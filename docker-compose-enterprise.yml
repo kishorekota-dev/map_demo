@@ -1,0 +1,272 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database Service - Enhanced for Enterprise Banking
+  postgres:
+    image: postgres:15-alpine
+    container_name: enterprise-banking-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: enterprise_banking
+      POSTGRES_USER: banking_user
+      POSTGRES_PASSWORD: secure_banking_pass_2024
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/backend/database/enhanced-schema.sql:/docker-entrypoint-initdb.d/01-enhanced-schema.sql:ro
+      - ./packages/backend/database/docker-init-enhanced.sh:/docker-entrypoint-initdb.d/02-init-enhanced.sh:ro
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking_user -d enterprise_banking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis Cache Service
+  redis:
+    image: redis:7-alpine
+    container_name: enterprise-banking-cache
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - banking-network
+    command: redis-server --appendonly yes --requirepass "redis_secure_pass_2024"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "redis_secure_pass_2024", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Enterprise Banking Backend API
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: enterprise-banking-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
+      JWT_SECRET: enterprise_banking_jwt_secret_2024_secure_key_for_production
+      JWT_EXPIRES_IN: 24h
+      ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
+      API_PREFIX: /api/v1
+      # Security settings
+      BCRYPT_ROUNDS: 12
+      SESSION_SECRET: enterprise_session_secret_2024
+      CORS_ORIGIN: "http://localhost:3001,http://localhost:3002,http://localhost:3003"
+      # Logging and monitoring
+      LOG_LEVEL: info
+      ENABLE_REQUEST_LOGGING: true
+      ENABLE_AUDIT_LOGGING: true
+    command: node server.js
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./packages/backend:/app
+      - /app/node_modules
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Web UI Application (Customer Portal)
+  web-ui:
+    build:
+      context: ./packages/web-ui
+      dockerfile: Dockerfile
+    container_name: enterprise-banking-web
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
+      REACT_APP_ENV: production
+      REACT_APP_APP_NAME: "Enterprise Banking Portal"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Agent UI Application (Staff Portal)
+  agent-ui:
+    build:
+      context: ./packages/agent-ui
+      dockerfile: Dockerfile
+    container_name: enterprise-banking-agent
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
+      REACT_APP_ENV: production
+      REACT_APP_APP_NAME: "Enterprise Banking Agent Portal"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ChatBot UI Application (AI Assistant)
+  chatbot-ui:
+    build:
+      context: ./packages/chatbot-ui
+      dockerfile: Dockerfile
+    container_name: enterprise-banking-chatbot
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
+      REACT_APP_ENV: production
+      REACT_APP_APP_NAME: "Enterprise Banking AI Assistant"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enterprise Data Seeder Service
+  data-seeder:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+    container_name: enterprise-data-seeder
+    restart: "no"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
+      ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
+      # Seeder configuration
+      CUSTOMER_COUNT: 200
+      SEED_TRANSACTIONS: true
+      SEED_PAYMENTS: true
+      SEED_DOCUMENTS: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo '🌱 Starting Enterprise Banking Data Seeding...' &&
+        echo '⏳ Waiting for backend services to be ready...' &&
+        sleep 15 &&
+        echo '📊 Seeding enterprise banking data with BIAN compliance...' &&
+        node -e \"
+          const EnterpriseDataSeeder = require('./database/enterpriseSeeder');
+          console.log('🏦 Initializing enterprise banking data seeder...');
+          EnterpriseDataSeeder.seedAll(parseInt(process.env.CUSTOMER_COUNT || 200))
+            .then(() => {
+              console.log('✅ Enterprise banking data seeding completed successfully!');
+              console.log('🎯 Created comprehensive banking ecosystem with:');
+              console.log('   • Customer profiles with PII encryption');
+              console.log('   • Credit accounts and products');
+              console.log('   • Transaction history');
+              console.log('   • Payment records');
+              console.log('   • KYC/AML compliance data');
+              console.log('   • Audit trails');
+              process.exit(0);
+            })
+            .catch(err => {
+              console.error('❌ Enterprise data seeding failed:', err);
+              process.exit(1);
+            });
+        \"
+      "
+    networks:
+      - banking-network
+
+  # Optional: PgAdmin for database management (development only)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: enterprise-banking-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@enterprise-banking.com
+      PGADMIN_DEFAULT_PASSWORD: admin_secure_pass_2024
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - banking-network
+    profiles:
+      - development
+      - admin
+
+  # Optional: Redis Commander for cache management (development only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: enterprise-banking-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: "redis:redis://:redis_secure_pass_2024@redis:6379"
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - banking-network
+    profiles:
+      - development
+      - admin
+
+# Persistent data volumes
+volumes:
+  postgres_data:
+    driver: local
+    name: enterprise_banking_postgres_data
+  redis_data:
+    driver: local
+    name: enterprise_banking_redis_data
+  pgadmin_data:
+    driver: local
+    name: enterprise_banking_pgadmin_data
+
+# Network configuration
+networks:
+  banking-network:
+    driver: bridge
+    name: enterprise_banking_network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
