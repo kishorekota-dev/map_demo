@@ -12,7 +12,12 @@
     "mcp:start": "node mcp-server.js",
     "mcp:test": "./test-mcp.sh",
     "mcp:example": "node mcp-example.js",
-    "lint": "eslint . --ext .js"
+    "lint": "eslint . --ext .js",
+    "db:init": "node database/populate.js 1000 init",
+    "db:seed": "node database/populate.js 1000 seed",
+    "db:clean": "node database/populate.js 1000 clean",
+    "db:reset": "node database/populate.js 1000 init-and-seed",
+    "db:setup": "node database/populate.js 1000 init-and-seed"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -26,6 +31,7 @@
     "dotenv": "^16.3.1",
     "@modelcontextprotocol/sdk": "^0.4.0",
     "axios": "^1.6.0",
+    "pg": "^8.11.3",
     "@credit-card-enterprise/shared": "file:../shared"
   },
   "devDependencies": {
