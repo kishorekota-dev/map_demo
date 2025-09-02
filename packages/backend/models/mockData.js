@@ -1,186 +1,235 @@
-const { v4: uuidv4 } = require('uuid');
+// Database Models - Replacing Mock Data
+const UserModel = require('./User');
+const AccountModel = require('./Account');
+const TransactionModel = require('./Transaction');
+const { testConnection } = require('../database');
 
-// Mock Data Storage
-const mockData = {
-  users: new Map(),
-  accounts: new Map(),
-  cards: new Map(),
-  transactions: new Map(),
-  balanceTransfers: new Map(),
-  disputes: new Map(),
-  fraudCases: new Map(),
-  fraudSettings: new Map()
-};
+// Initialize database connection
+let dbConnected = false;
 
-// Generate sample data
-const generateSampleData = () => {
-  // Sample Users
-  const sampleUsers = [
-    {
-      id: uuidv4(),
-      email: 'john.doe@example.com',
-      password: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewvMB0K5mYT7yDG.', // password123
-      firstName: 'John',
-      lastName: 'Doe',
-      phone: '+1-555-0123',
-      createdAt: new Date('2023-01-15'),
-      lastLogin: new Date()
-    },
-    {
-      id: uuidv4(),
-      email: 'jane.smith@example.com',
-      password: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewvMB0K5mYT7yDG.', // password123
-      firstName: 'Jane',
-      lastName: 'Smith',
-      phone: '+1-555-0124',
-      createdAt: new Date('2023-02-20'),
-      lastLogin: new Date()
+const initializeDatabase = async () => {
+  if (!dbConnected) {
+    dbConnected = await testConnection();
+    if (!dbConnected) {
+      console.warn('⚠️ Database not connected, falling back to mock data');
     }
-  ];
-
-  sampleUsers.forEach(user => {
-    mockData.users.set(user.id, user);
-  });
-
-  // Sample Accounts
-  sampleUsers.forEach((user, index) => {
-    const account = {
-      id: uuidv4(),
-      userId: user.id,
-      accountNumber: `4532${String(1000 + index).padStart(4, '0')}${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
-      accountType: 'CREDIT',
-      status: 'ACTIVE',
-      creditLimit: 5000.00 + (index * 1000),
-      currentBalance: 1250.50 + (index * 200),
-      availableCredit: 3749.50 + (index * 800),
-      paymentDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      minimumPayment: 125.00 + (index * 20),
-      interestRate: 18.99,
-      rewardsPoints: 1500 + (index * 300),
-      createdAt: new Date('2023-01-15'),
-      lastModified: new Date()
-    };
-    mockData.accounts.set(account.id, account);
-
-    // Sample Cards for each account
-    const card = {
-      id: uuidv4(),
-      accountId: account.id,
-      userId: user.id,
-      cardNumber: `4532****${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
-      fullCardNumber: account.accountNumber, // In real system, this would be encrypted
-      cardType: 'VISA',
-      expiryDate: '12/27',
-      cvv: '***',
-      fullCvv: String(Math.floor(Math.random() * 900) + 100), // In real system, this would be encrypted
-      status: 'ACTIVE',
-      isBlocked: false,
-      blockedTransactions: false,
-      fraudProtectionEnabled: true,
-      issuedDate: new Date('2023-01-15'),
-      lastUsed: new Date(),
-      dailyLimit: 2000.00,
-      monthlyLimit: 10000.00
-    };
-    mockData.cards.set(card.id, card);
-
-    // Sample Transactions
-    for (let i = 0; i < 5; i++) {
-      const transaction = {
-        id: uuidv4(),
-        accountId: account.id,
-        cardId: card.id,
-        userId: user.id,
-        amount: Math.floor(Math.random() * 500) + 10,
-        currency: 'USD',
-        type: Math.random() > 0.8 ? 'REFUND' : 'PURCHASE',
-        status: Math.random() > 0.95 ? 'PENDING' : 'COMPLETED',
-        merchantName: ['Amazon', 'Walmart', 'Target', 'Starbucks', 'Shell'][Math.floor(Math.random() * 5)],
-        merchantCategory: 'RETAIL',
-        description: `Purchase at ${['Amazon', 'Walmart', 'Target', 'Starbucks', 'Shell'][Math.floor(Math.random() * 5)]}`,
-        transactionDate: new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000),
-        authorizationCode: `AUTH${Math.floor(Math.random() * 1000000)}`,
-        location: {
-          city: 'New York',
-          state: 'NY',
-          country: 'USA',
-          zipCode: '10001'
-        },
-        isDisputed: false,
-        isFraudulent: Math.random() > 0.95,
-        createdAt: new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000)
-      };
-      mockData.transactions.set(transaction.id, transaction);
-    }
-
-    // Sample Fraud Settings
-    const fraudSettings = {
-      id: uuidv4(),
-      accountId: account.id,
-      userId: user.id,
-      blockIncomingTransactions: false,
-      dailyTransactionLimit: 2000.00,
-      internationalTransactionsBlocked: false,
-      onlineTransactionsBlocked: false,
-      contactlessTransactionsBlocked: false,
-      atmTransactionsBlocked: false,
-      notificationPreferences: {
-        email: true,
-        sms: true,
-        push: true
-      },
-      suspiciousActivityAlerts: true,
-      geoLocationTracking: true,
-      velocityChecks: true,
-      merchantCategoryBlocking: [],
-      trustedMerchants: [],
-      createdAt: new Date(),
-      lastModified: new Date()
-    };
-    mockData.fraudSettings.set(fraudSettings.id, fraudSettings);
-  });
+  }
+  return dbConnected;
 };
 
-// Initialize sample data
-generateSampleData();
-
-// Helper functions
-const findUserByEmail = (email) => {
-  return Array.from(mockData.users.values()).find(user => user.email === email);
+// User operations
+const getUsers = async () => {
+  await initializeDatabase();
+  if (dbConnected) {
+    const result = await UserModel.findAll();
+    return result.users;
+  }
+  return []; // Fallback to empty array if DB not available
 };
 
-const findAccountsByUserId = (userId) => {
-  return Array.from(mockData.accounts.values()).filter(account => account.userId === userId);
+const getUserById = async (id) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await UserModel.findById(id);
+  }
+  return null;
 };
 
-const findCardsByUserId = (userId) => {
-  return Array.from(mockData.cards.values()).filter(card => card.userId === userId);
+const getUserByEmail = async (email) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await UserModel.findByEmail(email);
+  }
+  return null;
 };
 
-const findTransactionsByAccountId = (accountId) => {
-  return Array.from(mockData.transactions.values()).filter(transaction => transaction.accountId === accountId);
+const createUser = async (userData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await UserModel.create(userData);
+  }
+  throw new Error('Database not available');
 };
 
-const findBalanceTransfersByUserId = (userId) => {
-  return Array.from(mockData.balanceTransfers.values()).filter(transfer => transfer.userId === userId);
+const updateUser = async (id, updateData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await UserModel.update(id, updateData);
+  }
+  throw new Error('Database not available');
 };
 
-const findDisputesByUserId = (userId) => {
-  return Array.from(mockData.disputes.values()).filter(dispute => dispute.userId === userId);
+// Account operations
+const getAccounts = async (filters = {}, page = 1, limit = 20) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.findAll(filters, page, limit);
+  }
+  return { accounts: [], total: 0, page: 1, limit: 20, totalPages: 0 };
 };
 
-const findFraudCasesByUserId = (userId) => {
-  return Array.from(mockData.fraudCases.values()).filter(fraudCase => fraudCase.userId === userId);
+const getAccountById = async (id) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.findById(id);
+  }
+  return null;
 };
 
+const getAccountsByUserId = async (userId) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.findByUserId(userId);
+  }
+  return [];
+};
+
+const createAccount = async (accountData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.create(accountData);
+  }
+  throw new Error('Database not available');
+};
+
+const updateAccount = async (id, updateData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.update(id, updateData);
+  }
+  throw new Error('Database not available');
+};
+
+// Transaction operations
+const getTransactions = async (filters = {}, page = 1, limit = 20) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.findAll(filters, page, limit);
+  }
+  return { transactions: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+};
+
+const getTransactionById = async (id) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.findById(id);
+  }
+  return null;
+};
+
+const getTransactionsByUserId = async (userId, page = 1, limit = 20) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.findByUserId(userId, page, limit);
+  }
+  return { transactions: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+};
+
+const getTransactionsByAccountId = async (accountId, page = 1, limit = 20) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.findByAccountId(accountId, page, limit);
+  }
+  return { transactions: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+};
+
+const createTransaction = async (transactionData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.create(transactionData);
+  }
+  throw new Error('Database not available');
+};
+
+const updateTransaction = async (id, updateData) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.update(id, updateData);
+  }
+  throw new Error('Database not available');
+};
+
+// Statistics and analytics
+const getUserStatistics = async () => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await UserModel.getStatistics();
+  }
+  return {
+    total_users: 0,
+    active_users: 0,
+    customers: 0,
+    staff: 0,
+    verified_emails: 0,
+    new_this_month: 0
+  };
+};
+
+const getAccountStatistics = async () => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await AccountModel.getStatistics();
+  }
+  return {
+    total_accounts: 0,
+    active_accounts: 0,
+    total_credit_limit: 0,
+    total_balance: 0,
+    total_available_credit: 0,
+    avg_interest_rate: 0,
+    high_utilization_accounts: 0
+  };
+};
+
+const getTransactionStatistics = async (userId = null) => {
+  await initializeDatabase();
+  if (dbConnected) {
+    return await TransactionModel.getStatistics(userId);
+  }
+  return {
+    total_transactions: 0,
+    completed_transactions: 0,
+    pending_transactions: 0,
+    failed_transactions: 0,
+    total_spent: 0,
+    total_payments: 0,
+    avg_transaction_amount: 0,
+    high_risk_transactions: 0,
+    international_transactions: 0,
+    online_transactions: 0
+  };
+};
+
+// Export the new database-backed functions
 module.exports = {
-  mockData,
-  findUserByEmail,
-  findAccountsByUserId,
-  findCardsByUserId,
-  findTransactionsByAccountId,
-  findBalanceTransfersByUserId,
-  findDisputesByUserId,
-  findFraudCasesByUserId,
-  generateSampleData
+  // User operations
+  getUsers,
+  getUserById,
+  getUserByEmail,
+  createUser,
+  updateUser,
+  
+  // Account operations
+  getAccounts,
+  getAccountById,
+  getAccountsByUserId,
+  createAccount,
+  updateAccount,
+  
+  // Transaction operations
+  getTransactions,
+  getTransactionById,
+  getTransactionsByUserId,
+  getTransactionsByAccountId,
+  createTransaction,
+  updateTransaction,
+  
+  // Statistics
+  getUserStatistics,
+  getAccountStatistics,
+  getTransactionStatistics,
+  
+  // Database status
+  initializeDatabase,
+  isDbConnected: () => dbConnected
 };

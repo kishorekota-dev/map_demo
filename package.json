@@ -30,7 +30,17 @@
     "build:shared": "npm run build --workspace=packages/shared",
     "migrate:backend": "chmod +x ./tools/migrate-backend.sh && ./tools/migrate-backend.sh",
     "mcp:start": "npm run mcp:start --workspace=packages/backend",
-    "mcp:test": "npm run mcp:test --workspace=packages/backend"
+    "mcp:test": "npm run mcp:test --workspace=packages/backend",
+    "db:setup": "npm run db:setup --workspace=packages/backend",
+    "db:init": "npm run db:init --workspace=packages/backend",
+    "db:seed": "npm run db:seed --workspace=packages/backend",
+    "db:clean": "npm run db:clean --workspace=packages/backend",
+    "db:reset": "npm run db:reset --workspace=packages/backend",
+    "db:test": "./packages/backend/test-database.sh",
+    "setup:database": "./packages/backend/setup-database.sh",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
   },
   "keywords": [
     "credit-card",
