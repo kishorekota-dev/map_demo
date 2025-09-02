@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * MCP Server for Credit Card Enterprise API
- * Model Context Protocol server that provides tools to interact with the credit card backend API
+ * Enterprise Banking MCP Server v2.0
+ * Model Context Protocol server for the enterprise banking API with BIAN compliance
+ * Provides comprehensive tools for customer management, accounts, transactions, and payments
  */
 
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
@@ -15,12 +16,12 @@ const {
 } = require('@modelcontextprotocol/sdk/types.js');
 const axios = require('axios');
 
-class CreditCardMCPServer {
+class EnterpriseBankingMCPServer {
   constructor() {
     this.server = new Server(
       {
-        name: 'credit-card-enterprise-mcp',
-        version: '1.0.0',
+        name: 'enterprise-banking-mcp',
+        version: '2.0.0',
       },
       {
         capabilities: {
@@ -29,8 +30,9 @@ class CreditCardMCPServer {
       }
     );
 
-    this.apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:3000/api/v1';
+    this.apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:3001/api/v1';
     this.authToken = null;
+    this.userRole = null;
     
     this.setupToolHandlers();
     this.setupErrorHandling();
@@ -41,343 +43,147 @@ class CreditCardMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
+          // Authentication Tools
           {
-            name: 'authenticate',
-            description: 'Authenticate with the credit card API and get access token',
+            name: 'enterprise_login',
+            description: 'Login to the enterprise banking system with customer or admin credentials',
             inputSchema: {
               type: 'object',
               properties: {
-                email: {
-                  type: 'string',
-                  description: 'User email address',
-                },
-                password: {
-                  type: 'string',
-                  description: 'User password',
-                },
+                email: { type: 'string', description: 'Email address' },
+                password: { type: 'string', description: 'Password' },
+                loginType: { type: 'string', enum: ['CUSTOMER', 'ADMIN'], description: 'Type of login', default: 'CUSTOMER' }
               },
               required: ['email', 'password'],
             },
           },
           {
-            name: 'get_accounts',
-            description: 'Retrieve user accounts with optional filtering and pagination',
+            name: 'register_customer',
+            description: 'Register a new customer with complete profile information',
             inputSchema: {
               type: 'object',
               properties: {
-                page: {
-                  type: 'number',
-                  description: 'Page number for pagination',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Number of items per page',
-                },
-                status: {
-                  type: 'string',
-                  enum: ['ACTIVE', 'SUSPENDED', 'CLOSED'],
-                  description: 'Filter by account status',
-                },
-                accountType: {
-                  type: 'string',
-                  enum: ['CREDIT', 'DEBIT', 'SAVINGS', 'CHECKING'],
-                  description: 'Filter by account type',
-                },
+                firstName: { type: 'string', description: 'First name' },
+                lastName: { type: 'string', description: 'Last name' },
+                email: { type: 'string', description: 'Email address' },
+                password: { type: 'string', description: 'Password' },
+                dateOfBirth: { type: 'string', description: 'Date of birth (YYYY-MM-DD)' },
+                phoneNumber: { type: 'string', description: 'Phone number (XXX-XXX-XXXX)' },
+                ssn: { type: 'string', description: 'SSN (XXX-XX-XXXX)' },
+                addressLine1: { type: 'string', description: 'Address line 1' },
+                city: { type: 'string', description: 'City' },
+                state: { type: 'string', description: 'State (2-letter code)' },
+                zipCode: { type: 'string', description: 'ZIP code' },
+                employmentStatus: { type: 'string', enum: ['FULL_TIME', 'PART_TIME', 'SELF_EMPLOYED', 'RETIRED', 'STUDENT', 'UNEMPLOYED'] },
+                annualIncome: { type: 'string', enum: ['0-25000', '25000-50000', '50000-75000', '75000-100000', '100000-150000', '150000+'] }
+              },
+              required: ['firstName', 'lastName', 'email', 'password', 'dateOfBirth', 'phoneNumber', 'ssn', 'addressLine1', 'city', 'state', 'zipCode', 'employmentStatus', 'annualIncome'],
+            },
+          },
+          
+          // Customer Profile Management
+          {
+            name: 'get_customer_profile',
+            description: 'Get detailed customer profile information',
+            inputSchema: { type: 'object', properties: {} },
+          },
+          {
+            name: 'update_customer_profile',
+            description: 'Update customer profile information',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                phoneNumber: { type: 'string', description: 'Phone number' },
+                email: { type: 'string', description: 'Email address' },
+                addressLine1: { type: 'string', description: 'Address line 1' },
+                city: { type: 'string', description: 'City' },
+                state: { type: 'string', description: 'State' },
+                zipCode: { type: 'string', description: 'ZIP code' }
               },
             },
           },
+          
+          // Account Management
           {
-            name: 'create_account',
-            description: 'Create a new credit card account',
+            name: 'get_customer_accounts',
+            description: 'Get customer accounts with filtering',
             inputSchema: {
               type: 'object',
               properties: {
-                accountType: {
-                  type: 'string',
-                  enum: ['CREDIT', 'DEBIT', 'SAVINGS', 'CHECKING'],
-                  description: 'Type of account to create',
-                },
-                creditLimit: {
-                  type: 'number',
-                  description: 'Credit limit for credit accounts',
-                },
-                initialDeposit: {
-                  type: 'number',
-                  description: 'Initial deposit for savings/checking accounts',
-                },
+                page: { type: 'number', description: 'Page number', default: 1 },
+                limit: { type: 'number', description: 'Items per page', default: 10 },
+                accountType: { type: 'string', enum: ['CREDIT', 'DEBIT', 'SAVINGS', 'CHECKING'] },
+                status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED', 'CLOSED'] }
               },
-              required: ['accountType'],
             },
           },
           {
             name: 'get_account_details',
-            description: 'Get detailed information about a specific account',
+            description: 'Get detailed account information',
             inputSchema: {
               type: 'object',
               properties: {
-                accountId: {
-                  type: 'string',
-                  description: 'Account ID to retrieve details for',
-                },
+                accountId: { type: 'string', description: 'Account ID' }
               },
               required: ['accountId'],
             },
           },
+          
+          // Transaction Management
           {
             name: 'get_transactions',
-            description: 'Retrieve transactions with filtering and pagination',
+            description: 'Get transaction history with filtering',
             inputSchema: {
               type: 'object',
               properties: {
-                page: {
-                  type: 'number',
-                  description: 'Page number for pagination',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Number of items per page',
-                },
-                accountId: {
-                  type: 'string',
-                  description: 'Filter by account ID',
-                },
-                status: {
-                  type: 'string',
-                  enum: ['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED'],
-                  description: 'Filter by transaction status',
-                },
-                type: {
-                  type: 'string',
-                  enum: ['DEBIT', 'CREDIT', 'TRANSFER', 'PAYMENT', 'WITHDRAWAL'],
-                  description: 'Filter by transaction type',
-                },
-                startDate: {
-                  type: 'string',
-                  description: 'Start date filter (YYYY-MM-DD)',
-                },
-                endDate: {
-                  type: 'string',
-                  description: 'End date filter (YYYY-MM-DD)',
-                },
+                page: { type: 'number', description: 'Page number', default: 1 },
+                limit: { type: 'number', description: 'Items per page', default: 20 },
+                accountId: { type: 'string', description: 'Account ID filter' },
+                transactionType: { type: 'string', enum: ['PURCHASE', 'PAYMENT', 'TRANSFER', 'WITHDRAWAL', 'DEPOSIT', 'FEE', 'INTEREST'] },
+                status: { type: 'string', enum: ['PENDING', 'AUTHORIZED', 'SETTLED', 'DECLINED', 'REVERSED'] },
+                startDate: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+                endDate: { type: 'string', description: 'End date (YYYY-MM-DD)' }
               },
             },
           },
+          
+          // Payment Management
           {
-            name: 'create_transaction',
-            description: 'Create a new transaction',
+            name: 'make_payment',
+            description: 'Make a payment to a credit card account',
             inputSchema: {
               type: 'object',
               properties: {
-                accountId: {
-                  type: 'string',
-                  description: 'Account ID for the transaction',
-                },
-                amount: {
-                  type: 'number',
-                  description: 'Transaction amount',
-                },
-                type: {
-                  type: 'string',
-                  enum: ['DEBIT', 'CREDIT', 'TRANSFER', 'PAYMENT', 'WITHDRAWAL'],
-                  description: 'Type of transaction',
-                },
-                description: {
-                  type: 'string',
-                  description: 'Transaction description',
-                },
-                merchantId: {
-                  type: 'string',
-                  description: 'Merchant ID (optional)',
-                },
-                category: {
-                  type: 'string',
-                  description: 'Transaction category',
-                },
+                accountId: { type: 'string', description: 'Account ID' },
+                amount: { type: 'number', description: 'Payment amount' },
+                paymentMethod: { type: 'string', enum: ['ACH', 'WIRE', 'CHECK', 'DEBIT_CARD'] },
+                memo: { type: 'string', description: 'Payment memo' }
               },
-              required: ['accountId', 'amount', 'type', 'description'],
+              required: ['accountId', 'amount', 'paymentMethod'],
             },
           },
+          
+          // Credit Card Management
           {
-            name: 'get_cards',
-            description: 'Retrieve credit/debit cards with filtering',
+            name: 'apply_credit_card',
+            description: 'Apply for a new credit card',
             inputSchema: {
               type: 'object',
               properties: {
-                page: {
-                  type: 'number',
-                  description: 'Page number for pagination',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Number of items per page',
-                },
-                status: {
-                  type: 'string',
-                  enum: ['ACTIVE', 'BLOCKED', 'EXPIRED', 'CANCELLED'],
-                  description: 'Filter by card status',
-                },
-                type: {
-                  type: 'string',
-                  enum: ['CREDIT', 'DEBIT'],
-                  description: 'Filter by card type',
-                },
+                cardType: { type: 'string', enum: ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER'] },
+                requestedCreditLimit: { type: 'number', description: 'Requested credit limit' },
+                purpose: { type: 'string', enum: ['PERSONAL', 'BUSINESS', 'BALANCE_TRANSFER', 'EMERGENCY'] }
               },
+              required: ['cardType', 'requestedCreditLimit'],
             },
           },
+          
+          // System Information
           {
-            name: 'create_card',
-            description: 'Create a new credit or debit card',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                accountId: {
-                  type: 'string',
-                  description: 'Account ID to associate with the card',
-                },
-                cardType: {
-                  type: 'string',
-                  enum: ['CREDIT', 'DEBIT'],
-                  description: 'Type of card to create',
-                },
-                cardCategory: {
-                  type: 'string',
-                  enum: ['STANDARD', 'GOLD', 'PLATINUM', 'BLACK'],
-                  description: 'Card category/tier',
-                },
-                deliveryAddress: {
-                  type: 'object',
-                  properties: {
-                    street: { type: 'string' },
-                    city: { type: 'string' },
-                    state: { type: 'string' },
-                    zipCode: { type: 'string' },
-                    country: { type: 'string' },
-                  },
-                  description: 'Delivery address for the physical card',
-                },
-              },
-              required: ['accountId', 'cardType', 'cardCategory'],
-            },
-          },
-          {
-            name: 'get_fraud_cases',
-            description: 'Retrieve fraud cases with filtering',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                page: {
-                  type: 'number',
-                  description: 'Page number for pagination',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Number of items per page',
-                },
-                status: {
-                  type: 'string',
-                  enum: ['OPEN', 'INVESTIGATING', 'RESOLVED', 'CLOSED'],
-                  description: 'Filter by case status',
-                },
-                priority: {
-                  type: 'string',
-                  enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
-                  description: 'Filter by priority level',
-                },
-                riskScore: {
-                  type: 'number',
-                  description: 'Filter by minimum risk score',
-                },
-              },
-            },
-          },
-          {
-            name: 'create_fraud_case',
-            description: 'Create a new fraud case',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                accountId: {
-                  type: 'string',
-                  description: 'Account ID associated with the fraud case',
-                },
-                transactionId: {
-                  type: 'string',
-                  description: 'Transaction ID if related to a specific transaction',
-                },
-                description: {
-                  type: 'string',
-                  description: 'Description of the fraud case',
-                },
-                priority: {
-                  type: 'string',
-                  enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
-                  description: 'Priority level of the case',
-                },
-                riskScore: {
-                  type: 'number',
-                  minimum: 0,
-                  maximum: 100,
-                  description: 'Risk score (0-100)',
-                },
-                category: {
-                  type: 'string',
-                  description: 'Fraud category',
-                },
-              },
-              required: ['accountId', 'description', 'priority', 'riskScore', 'category'],
-            },
-          },
-          {
-            name: 'get_disputes',
-            description: 'Retrieve dispute cases with filtering',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                page: {
-                  type: 'number',
-                  description: 'Page number for pagination',
-                },
-                limit: {
-                  type: 'number',
-                  description: 'Number of items per page',
-                },
-                status: {
-                  type: 'string',
-                  enum: ['PENDING', 'INVESTIGATING', 'RESOLVED', 'REJECTED'],
-                  description: 'Filter by dispute status',
-                },
-                type: {
-                  type: 'string',
-                  enum: ['CHARGEBACK', 'BILLING_ERROR', 'FRAUD', 'QUALITY_ISSUE'],
-                  description: 'Filter by dispute type',
-                },
-              },
-            },
-          },
-          {
-            name: 'health_check',
-            description: 'Check the health status of the credit card API',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
-          },
-          {
-            name: 'get_user_profile',
-            description: 'Get current user profile and permissions',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
-          },
-          {
-            name: 'get_permissions',
-            description: 'Get user role permissions and access levels',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
-          },
+            name: 'get_system_health',
+            description: 'Get system health and status information',
+            inputSchema: { type: 'object', properties: {} },
+          }
         ],
       };
     });
@@ -388,357 +194,251 @@ class CreditCardMCPServer {
 
       try {
         switch (name) {
-          case 'authenticate':
-            return await this.authenticate(args);
-          case 'get_accounts':
-            return await this.getAccounts(args);
-          case 'create_account':
-            return await this.createAccount(args);
+          case 'enterprise_login':
+            return await this.enterpriseLogin(args.email, args.password, args.loginType);
+          case 'register_customer':
+            return await this.registerCustomer(args);
+          case 'get_customer_profile':
+            return await this.getCustomerProfile();
+          case 'update_customer_profile':
+            return await this.updateCustomerProfile(args);
+          case 'get_customer_accounts':
+            return await this.getCustomerAccounts(args);
           case 'get_account_details':
-            return await this.getAccountDetails(args);
+            return await this.getAccountDetails(args.accountId);
           case 'get_transactions':
             return await this.getTransactions(args);
-          case 'create_transaction':
-            return await this.createTransaction(args);
-          case 'get_cards':
-            return await this.getCards(args);
-          case 'create_card':
-            return await this.createCard(args);
-          case 'get_fraud_cases':
-            return await this.getFraudCases(args);
-          case 'create_fraud_case':
-            return await this.createFraudCase(args);
-          case 'get_disputes':
-            return await this.getDisputes(args);
-          case 'health_check':
-            return await this.healthCheck();
-          case 'get_user_profile':
-            return await this.getUserProfile();
-          case 'get_permissions':
-            return await this.getPermissions();
+          case 'make_payment':
+            return await this.makePayment(args);
+          case 'apply_credit_card':
+            return await this.applyCreditCard(args);
+          case 'get_system_health':
+            return await this.getSystemHealth();
           default:
-            throw new McpError(
-              ErrorCode.MethodNotFound,
-              `Unknown tool: ${name}`
-            );
+            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
       } catch (error) {
-        if (error instanceof McpError) {
-          throw error;
-        }
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Error executing tool ${name}: ${error.message}`
-        );
+        if (error instanceof McpError) throw error;
+        console.error(`Error in tool ${name}:`, error);
+        throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${error.message}`);
       }
     });
   }
 
   setupErrorHandling() {
     this.server.onerror = (error) => {
-      console.error('[MCP Error]', error);
+      console.error('[MCP Server Error]:', error);
     };
-
     process.on('SIGINT', async () => {
       await this.server.close();
       process.exit(0);
     });
   }
 
-  // Helper method to make authenticated API requests
-  async makeRequest(method, endpoint, data = null, requireAuth = true) {
-    const config = {
-      method,
-      url: `${this.apiBaseUrl}${endpoint}`,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    };
-
-    if (requireAuth && this.authToken) {
-      config.headers.Authorization = `Bearer ${this.authToken}`;
-    }
-
-    if (data) {
-      config.data = data;
-    }
-
+  async makeRequest(method, endpoint, data = null, requiresAuth = true) {
     try {
+      if (requiresAuth && !this.authToken) {
+        throw new Error('Authentication required. Please login first.');
+      }
+
+      const config = {
+        method,
+        url: `${this.apiBaseUrl}${endpoint}`,
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      if (requiresAuth && this.authToken) {
+        config.headers.Authorization = `Bearer ${this.authToken}`;
+      }
+      if (data) config.data = data;
+
       const response = await axios(config);
       return response.data;
     } catch (error) {
       if (error.response) {
-        throw new Error(`API Error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+        const errorMsg = error.response.data?.message || error.response.data?.error || 'API request failed';
+        throw new Error(`API Error (${error.response.status}): ${errorMsg}`);
+      } else if (error.request) {
+        throw new Error('Network error: Unable to reach the API server');
+      } else {
+        throw new Error(`Request error: ${error.message}`);
       }
-      throw new Error(`Network Error: ${error.message}`);
     }
   }
 
-  // Tool implementations
-  async authenticate(args) {
-    const { email, password } = args;
-    
+  // Authentication Methods
+  async enterpriseLogin(email, password, loginType = 'CUSTOMER') {
     try {
-      const response = await this.makeRequest('POST', '/auth/login', {
-        email,
-        password,
-      }, false);
-
+      const response = await this.makeRequest('POST', '/auth/login', { email, password, loginType }, false);
       this.authToken = response.token;
+      this.userRole = response.user?.role || loginType;
       
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: true,
-              message: 'Authentication successful',
-              user: response.user,
-              role: response.user.role,
-              permissions: response.user.permissions,
-              accountIds: response.user.accountIds,
-              tokenExpires: response.expiresAt,
-            }, null, 2),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: `✅ Successfully logged in as ${loginType}\n\nCustomer ID: ${response.user?.customerId || 'N/A'}\nEmail: ${response.user?.email}\nRole: ${this.userRole}\n\n🔐 Authentication token stored for subsequent requests.`,
+        }],
       };
     } catch (error) {
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error.message,
-            }, null, 2),
-          },
-        ],
+        content: [{ type: 'text', text: `❌ Login failed: ${error.message}` }],
       };
     }
   }
 
-  async getAccounts(args) {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(args).forEach(([key, value]) => {
-      if (value !== undefined) {
-        queryParams.append(key, value.toString());
-      }
-    });
-
-    const endpoint = `/accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
-    const data = await this.makeRequest('GET', endpoint);
-
-    return {
-      content: [
-        {
+  async registerCustomer(customerData) {
+    try {
+      const response = await this.makeRequest('POST', '/auth/register', customerData, false);
+      return {
+        content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+          text: `✅ Customer registration successful!\n\nCustomer Number: ${response.customerNumber}\nCustomer ID: ${response.customerId}\nEmail: ${response.email}\nStatus: ${response.accountStatus}\nKYC Status: ${response.kycStatus}\n\n📋 Next steps:\n1. Verify email address\n2. Complete KYC documentation\n3. Login to access banking services`,
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Customer registration failed: ${error.message}` }],
+      };
+    }
   }
 
-  async createAccount(args) {
-    const data = await this.makeRequest('POST', '/accounts', args);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async getCustomerProfile() {
+    try {
+      const response = await this.makeRequest('GET', '/customers/profile');
+      return {
+        content: [{ type: 'text', text: `👤 Customer Profile\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to retrieve customer profile: ${error.message}` }],
+      };
+    }
   }
 
-  async getAccountDetails(args) {
-    const { accountId } = args;
-    const data = await this.makeRequest('GET', `/accounts/${accountId}`);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async updateCustomerProfile(updateData) {
+    try {
+      const response = await this.makeRequest('PUT', '/customers/profile', updateData);
+      return {
+        content: [{ type: 'text', text: `✅ Customer profile updated successfully!\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to update customer profile: ${error.message}` }],
+      };
+    }
   }
 
-  async getTransactions(args) {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(args).forEach(([key, value]) => {
-      if (value !== undefined) {
-        queryParams.append(key, value.toString());
-      }
-    });
-
-    const endpoint = `/transactions${queryParams.toString() ? `?${queryParams}` : ''}`;
-    const data = await this.makeRequest('GET', endpoint);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async getCustomerAccounts(filters = {}) {
+    try {
+      const queryParams = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, value.toString());
+        }
+      });
+      
+      const endpoint = '/accounts' + (queryParams.toString() ? `?${queryParams.toString()}` : '');
+      const response = await this.makeRequest('GET', endpoint);
+      
+      return {
+        content: [{ type: 'text', text: `💳 Customer Accounts\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to retrieve accounts: ${error.message}` }],
+      };
+    }
   }
 
-  async createTransaction(args) {
-    const data = await this.makeRequest('POST', '/transactions', args);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async getAccountDetails(accountId) {
+    try {
+      const response = await this.makeRequest('GET', `/accounts/${accountId}`);
+      return {
+        content: [{ type: 'text', text: `💳 Account Details (${accountId})\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to retrieve account details: ${error.message}` }],
+      };
+    }
   }
 
-  async getCards(args) {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(args).forEach(([key, value]) => {
-      if (value !== undefined) {
-        queryParams.append(key, value.toString());
-      }
-    });
-
-    const endpoint = `/cards${queryParams.toString() ? `?${queryParams}` : ''}`;
-    const data = await this.makeRequest('GET', endpoint);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async getTransactions(filters = {}) {
+    try {
+      const queryParams = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, value.toString());
+        }
+      });
+      
+      const endpoint = '/transactions' + (queryParams.toString() ? `?${queryParams.toString()}` : '');
+      const response = await this.makeRequest('GET', endpoint);
+      
+      return {
+        content: [{ type: 'text', text: `💰 Transaction History\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to retrieve transactions: ${error.message}` }],
+      };
+    }
   }
 
-  async createCard(args) {
-    const data = await this.makeRequest('POST', '/cards', args);
-    
-    return {
-      content: [
-        {
+  async makePayment(paymentData) {
+    try {
+      const response = await this.makeRequest('POST', '/payments', paymentData);
+      return {
+        content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+          text: `✅ Payment submitted successfully!\n\nPayment ID: ${response.paymentId}\nAmount: $${response.amount}\nAccount: ${response.accountId}\nMethod: ${response.paymentMethod}\nStatus: ${response.status}\n\n📋 Your payment is being processed.`,
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Payment failed: ${error.message}` }],
+      };
+    }
   }
 
-  async getFraudCases(args) {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(args).forEach(([key, value]) => {
-      if (value !== undefined) {
-        queryParams.append(key, value.toString());
-      }
-    });
-
-    const endpoint = `/fraud/cases${queryParams.toString() ? `?${queryParams}` : ''}`;
-    const data = await this.makeRequest('GET', endpoint);
-
-    return {
-      content: [
-        {
+  async applyCreditCard(applicationData) {
+    try {
+      const response = await this.makeRequest('POST', '/cards/apply', applicationData);
+      return {
+        content: [{
           type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+          text: `✅ Credit card application submitted!\n\nApplication ID: ${response.applicationId}\nStatus: ${response.status}\nCard Type: ${response.cardType}\nRequested Limit: $${response.requestedCreditLimit}\n\n📋 Your application is being processed.`,
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Credit card application failed: ${error.message}` }],
+      };
+    }
   }
 
-  async createFraudCase(args) {
-    const data = await this.makeRequest('POST', '/fraud/cases', args);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
-  }
-
-  async getDisputes(args) {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(args).forEach(([key, value]) => {
-      if (value !== undefined) {
-        queryParams.append(key, value.toString());
-      }
-    });
-
-    const endpoint = `/disputes${queryParams.toString() ? `?${queryParams}` : ''}`;
-    const data = await this.makeRequest('GET', endpoint);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
-  }
-
-  async healthCheck() {
-    const data = await this.makeRequest('GET', '/health', null, false);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
-  }
-
-  async getUserProfile() {
-    const data = await this.makeRequest('GET', '/auth/me');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
-  }
-
-  async getPermissions() {
-    const data = await this.makeRequest('GET', '/auth/permissions');
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+  async getSystemHealth() {
+    try {
+      const response = await this.makeRequest('GET', '../health', null, false);
+      return {
+        content: [{ type: 'text', text: `🏥 System Health\n\n${JSON.stringify(response, null, 2)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `❌ Failed to retrieve system health: ${error.message}` }],
+      };
+    }
   }
 
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Credit Card Enterprise MCP server running on stdio');
+    console.error('🏦 Enterprise Banking MCP Server v2.0.0 running on stdio');
+    console.error('📡 API Base URL:', this.apiBaseUrl);
+    console.error('🔧 Tools available: Authentication, Customer Management, Accounts, Transactions, Payments');
   }
 }
 
 // Start the server
-const server = new CreditCardMCPServer();
+const server = new EnterpriseBankingMCPServer();
 server.run().catch(console.error);

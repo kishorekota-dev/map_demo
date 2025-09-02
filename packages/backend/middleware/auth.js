@@ -151,9 +151,70 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
+// Enhanced token authentication for enterprise routes
+const authenticateToken = async (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: 'No token provided'
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'enterprise_banking_jwt_secret_2024_secure_key_for_production');
+    
+    // For enterprise routes, expect customer-specific token structure
+    req.user = {
+      customerId: decoded.customerId,
+      email: decoded.email,
+      role: decoded.role || 'CUSTOMER',
+      tokenType: decoded.tokenType || 'ACCESS'
+    };
+
+    next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        error: 'Token expired',
+        message: 'Please login again'
+      });
+    }
+    
+    res.status(401).json({
+      error: 'Invalid token',
+      message: 'Token verification failed'
+    });
+  }
+};
+
+// Role-based authorization middleware
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: 'Authentication required'
+      });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'Insufficient permissions'
+      });
+    }
+
+    next();
+  };
+};
+
 module.exports = { 
   auth, 
   authorize, 
   authorizeAccountAccess, 
-  optionalAuth 
+  optionalAuth,
+  authenticateToken,
+  authorizeRoles
 };

@@ -1,7 +1,7 @@
 {
   "name": "@credit-card-enterprise/backend",
-  "version": "1.0.0",
-  "description": "Credit Card Enterprise Backend API with MCP integration",
+  "version": "2.0.0",
+  "description": "Enterprise Banking Backend API with BIAN compliance and MCP integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,15 +9,19 @@
     "build": "echo 'Backend build completed'",
     "test": "jest",
     "test:security": "./test-security.sh",
+    "test:enterprise": "./test-enterprise-api.sh",
     "mcp:start": "node mcp-server.js",
     "mcp:test": "./test-mcp.sh",
     "mcp:example": "node mcp-example.js",
+    "mcp:demo": "node mcp-example.js",
     "lint": "eslint . --ext .js",
     "db:init": "node database/populate.js 1000 init",
     "db:seed": "node database/populate.js 1000 seed",
+    "db:enterprise": "node database/enterpriseSeeder.js",
     "db:clean": "node database/populate.js 1000 clean",
     "db:reset": "node database/populate.js 1000 init-and-seed",
-    "db:setup": "node database/populate.js 1000 init-and-seed"
+    "db:setup": "node database/populate.js 1000 init-and-seed",
+    "enterprise:setup": "node database/enterpriseSeeder.js"
   },
   "dependencies": {
     "@credit-card-enterprise/shared": "file:../shared",
