@@ -154,11 +154,18 @@ build/
 dist/
 public/build/
 
-# Docker
+# Docker (selective exclusion)
+# Exclude .dockerignore but allow Docker Compose and Dockerfile
 .dockerignore
-Dockerfile*
-docker-compose*.yml
+# Allow Docker Compose files and Dockerfiles for deployment
+!docker-compose*.yml
+!Dockerfile*
+!docker-setup.sh
+!*docker*.sh
+# Exclude Docker runtime and cache directories
 .docker/
+docker-data/
+.docker-cache/
 
 # Local development
 .local/

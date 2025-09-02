@@ -1,0 +1,189 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: credit_card_postgres
+    environment:
+      POSTGRES_DB: credit_card_enterprise
+      POSTGRES_USER: credit_card_user
+      POSTGRES_PASSWORD: credit_card_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/backend/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks:
+      - credit_card_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U credit_card_user -d credit_card_enterprise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: credit_card_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - credit_card_network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Data seeder service - runs once to populate the database
+  data-seeder:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile.seeder
+    container_name: credit_card_seeder
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: credit_card_enterprise
+      DB_USER: credit_card_user
+      DB_PASSWORD: credit_card_password
+      DB_SSL: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - credit_card_network
+    command: node database/populate.js 1000 init-and-seed
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: credit_card_backend
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: credit_card_enterprise
+      DB_USER: credit_card_user
+      DB_PASSWORD: credit_card_password
+      DB_SSL: false
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: your-super-secret-jwt-key-change-this-in-production
+      JWT_EXPIRY: 24h
+      API_PREFIX: /api/v1
+      RATE_LIMIT_WINDOW_MS: 900000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      BCRYPT_ROUNDS: 12
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      data-seeder:
+        condition: service_completed_successfully
+    networks:
+      - credit_card_network
+    volumes:
+      - ./packages/backend:/app
+      - ./packages/shared:/shared
+      - /app/node_modules
+      - /shared/node_modules
+    command: npm run dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Web UI - Customer Portal
+  web-ui:
+    build:
+      context: .
+      dockerfile: packages/web-ui/Dockerfile
+    container_name: credit_card_web_ui
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001/api/v1
+      VITE_APP_NAME: Credit Card Portal
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - credit_card_network
+    volumes:
+      - ./packages/web-ui:/app
+      - ./packages/shared:/shared
+      - /app/node_modules
+      - /shared/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+    restart: unless-stopped
+
+  # Agent UI - Admin Dashboard
+  agent-ui:
+    build:
+      context: .
+      dockerfile: packages/agent-ui/Dockerfile
+    container_name: credit_card_agent_ui
+    ports:
+      - "3002:3002"
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001/api/v1
+      VITE_APP_NAME: Agent Dashboard
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - credit_card_network
+    volumes:
+      - ./packages/agent-ui:/app
+      - ./packages/shared:/shared
+      - /app/node_modules
+      - /shared/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 3002
+    restart: unless-stopped
+
+  # ChatBot UI - Conversational Interface
+  chatbot-ui:
+    build:
+      context: .
+      dockerfile: packages/chatbot-ui/Dockerfile
+    container_name: credit_card_chatbot_ui
+    ports:
+      - "3003:3003"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3001/api/v1
+      NEXT_PUBLIC_MCP_URL: http://localhost:3001
+      PORT: 3003
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - credit_card_network
+    volumes:
+      - ./packages/chatbot-ui:/app
+      - ./packages/shared:/shared
+      - /app/node_modules
+      - /shared/node_modules
+    command: npm run dev
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  credit_card_network:
+    driver: bridge

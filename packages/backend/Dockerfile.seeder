@@ -1,0 +1,35 @@
+# Data Seeder Dockerfile
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for waiting for postgres
+RUN apk add --no-cache postgresql-client
+
+# Copy package files
+COPY packages/backend/package*.json ./
+COPY packages/shared/package*.json ../shared/
+
+# Install dependencies (including dev dependencies for TypeScript)
+RUN npm install
+RUN cd ../shared && npm install
+
+# Copy shared package and build it
+COPY packages/shared/ ../shared/
+RUN cd ../shared && npm run build
+
+# Copy backend source code
+COPY packages/backend/ ./
+
+# Create wait script for database
+RUN echo '#!/bin/sh' > /wait-for-db.sh && \
+    echo 'until pg_isready -h postgres -p 5432 -U credit_card_user; do' >> /wait-for-db.sh && \
+    echo '  echo "Waiting for database..."' >> /wait-for-db.sh && \
+    echo '  sleep 2' >> /wait-for-db.sh && \
+    echo 'done' >> /wait-for-db.sh && \
+    echo 'echo "Database is ready!"' >> /wait-for-db.sh && \
+    chmod +x /wait-for-db.sh
+
+# Default command waits for DB then seeds data
+CMD ["/wait-for-db.sh"]
