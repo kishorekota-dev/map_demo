@@ -1,6 +1,6 @@
 # Credit Card Enterprise Backend API
 
-A comprehensive mock API system for simulating a credit card enterprise backend with full CRUD operations, JWT authentication, and realistic financial data handling.
+A comprehensive mock API system for simulating a credit card enterprise backend with full CRUD operations, JWT authentication, realistic financial data handling, and **Model Context Protocol (MCP) server integration**.
 
 ## 🚀 Features
 
@@ -12,6 +12,13 @@ A comprehensive mock API system for simulating a credit card enterprise backend 
 - **Dispute Management** - Transaction dispute handling
 - **Fraud Protection** - Fraud case creation and monitoring
 - **Card Management** - Card issuance, blocking, and maintenance
+
+### MCP Server Integration 🤖
+- **Model Context Protocol Server** - AI assistant integration
+- **12 Comprehensive Tools** - Full API access for AI assistants
+- **Secure Authentication** - JWT token management for AI interactions
+- **Interactive Client** - Test and development interface
+- **Claude Desktop Ready** - Direct integration with Claude and other MCP clients
 
 ### Security Features
 - JWT token authentication
@@ -64,6 +71,43 @@ npm start
 ```
 
 The API will be available at `http://localhost:3000`
+
+## 🤖 MCP Server Setup
+
+The project includes a Model Context Protocol server for AI assistant integration:
+
+### Quick Setup
+```bash
+# Setup MCP server
+npm run mcp:setup
+
+# Start API server
+npm start
+
+# In another terminal, start MCP server
+npm run mcp:start
+```
+
+### Test the MCP Server
+```bash
+# Run example client
+npm run mcp:example
+
+# Interactive testing mode
+npm run mcp:interactive
+```
+
+### AI Assistant Integration
+The MCP server provides 12 tools for AI assistants:
+- Authentication and user management
+- Account operations (create, retrieve, update)
+- Transaction management
+- Card operations
+- Fraud case handling
+- Dispute management
+- Health monitoring
+
+See `README-MCP.md` for detailed MCP server documentation.
 
 ## 📚 API Documentation
 
