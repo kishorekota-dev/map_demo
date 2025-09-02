@@ -1,0 +1,50 @@
+{
+  "name": "@credit-card-enterprise/agent-ui",
+  "version": "1.0.0",
+  "description": "Credit Card Enterprise Agent UI - React application for customer service agents",
+  "scripts": {
+    "dev": "vite --port 3001",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.14.0",
+    "axios": "^1.6.0",
+    "@tanstack/react-query": "^4.29.0",
+    "@heroicons/react": "^2.0.18",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "@headlessui/react": "^1.7.15",
+    "clsx": "^1.2.1",
+    "date-fns": "^2.30.0",
+    "react-hook-form": "^7.45.0",
+    "react-hot-toast": "^2.4.1",
+    "recharts": "^2.7.2",
+    "@credit-card-enterprise/shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitejs/plugin-react": "^4.0.3",
+    "eslint": "^8.45.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.3",
+    "typescript": "^5.0.2",
+    "vite": "^4.4.5",
+    "vitest": "^0.34.0"
+  },
+  "keywords": [
+    "react",
+    "agent-ui",
+    "admin-dashboard",
+    "credit-card"
+  ]
+}

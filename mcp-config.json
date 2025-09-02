@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "credit-card-enterprise": {
+      "command": "node",
+      "args": ["./mcp-server.js"],
+      "env": {
+        "API_BASE_URL": "http://localhost:3000/api/v1"
+      }
+    }
+  }
+}

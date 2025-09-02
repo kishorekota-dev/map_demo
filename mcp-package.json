@@ -1,0 +1,30 @@
+{
+  "name": "credit-card-enterprise-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Credit Card Enterprise API",
+  "main": "mcp-server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node mcp-server.js",
+    "dev": "nodemon mcp-server.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "credit-card",
+    "api",
+    "server"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.4.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "bin": {
+    "credit-card-mcp": "./mcp-server.js"
+  }
+}
