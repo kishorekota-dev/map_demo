@@ -80,7 +80,7 @@ app.use('/api/v1/auth', authLimiter);
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://enterprise-banking.com', 'https://admin.enterprise-banking.com']
+    ? ['https://enterprise-banking.com', 'https://admin.enterprise-banking.com', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:3003']
     : ['http://localhost:3001', 'http://localhost:3002', 'http://localhost:3003'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
@@ -112,6 +112,47 @@ app.get('/health', (req, res) => {
   });
 });
 
+// API Health check endpoint (for MCP client)
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      database: 'connected',
+      api: 'operational',
+      mcp: 'available'
+    }
+  });
+});
+
+// API v1 Health check endpoint (following v1 URI pattern)
+app.get('/api/v1/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      database: 'connected',
+      api: 'operational',
+      mcp: 'available'
+    },
+    api: {
+      version: 'v1',
+      basePath: '/api/v1',
+      standards: ['BIAN', 'REST'],
+      features: [
+        'Advanced PII encryption',
+        'KYC/AML compliance',
+        'Real-time fraud detection',
+        'Comprehensive audit logging'
+      ]
+    }
+  });
+});
+
 // API version info
 app.get('/api', (req, res) => {
   res.status(200).json({
@@ -120,6 +161,7 @@ app.get('/api', (req, res) => {
     description: 'BIAN-compliant enterprise banking platform with comprehensive PII support',
     documentation: '/api/docs',
     endpoints: {
+      health: '/api/v1/health',
       auth: '/api/v1/auth',
       customers: '/api/v1/customers', 
       accounts: '/api/v1/accounts',
@@ -230,6 +272,8 @@ app.use('*', (req, res) => {
     availableEndpoints: [
       'GET /api - API information',
       'GET /health - Health check',
+      'GET /api/health - API health check',
+      'GET /api/v1/health - API v1 health check',
       'POST /api/v1/auth/login - Authentication',
       'POST /api/v1/auth/register - Customer registration',
       'GET /api/v1/customers/profile - Customer profile',

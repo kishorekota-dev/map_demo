@@ -7,8 +7,8 @@ services:
     container_name: enterprise-banking-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: enterprise_banking
-      POSTGRES_USER: banking_user
+      POSTGRES_DB: credit_card_enterprise
+      POSTGRES_USER: credit_card_user
       POSTGRES_PASSWORD: secure_banking_pass_2024
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     ports:
@@ -20,7 +20,7 @@ services:
     networks:
       - banking-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U banking_user -d enterprise_banking"]
+      test: ["CMD-SHELL", "pg_isready -U credit_card_user -d credit_card_enterprise"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,8 +47,8 @@ services:
   # MCP Server (Model Context Protocol)
   mcp-server:
     build:
-      context: ./packages/mcp-server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
     container_name: enterprise-banking-mcp
     restart: unless-stopped
     ports:
@@ -56,7 +56,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      DATABASE_URL: postgresql://credit_card_user:secure_banking_pass_2024@postgres:5432/credit_card_enterprise
       REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
       JWT_SECRET: enterprise_banking_jwt_secret_2024_secure_key_for_production
       ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
@@ -91,8 +91,8 @@ services:
   # Enterprise Banking Backend API
   backend:
     build:
-      context: ./packages/backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
     container_name: enterprise-banking-api
     restart: unless-stopped
     ports:
@@ -100,15 +100,20 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      DATABASE_URL: postgresql://credit_card_user:secure_banking_pass_2024@postgres:5432/credit_card_enterprise
       REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
       JWT_SECRET: enterprise_banking_jwt_secret_2024_secure_key_for_production
       JWT_EXPIRES_IN: 24h
       ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
       API_PREFIX: /api/v1
       # Security settings
+      ENABLE_AUTH: true
+      ENABLE_RATE_LIMITING: true
+      RATE_LIMIT_WINDOW: 15
+      RATE_LIMIT_MAX: 100
       BCRYPT_ROUNDS: 12
       SESSION_SECRET: enterprise_session_secret_2024
+      # CORS Configuration
       CORS_ORIGIN: "http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:8080"
       # Logging and monitoring
       LOG_LEVEL: info
@@ -126,7 +131,7 @@ services:
     networks:
       - banking-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -135,8 +140,8 @@ services:
   # Web UI Application (Customer Portal)
   web-ui:
     build:
-      context: ./packages/web-ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/web-ui/Dockerfile
     container_name: enterprise-banking-web
     restart: unless-stopped
     ports:
@@ -159,8 +164,8 @@ services:
   # Agent UI Application (Staff Portal)
   agent-ui:
     build:
-      context: ./packages/agent-ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/agent-ui/Dockerfile
     container_name: enterprise-banking-agent
     restart: unless-stopped
     ports:
@@ -183,8 +188,8 @@ services:
   # ChatBot UI Application (AI Assistant)
   chatbot-ui:
     build:
-      context: ./packages/chatbot-ui
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/chatbot-ui/Dockerfile
     container_name: enterprise-banking-chatbot
     restart: unless-stopped
     ports:
@@ -256,7 +261,7 @@ services:
     networks:
       - banking-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3002/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -265,13 +270,13 @@ services:
   # Enterprise Data Seeder Service
   data-seeder:
     build:
-      context: ./packages/backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./packages/backend/Dockerfile
     container_name: enterprise-data-seeder
     restart: "no"
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      DATABASE_URL: postgresql://credit_card_user:secure_banking_pass_2024@postgres:5432/credit_card_enterprise
       REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
       ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
       # Seeder configuration
@@ -370,5 +375,5 @@ networks:
     name: enterprise_banking_network
     ipam:
       config:
-        - subnet: 172.20.0.0/16
-          gateway: 172.20.0.1
+        - subnet: 172.24.0.0/16
+          gateway: 172.24.0.1

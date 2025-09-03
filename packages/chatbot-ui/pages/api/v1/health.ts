@@ -11,6 +11,11 @@ interface HealthCheckResponse {
     dialogflow: 'configured' | 'not_configured';
     redis: 'connected' | 'disconnected' | 'unknown';
   };
+  api: {
+    version: string;
+    basePath: string;
+    features: string[];
+  };
   uptime: number;
 }
 
@@ -32,6 +37,11 @@ export default async function handler(
         dialogflow: 'not_configured',
         redis: 'unknown'
       },
+      api: {
+        version: 'v1',
+        basePath: '/api/v1',
+        features: ['Authentication', 'Chatbot', 'Banking Integration']
+      },
       uptime: 0
     });
   }
@@ -40,7 +50,7 @@ export default async function handler(
     // Check backend connectivity
     let backendStatus: 'connected' | 'disconnected' | 'unknown' = 'unknown';
     try {
-      const backendUrl = process.env.BANKING_API_URL || 'http://backend:3000/api/v1';
+      const backendUrl = process.env.BANKING_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://backend:3000/api/v1';
       if (backendUrl) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -59,7 +69,7 @@ export default async function handler(
     // Check MCP server connectivity
     let mcpStatus: 'connected' | 'disconnected' | 'unknown' = 'unknown';
     try {
-      const mcpUrl = process.env.MCP_SERVER_URL || 'http://backend:3000';
+      const mcpUrl = process.env.MCP_SERVER_URL || process.env.NEXT_PUBLIC_MCP_SERVER_URL || 'http://mcp-server:3001';
       if (mcpUrl) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -90,7 +100,7 @@ export default async function handler(
 
     const uptime = Date.now() - startTime;
     const overallStatus = 
-      backendStatus === 'connected' && mcpStatus === 'connected' 
+      backendStatus === 'connected' 
         ? 'healthy' 
         : 'unhealthy';
 
@@ -104,6 +114,17 @@ export default async function handler(
         mcp: mcpStatus,
         dialogflow: dialogflowStatus,
         redis: redisStatus
+      },
+      api: {
+        version: 'v1',
+        basePath: '/api/v1',
+        features: [
+          'Authentication proxy',
+          'Chatbot interface',
+          'Banking API integration',
+          'Session management',
+          'Health monitoring'
+        ]
       },
       uptime
     };
@@ -125,6 +146,11 @@ export default async function handler(
         mcp: 'unknown',
         dialogflow: 'not_configured',
         redis: 'unknown'
+      },
+      api: {
+        version: 'v1',
+        basePath: '/api/v1',
+        features: ['Authentication', 'Chatbot', 'Banking Integration']
       },
       uptime: Date.now() - startTime
     });

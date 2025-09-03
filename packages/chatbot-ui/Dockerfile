@@ -11,7 +11,8 @@ COPY packages/chatbot-ui/package*.json ./
 COPY packages/shared/package*.json ../shared/
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install
+RUN cd ../shared && npm install
 
 # Stage 2: Builder
 FROM node:18-alpine AS builder

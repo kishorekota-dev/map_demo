@@ -14,7 +14,7 @@ import {
   IntentCategory
 } from '../types';
 import DialogFlowService from './dialogflow';
-import MCPClientService from './mcp-client';
+import { MCPClientService } from './mcp-client';
 
 export class ChatBotService {
   private dialogFlow: DialogFlowService;
@@ -88,13 +88,13 @@ export class ChatBotService {
         id: sessionId,
         userId,
         isAuthenticated: false,
-        authContext: this.authContext,
+        authContext: this.authContext || undefined,
         userRole: this.authContext?.role,
         messages: [],
         context: {
-          sessionId,
-          language: 'en-US',
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          currentIntent: undefined,
+          conversationFlow: 'greeting',
+          collectedData: {},
         },
         startTime: new Date(),
         lastActivity: new Date(),
@@ -166,7 +166,6 @@ export class ChatBotService {
         context: {
           ...this.currentSession?.context,
           customerInfo: authResult.user,
-          accountIds: authResult.user.accountIds
         },
         startTime: this.currentSession?.startTime || new Date(),
         lastActivity: new Date()
@@ -352,8 +351,7 @@ export class ChatBotService {
       // Detect intent using DialogFlow
       const intent = await this.dialogFlow.detectIntent(
         message,
-        this.currentSession.id,
-        this.currentSession.context
+        this.currentSession.id
       );
 
       userMessage.intent = intent;
@@ -515,14 +513,47 @@ export class ChatBotService {
 
     // Map intents to MCP actions with authentication context
     const actionMap: Record<string, () => Promise<MCPAction>> = {
-      'account.balance': () => this.mcpClient.getAccountBalance(intent.parameters?.accountId),
-      'account.statement': () => this.mcpClient.getAccountStatement(intent.parameters?.accountId),
-      'transaction.history': () => this.mcpClient.getTransactionHistory(intent.parameters?.accountId),
-      'payment.transfer': () => this.mcpClient.transferMoney(intent.parameters),
-      'payment.bill': () => this.mcpClient.payBill(intent.parameters),
-      'card.status': () => this.mcpClient.getCards(),
-      'card.block': () => this.mcpClient.blockCard(intent.parameters?.cardId),
-      'dispute.create': () => this.mcpClient.createDispute(intent.parameters)
+      'account.balance': async () => {
+        const result = await this.mcpClient.getAccountBalance(intent.parameters?.accountId || '');
+        return { tool: 'account.balance', parameters: { accountId: intent.parameters?.accountId }, result: result.data };
+      },
+      'account.statement': async () => {
+        // Use getAccountBalance as fallback for statement
+        const result = await this.mcpClient.getAccountBalance(intent.parameters?.accountId || '');
+        return { tool: 'account.statement', parameters: { accountId: intent.parameters?.accountId }, result: result.data };
+      },
+      'transaction.history': async () => {
+        const result = await this.mcpClient.getTransactionHistory(intent.parameters?.accountId || '');
+        return { tool: 'transaction.history', parameters: { accountId: intent.parameters?.accountId }, result: result.data };
+      },
+      'payment.transfer': async () => {
+        const result = await this.mcpClient.transferFunds(
+          intent.parameters?.fromAccount || '',
+          intent.parameters?.toAccount || '',
+          intent.parameters?.amount || 0
+        );
+        return { tool: 'payment.transfer', parameters: intent.parameters || {}, result: result.data };
+      },
+      'payment.bill': async () => {
+        const result = await this.mcpClient.payBill(
+          intent.parameters?.accountId || '',
+          intent.parameters?.billId || '',
+          intent.parameters?.amount || 0
+        );
+        return { tool: 'payment.bill', parameters: intent.parameters || {}, result: result.data };
+      },
+      'card.status': async () => {
+        const result = await this.mcpClient.getCardDetails(intent.parameters?.cardId || '');
+        return { tool: 'card.status', parameters: intent.parameters || {}, result: result.data };
+      },
+      'card.block': async () => {
+        const result = await this.mcpClient.toggleCardStatus(intent.parameters?.cardId || '', true);
+        return { tool: 'card.block', parameters: intent.parameters || {}, result: result.data };
+      },
+      'card.unblock': async () => {
+        const result = await this.mcpClient.toggleCardStatus(intent.parameters?.cardId || '', false);
+        return { tool: 'card.unblock', parameters: intent.parameters || {}, result: result.data };
+      }
     };
 
     if (actionMap[intent.name]) {
