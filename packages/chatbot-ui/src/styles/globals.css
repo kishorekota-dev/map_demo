@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS for ChatBot UI */
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
+    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Animation classes */
+.message-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.message-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms, transform 300ms;
+}
+
+.typing-animation {
+  animation: typing 1.5s infinite;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Custom component styles */
+.chat-message {
+  @apply max-w-[80%] p-3 rounded-lg break-words;
+}
+
+.chat-message.user {
+  @apply bg-blue-600 text-white ml-auto;
+}
+
+.chat-message.assistant {
+  @apply bg-gray-100 text-gray-900 mr-auto;
+}
+
+.chat-message.system {
+  @apply bg-yellow-50 text-yellow-800 border border-yellow-200 mx-auto text-center text-sm;
+}
+
+.chat-message.error {
+  @apply bg-red-50 text-red-800 border border-red-200 mx-auto text-center text-sm;
+}
+
+/* Quick action button styles */
+.quick-action-btn {
+  @apply px-3 py-2 text-sm rounded-lg border transition-all duration-200 hover:shadow-md;
+}
+
+.quick-action-account {
+  @apply border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100;
+}
+
+.quick-action-transaction {
+  @apply border-green-200 bg-green-50 text-green-700 hover:bg-green-100;
+}
+
+.quick-action-payment {
+  @apply border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100;
+}
+
+.quick-action-card {
+  @apply border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100;
+}
+
+.quick-action-support {
+  @apply border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100;
+}
+
+/* Loading spinner */
+.spinner {
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #3498db;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Input focus styles */
+.input-focus {
+  @apply focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200;
+}
+
+/* Button variants */
+.btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 text-gray-700 hover:bg-gray-300 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200;
+}
+
+/* Status indicators */
+.status-online {
+  @apply bg-green-500;
+}
+
+.status-busy {
+  @apply bg-yellow-500;
+}
+
+.status-offline {
+  @apply bg-gray-400;
+}
+
+/* Banking-specific styles */
+.banking-card {
+  @apply bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200;
+}
+
+.banking-amount {
+  @apply font-mono font-semibold;
+}
+
+.banking-amount.positive {
+  @apply text-green-600;
+}
+
+.banking-amount.negative {
+  @apply text-red-600;
+}
+
+.banking-status-active {
+  @apply text-green-600 bg-green-100 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.banking-status-pending {
+  @apply text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.banking-status-blocked {
+  @apply text-red-600 bg-red-100 px-2 py-1 rounded-full text-xs font-medium;
+}
