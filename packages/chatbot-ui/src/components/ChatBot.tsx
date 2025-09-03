@@ -29,6 +29,19 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
 
+  // Check for authentication requirements in new messages
+  useEffect(() => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage && 
+        lastMessage.role === 'system' && 
+        lastMessage.metadata?.requiresAuth && 
+        !state.isAuthenticated &&
+        !showAuthDialog) {
+      // Auto-trigger authentication dialog when system requests auth
+      setShowAuthDialog(true);
+    }
+  }, [state.messages, state.isAuthenticated, showAuthDialog]);
+
   // Initialize ChatBot on mount
   useEffect(() => {
     if (!state.isInitialized) {
@@ -46,7 +59,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
         },
         mcp: {
           serverPath: process.env.NEXT_PUBLIC_MCP_SERVER_PATH || '../backend/mcp-server.js',
-          apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api',
+          apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1',
           timeout: 30000,
           retryAttempts: 3,
         },
@@ -78,6 +91,23 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
 
   const handleSendMessage = async (message: string) => {
     try {
+      console.log('🔥 Message Sent:', message);
+      console.log('🔥 Current Auth State:', state.isAuthenticated);
+      
+      // Check if this message requires authentication before sending
+      const lowerMessage = message.toLowerCase();
+      const authRequiredKeywords = ['balance', 'transfer', 'payment', 'card', 'transaction', 'account'];
+      const requiresAuthMessage = authRequiredKeywords.some(keyword => lowerMessage.includes(keyword));
+      
+      console.log('🔥 Requires Auth:', requiresAuthMessage);
+      
+      if (requiresAuthMessage && !state.isAuthenticated) {
+        console.log('🔥 Triggering Auth Dialog from Message');
+        // Immediately show auth dialog for banking operations
+        setShowAuthDialog(true);
+        return;
+      }
+
       await chatBotStore.sendMessage(message);
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -86,21 +116,34 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
 
   const handleQuickAction = async (action: { intent: string; parameters?: Record<string, any> }) => {
     try {
-      // Check if authentication is required
-      if (requiresAuth(action.intent) && !state.isAuthenticated) {
+      console.log('🔥 Quick Action Clicked:', action);
+      console.log('🔥 Current Auth State:', state.isAuthenticated);
+      console.log('🔥 Current Show Auth Dialog:', showAuthDialog);
+      
+      // Handle Login action specially
+      if (action.intent === 'Login') {
+        console.log('🔥 Triggering Login Dialog');
         setShowAuthDialog(true);
         return;
       }
 
+      // Check if authentication is required for other actions
+      if (requiresAuth(action.intent) && !state.isAuthenticated) {
+        console.log('🔥 Auth Required - Triggering Dialog');
+        setShowAuthDialog(true);
+        return;
+      }
+
+      console.log('🔥 Executing Quick Action');
       await chatBotStore.executeQuickAction(action);
     } catch (error) {
       console.error('Failed to execute quick action:', error);
     }
   };
 
-  const handleAuthenticate = async (username: string, password: string) => {
+  const handleAuthenticate = async (email: string, password: string) => {
     try {
-      const success = await chatBotStore.authenticate(username, password);
+      const success = await chatBotStore.authenticate(email, password);
       if (success) {
         setShowAuthDialog(false);
       }
@@ -134,6 +177,11 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
       'Transfer Money',
       'Card Information',
       'Make Payment',
+      'account.balance',
+      'transaction.history',
+      'payment.transfer',
+      'card.status',
+      'payment.bill'
     ];
     return authRequiredIntents.includes(intent);
   };
@@ -235,6 +283,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
       />
 
       {/* Authentication Dialog */}
+      {(() => { console.log('🔥 Rendering Auth Dialog:', showAuthDialog); return null; })()}
       {showAuthDialog && (
         <AuthDialog
           isOpen={showAuthDialog}

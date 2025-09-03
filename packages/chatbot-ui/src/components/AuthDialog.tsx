@@ -15,17 +15,17 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
   isLoading = false,
   error = null,
 }) => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const usernameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
 
-  // Focus on username field when dialog opens
+  // Focus on email field when dialog opens
   useEffect(() => {
-    if (isOpen && usernameRef.current) {
+    if (isOpen && emailRef.current) {
       setTimeout(() => {
-        usernameRef.current?.focus();
+        emailRef.current?.focus();
       }, 100);
     }
   }, [isOpen]);
@@ -33,7 +33,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
   // Reset form when dialog opens/closes
   useEffect(() => {
     if (isOpen) {
-      setUsername('');
+      setEmail('');
       setPassword('');
       setAuthError(null);
       setShowPassword(false);
@@ -43,17 +43,17 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!username.trim() || !password.trim()) {
-      setAuthError('Please enter both username and password');
+    if (!email.trim() || !password.trim()) {
+      setAuthError('Please enter both email and password');
       return;
     }
 
     setAuthError(null);
     
     try {
-      const success = await onAuthenticate(username.trim(), password);
+      const success = await onAuthenticate(email.trim(), password);
       if (!success) {
-        setAuthError('Invalid username or password');
+        setAuthError('Invalid email or password');
       }
       // If successful, the dialog will be closed by the parent component
     } catch (error) {
@@ -118,21 +118,21 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Username */}
+          {/* Email */}
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-              Username
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+              Email
             </label>
             <input
-              ref={usernameRef}
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              ref={emailRef}
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               disabled={isLoading}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="Enter your username"
-              autoComplete="username"
+              placeholder="Enter your email"
+              autoComplete="email"
             />
           </div>
 
@@ -188,8 +188,8 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <h4 className="text-sm font-medium text-blue-800 mb-2">Demo Credentials</h4>
             <div className="text-xs text-blue-700 space-y-1">
-              <div><strong>Customer:</strong> john.doe / password123</div>
-              <div><strong>Admin:</strong> admin / admin123</div>
+              <div><strong>Customer:</strong> john.doe@example.com / password123</div>
+              <div><strong>Admin:</strong> admin@enterprise-banking.com / admin123</div>
             </div>
           </div>
 
@@ -205,7 +205,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isLoading || !username.trim() || !password.trim()}
+              disabled={isLoading || !email.trim() || !password.trim()}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
               {isLoading ? (

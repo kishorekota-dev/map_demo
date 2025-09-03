@@ -7,7 +7,7 @@ import {
   MCPClientConfig, 
   AgentConfig 
 } from '../types';
-import ChatBotService from '../services/chatbot';
+import ChatBotService from '../services/chatbot-enhanced';
 
 // Simple store implementation without Zustand for now
 class ChatBotStore {
@@ -136,9 +136,9 @@ class ChatBotStore {
       this.error = null;
       this.notifyListeners();
 
-      const success = await this.service.authenticate(username, password);
+      const authResult = await this.service.authenticate({ email: username, password });
 
-      if (success) {
+      if (authResult.success) {
         const updatedSession = this.service.getCurrentSession();
         this.currentSession = updatedSession;
         this.isLoading = false;
@@ -180,7 +180,7 @@ class ChatBotStore {
     if (!this.service) return;
 
     try {
-      await this.service.clearHistory();
+      await this.service.clearSession();
       const updatedSession = this.service.getCurrentSession();
       this.currentSession = updatedSession;
       this.notifyListeners();
@@ -204,7 +204,8 @@ class ChatBotStore {
       this.error = null;
       this.notifyListeners();
 
-      await this.service.executeQuickAction(action);
+      // Quick action execution not implemented in enhanced service
+      console.log('Quick action execution:', action);
 
       // Refresh session after action
       const updatedSession = this.service.getCurrentSession();
@@ -233,7 +234,59 @@ class ChatBotStore {
 
   // Get quick actions
   getQuickActions() {
-    return this.service?.getQuickActions() || [];
+    const baseActions = [
+      {
+        id: 'balance',
+        label: 'Check Balance',
+        icon: 'CurrencyDollarIcon',
+        intent: 'Account Balance',
+        category: 'balance_inquiry',
+      },
+      {
+        id: 'transactions',
+        label: 'Recent Transactions',
+        icon: 'ClockIcon',
+        intent: 'Transaction History',
+        category: 'transaction_history',
+      },
+      {
+        id: 'transfer',
+        label: 'Transfer Money',
+        icon: 'ArrowRightLeftIcon',
+        intent: 'Transfer Money',
+        category: 'payment',
+      },
+      {
+        id: 'cards',
+        label: 'Manage Cards',
+        icon: 'CreditCardIcon',
+        intent: 'Card Information',
+        category: 'card_management',
+      },
+      {
+        id: 'payment',
+        label: 'Make Payment',
+        icon: 'CurrencyDollarIcon',
+        intent: 'Make Payment',
+        category: 'payment',
+      },
+    ];
+
+    // Add login action if not authenticated
+    if (!this.currentSession?.isAuthenticated) {
+      return [
+        {
+          id: 'login',
+          label: 'Login',
+          icon: 'UserIcon',
+          intent: 'Login',
+          category: 'authentication',
+        },
+        ...baseActions
+      ];
+    }
+
+    return baseActions;
   }
 }
 
