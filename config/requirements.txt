@@ -1,0 +1,25 @@
+# DialogFlow Enterprise Banking Setup Requirements
+
+# Core Google Cloud Dependencies
+google-cloud-dialogflow==2.25.0
+google-cloud-core==2.4.1
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# Additional Utilities
+requests==2.31.0
+python-dotenv==1.0.0
+pyyaml==6.0.1
+click==8.1.7
+
+# Development and Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+flake8==6.1.0
+
+# Optional: For enhanced NLP processing
+nltk==3.8.1
+spacy==3.7.2
+transformers==4.35.2

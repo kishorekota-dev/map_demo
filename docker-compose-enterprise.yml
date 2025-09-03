@@ -44,6 +44,50 @@ services:
       timeout: 3s
       retries: 5
 
+  # MCP Server (Model Context Protocol)
+  mcp-server:
+    build:
+      context: ./packages/mcp-server
+      dockerfile: Dockerfile
+    container_name: enterprise-banking-mcp
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://banking_user:secure_banking_pass_2024@postgres:5432/enterprise_banking
+      REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
+      JWT_SECRET: enterprise_banking_jwt_secret_2024_secure_key_for_production
+      ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
+      MCP_SERVER_NAME: enterprise-banking-mcp
+      MCP_SERVER_VERSION: 2.1.0
+      # Banking API integration
+      BANKING_API_URL: http://backend:3000/api/v1
+      # Security settings
+      ENABLE_AUTH: true
+      ENABLE_RATE_LIMITING: true
+      RATE_LIMIT_WINDOW: 15
+      RATE_LIMIT_MAX: 100
+      # Logging
+      LOG_LEVEL: info
+      ENABLE_AUDIT_LOGGING: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # Enterprise Banking Backend API
   backend:
     build:
@@ -65,7 +109,7 @@ services:
       # Security settings
       BCRYPT_ROUNDS: 12
       SESSION_SECRET: enterprise_session_secret_2024
-      CORS_ORIGIN: "http://localhost:3001,http://localhost:3002,http://localhost:3003"
+      CORS_ORIGIN: "http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:8080"
       # Logging and monitoring
       LOG_LEVEL: info
       ENABLE_REQUEST_LOGGING: true
@@ -96,7 +140,7 @@ services:
     container_name: enterprise-banking-web
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3003:3000"
     environment:
       REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
       REACT_APP_ENV: production
@@ -120,7 +164,7 @@ services:
     container_name: enterprise-banking-agent
     restart: unless-stopped
     ports:
-      - "3002:3000"
+      - "3004:3000"
     environment:
       REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
       REACT_APP_ENV: production
@@ -144,21 +188,79 @@ services:
     container_name: enterprise-banking-chatbot
     restart: unless-stopped
     ports:
-      - "3003:3000"
+      - "3002:3002"
     environment:
-      REACT_APP_API_BASE_URL: http://localhost:3000/api/v1
-      REACT_APP_ENV: production
-      REACT_APP_APP_NAME: "Enterprise Banking AI Assistant"
+      # Next.js Configuration
+      NODE_ENV: production
+      PORT: 3002
+      NEXTAUTH_URL: http://localhost:3002
+      NEXTAUTH_SECRET: enterprise_chatbot_nextauth_secret_2024
+      
+      # API Integration
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000/api/v1
+      NEXT_PUBLIC_MCP_SERVER_URL: http://localhost:3001
+      NEXT_PUBLIC_APP_NAME: "Enterprise Banking AI Assistant"
+      NEXT_PUBLIC_APP_ENV: production
+      
+      # Internal API URLs (for server-side calls)
+      BANKING_API_URL: http://backend:3000/api/v1
+      MCP_SERVER_URL: http://mcp-server:3001
+      
+      # DialogFlow Configuration
+      GOOGLE_PROJECT_ID: enterprise-banking-chatbot
+      GOOGLE_APPLICATION_CREDENTIALS: /app/config/dialogflow-service-account.json
+      DIALOGFLOW_LANGUAGE_CODE: en-US
+      DIALOGFLOW_SESSION_TIMEOUT: 3600
+      
+      # Authentication & Security
+      JWT_SECRET: enterprise_banking_jwt_secret_2024_secure_key_for_production
+      ENCRYPTION_KEY: enterprise_banking_encryption_key_2024_very_secure_for_pii
+      
+      # LangChain Configuration
+      LANGCHAIN_TRACING_V2: false
+      LANGCHAIN_PROJECT: enterprise-banking-chatbot
+      LANGCHAIN_API_KEY: ""
+      
+      # Session Management
+      REDIS_URL: redis://:redis_secure_pass_2024@redis:6379
+      SESSION_TIMEOUT: 1800
+      MAX_SESSIONS_PER_USER: 3
+      
+      # Application Features
+      ENABLE_GUEST_MODE: true
+      ENABLE_VOICE_INPUT: false
+      ENABLE_FILE_UPLOAD: false
+      MAX_MESSAGE_LENGTH: 2000
+      
+      # Logging and Monitoring
+      LOG_LEVEL: info
+      ENABLE_ANALYTICS: true
+      ENABLE_ERROR_REPORTING: true
+      
+      # Rate Limiting
+      RATE_LIMIT_ENABLED: true
+      RATE_LIMIT_WINDOW: 15
+      RATE_LIMIT_MAX_REQUESTS: 50
+    volumes:
+      # Mount DialogFlow service account credentials
+      - ./config/dialogflow-service-account.json:/app/config/dialogflow-service-account.json:ro
+      # Mount any custom configurations
+      - ./packages/chatbot-ui/.env.local:/app/.env.local:ro
     depends_on:
       backend:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - banking-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "curl", "-f", "http://localhost:3002/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 90s
 
   # Enterprise Data Seeder Service
   data-seeder:
