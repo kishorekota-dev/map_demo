@@ -11,6 +11,8 @@ function showUsage() {
   console.log('');
   console.log('Commands:');
   console.log('  demo      - Run the full MCP demo (default)');
+  console.log('  host      - Run MCP Host with OpenAI (requires API key)');
+  console.log('  host-sim  - Run AI simulation (no API key needed)');
   console.log('  backend   - Start only the backend API');
   console.log('  server    - Start only the MCP server');
   console.log('  client    - Start only the MCP client');
@@ -20,7 +22,8 @@ function showUsage() {
   console.log('');
   console.log('Examples:');
   console.log('  node index.js demo');
-  console.log('  node index.js test');
+  console.log('  node index.js host      # Requires OPENAI_API_KEY');
+  console.log('  node index.js host-sim  # Shows what AI interaction looks like');
   console.log('  npm start demo');
 }
 
@@ -58,6 +61,49 @@ async function main() {
   const command = process.argv[2] || 'demo';
 
   switch (command) {
+    case 'host':
+      console.log('🤖 Starting MCP Host with OpenAI...');
+      console.log('This will start the backend, then run the AI-powered MCP Host.\n');
+      
+      // Check for OpenAI API key
+      if (!process.env.OPENAI_API_KEY) {
+        console.log('❌ OpenAI API key required!');
+        console.log('Set your API key: export OPENAI_API_KEY=your_key_here');
+        console.log('Get one from: https://platform.openai.com/api-keys');
+        process.exit(1);
+      }
+      
+      // Start backend in background
+      console.log('Starting backend API...');
+      const hostBackendProcess = runCommandInBackground('backend-api.js');
+      
+      // Wait for backend to start
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      try {
+        // Run the MCP host
+        console.log('Starting MCP Host with OpenAI...');
+        await runCommand('mcp-host.js');
+      } finally {
+        // Clean up
+        hostBackendProcess.kill();
+      }
+      break;
+
+    case 'host-sim':
+      console.log('🎭 Running AI Simulation Demo...');
+      const { spawn: spawnSim } = require('child_process');
+      const simProcess = spawnSim('./demo-ai-simulation.sh', [], {
+        stdio: 'inherit',
+        cwd: __dirname,
+        shell: true,
+      });
+      
+      simProcess.on('close', (code) => {
+        process.exit(code);
+      });
+      break;
+
     case 'demo':
       console.log('🚀 Running MCP Demo...');
       console.log('This will start the backend, then run the MCP client demo.\n');

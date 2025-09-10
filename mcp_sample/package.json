@@ -12,6 +12,9 @@
     "backend:enhanced": "node backend-api-enhanced.js",
     "dev": "concurrently \"npm run backend\" \"npm run server\" \"sleep 2 && npm run client\"",
     "dev:enhanced": "concurrently \"npm run backend:enhanced\" \"npm run server:enhanced\" \"sleep 3 && node demo-client.js\"",
+    "dev:host": "concurrently \"npm run backend\" \"sleep 3 && npm run host\"",
+    "host": "node mcp-host.js",
+    "host:interactive": "node mcp-host.js interactive",
     "test": "node test.js",
     "demo": "node index.js demo",
     "demo:enhanced": "./demo-enhanced.sh",
@@ -19,15 +22,23 @@
     "docker:run": "docker run -p 3001:3001 mcp-demo",
     "docker:compose": "docker-compose up --build"
   },
-  "keywords": ["mcp", "model-context-protocol", "demo", "nodejs", "websocket", "real-time"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "demo",
+    "nodejs",
+    "websocket",
+    "real-time"
+  ],
   "author": "Demo Developer",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.4.0",
-    "express": "^4.18.2",
     "axios": "^1.6.0",
-    "cors": "^2.8.5",
     "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "openai": "^4.104.0",
     "ws": "^8.14.2"
   },
   "devDependencies": {
