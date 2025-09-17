@@ -168,10 +168,12 @@ export interface DialogFlowConfig {
 }
 
 export interface MCPClientConfig {
-  serverPath: string;
+  serverPath?: string;
   apiBaseUrl: string;
+  mcpServerUrl?: string;
   timeout: number;
   retryAttempts: number;
+  transport?: 'stdio' | 'http';
 }
 
 export interface AgentConfig {

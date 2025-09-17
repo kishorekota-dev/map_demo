@@ -5,6 +5,7 @@ const Joi = require('joi');
 const { validateRequest } = require('../middleware/validation');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const CustomerModel = require('../models/CustomerModel');
+const { UserService } = require('../models/users');
 const { query } = require('../database');
 
 const router = express.Router();
@@ -99,7 +100,10 @@ const generateToken = (user, type = 'CUSTOMER') => {
     type: type,
     customerId: type === 'CUSTOMER' ? user.id : null,
     role: type === 'ADMIN' ? user.role : 'CUSTOMER',
-    permissions: type === 'ADMIN' ? user.permissions : ['read:own_account', 'write:own_account']
+    permissions: type === 'ADMIN' ? user.permissions : UserService.getUserPermissions('CUSTOMER')?.permissions || [
+      'accounts:read:own', 'transactions:read:own', 'cards:read:own',
+      'cards:create:own', 'disputes:create:own', 'disputes:read:own'
+    ]
   };
 
   return jwt.sign(
@@ -179,11 +183,11 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     }
 
     // Check account status
-    if (customer.account_status !== 'ACTIVE') {
+    if (customer.status !== 'ACTIVE') {
       return res.status(401).json({
         error: 'Account inactive',
         message: 'Your account has been deactivated. Please contact customer service.',
-        accountStatus: customer.account_status
+        accountStatus: customer.status
       });
     }
 
@@ -216,11 +220,10 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
 
     // Get customer's accounts
     const accountsQuery = `
-      SELECT ca.id, ca.account_number, ca.account_status, ca.credit_limit, ca.current_balance,
-             ccp.product_name, ccp.product_type
-      FROM credit_accounts ca
-      LEFT JOIN credit_card_products ccp ON ca.product_id = ccp.id
-      WHERE ca.customer_id = $1 AND ca.account_status != 'CLOSED'
+      SELECT a.id, a.account_number, a.status, a.credit_limit, a.current_balance,
+             a.account_type
+      FROM accounts a
+      WHERE a.user_id = $1 AND a.status != 'CLOSED'
     `;
     
     const accountsResult = await query(accountsQuery, [customer.id]);

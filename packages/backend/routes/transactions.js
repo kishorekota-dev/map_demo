@@ -19,8 +19,18 @@ const {
   findAccountsByUserId,
   findTransactionsByAccountId 
 } = require('../models/mockData');
+const {
+  createRouteDebugLogger,
+  logBusinessOperation,
+  logAuthEvent,
+  logError,
+  withPerformanceLogging
+} = require('../middleware/apiDebugLogger');
 
 const router = express.Router();
+
+// Create route-specific debug logger
+const debugLogger = createRouteDebugLogger('transactions');
 
 // Validation schemas
 const createTransactionSchema = Joi.object({

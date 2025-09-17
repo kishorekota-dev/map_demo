@@ -76,12 +76,37 @@ export default async function handler(
       });
     }
 
+    // Map backend response to expected frontend format
+    const mappedUser = {
+      userId: result.customer.id,
+      customerId: result.customer.id,
+      email: result.customer.email,
+      firstName: result.customer.firstName,
+      lastName: result.customer.lastName,
+      role: 'CUSTOMER',
+      permissions: [
+        'accounts:read',
+        'transactions:read',
+        'cards:read',
+        'disputes:create',
+        'fraud:create',
+        'payments:initiate',
+        'cards:update'
+      ],
+      accountIds: result.customer.accounts?.map((account: any) => account.id) || [],
+      paymentLimits: {
+        transaction: 10000,
+        daily: 25000,
+        monthly: 100000
+      }
+    };
+
     // Return successful authentication response
     return res.status(200).json({
       success: true,
       token: result.token,
-      sessionId: result.sessionId,
-      user: result.user,
+      sessionId: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      user: mappedUser,
       message: 'Authentication successful'
     });
 

@@ -131,7 +131,7 @@ class CustomerModel {
     // Get customer by ID with decrypted sensitive data (for authorized access only)
     static async getCustomerById(customerId, includeEncrypted = false) {
         const selectQuery = `
-            SELECT * FROM customers WHERE id = $1 AND customer_status != 'CLOSED'
+            SELECT * FROM users WHERE id = $1 AND status = 'ACTIVE'
         `;
         
         const result = await query(selectQuery, [customerId]);
@@ -296,7 +296,7 @@ class CustomerModel {
 
     // Verify customer password
     static async verifyPassword(customerId, password) {
-        const selectQuery = 'SELECT password_hash FROM customers WHERE id = $1';
+        const selectQuery = 'SELECT password_hash FROM users WHERE id = $1';
         const result = await query(selectQuery, [customerId]);
 
         if (result.rows.length === 0) {
@@ -309,7 +309,7 @@ class CustomerModel {
     // Update last login timestamp
     static async updateLastLogin(customerId) {
         const updateQuery = `
-            UPDATE customers 
+            UPDATE users 
             SET last_login = CURRENT_TIMESTAMP, failed_login_attempts = 0
             WHERE id = $1
         `;
@@ -320,7 +320,7 @@ class CustomerModel {
     // Handle failed login attempt
     static async recordFailedLogin(email) {
         const updateQuery = `
-            UPDATE customers 
+            UPDATE users 
             SET failed_login_attempts = failed_login_attempts + 1,
                 account_locked_until = CASE 
                     WHEN failed_login_attempts >= 4 THEN CURRENT_TIMESTAMP + INTERVAL '30 minutes'
@@ -338,7 +338,7 @@ class CustomerModel {
     static async isAccountLocked(email) {
         const selectQuery = `
             SELECT account_locked_until, failed_login_attempts
-            FROM customers 
+            FROM users 
             WHERE email = $1
         `;
 
@@ -355,6 +355,52 @@ class CustomerModel {
         }
 
         return false;
+    }
+
+    // Find customer by email address
+    static async findByEmail(email) {
+        const selectQuery = `
+            SELECT * FROM users 
+            WHERE email = $1 AND status = 'ACTIVE'
+        `;
+        
+        const result = await query(selectQuery, [email]);
+        
+        if (result.rows.length === 0) {
+            return null;
+        }
+
+        return result.rows[0];
+    }
+
+    // Find customer by ID
+    static async findById(customerId) {
+        return await this.getCustomerById(customerId, false);
+    }
+
+    // Track login attempts for security
+    static async trackLoginAttempt(customerId, successful, ipAddress) {
+        const insertQuery = `
+            INSERT INTO audit_logs (user_id, action, resource_type, resource_id, ip_address, timestamp, status)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6)
+        `;
+
+        const status = successful ? 'SUCCESS' : 'FAILED';
+
+        await query(insertQuery, [customerId, 'LOGIN', 'USER', customerId, ipAddress, status]);
+
+        if (successful) {
+            await this.updateLastLogin(customerId);
+        } else {
+            await this.recordFailedLogin(customerId);
+        }
+    }
+
+    // Find customer by SSN (encrypted)
+    static async findBySSN(ssn) {
+        // This would need to be implemented with proper encryption search
+        // For now, return null as this is a complex operation requiring decryption
+        return null;
     }
 }
 

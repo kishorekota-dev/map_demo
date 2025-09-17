@@ -8,11 +8,17 @@ require('dotenv').config();
 
 // Import database and models
 const { initializeDatabase } = require('./database');
-const EnterpriseDataSeeder = require('./database/enterpriseSeeder');
+const EnterpriseSeeder = require('./database/enterpriseSeeder');
 
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
+const { 
+  apiDebugMiddleware, 
+  apiDebugLogger,
+  logAuthEvent,
+  logBusinessOperation 
+} = require('./middleware/apiDebugLogger');
 
 // Import enterprise routes
 const enterpriseAuthRoutes = require('./routes/enterpriseAuth');
@@ -96,10 +102,15 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined'));
 }
+
+// Enhanced API debug logging (before request logger)
+app.use(apiDebugMiddleware);
 app.use(requestLogger);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  apiDebugLogger.info('Health check requested', { requestId: req.requestId });
+  
   res.status(200).json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -200,7 +211,17 @@ app.use('/api/v1/legacy/auth', authRoutes);
 // Admin endpoints
 app.post('/api/v1/admin/seed-data', async (req, res) => {
   try {
+    apiDebugLogger.info('Enterprise data seeding requested', { 
+      requestId: req.requestId,
+      environment: process.env.NODE_ENV 
+    });
+
     if (process.env.NODE_ENV === 'production') {
+      apiDebugLogger.security('Data seeding blocked in production', { 
+        requestId: req.requestId,
+        environment: process.env.NODE_ENV 
+      });
+      
       return res.status(403).json({
         error: 'Not allowed in production',
         message: 'Data seeding is not allowed in production environment'
@@ -209,8 +230,18 @@ app.post('/api/v1/admin/seed-data', async (req, res) => {
 
     const { customerCount = 100 } = req.body;
     
+    logBusinessOperation('Enterprise data seeding started', { 
+      customerCount,
+      requestId: req.requestId 
+    });
+    
     console.log('🌱 Starting enterprise data seeding...');
     await EnterpriseDataSeeder.seedAll(customerCount);
+    
+    logBusinessOperation('Enterprise data seeding completed', { 
+      customerCount,
+      requestId: req.requestId 
+    });
     
     res.status(200).json({
       message: 'Enterprise data seeding completed successfully',
@@ -218,6 +249,12 @@ app.post('/api/v1/admin/seed-data', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    apiDebugLogger.error('Data seeding failed', {
+      requestId: req.requestId,
+      error: error.message,
+      stack: error.stack
+    });
+    
     console.error('Data seeding failed:', error);
     res.status(500).json({
       error: 'Data seeding failed',
@@ -302,8 +339,14 @@ async function startServer() {
   try {
     // Initialize database connection
     console.log('🔌 Connecting to enterprise database...');
+    apiDebugLogger.info('Initializing database connection', { 
+      environment: process.env.NODE_ENV 
+    });
+    
     await initializeDatabase();
+    
     console.log('✅ Database connection established');
+    apiDebugLogger.info('Database connection established successfully');
 
     // Start the server
     const server = app.listen(PORT, '0.0.0.0', () => {
@@ -326,14 +369,26 @@ async function startServer() {
     server.on('error', (error) => {
       if (error.code === 'EADDRINUSE') {
         console.error(`❌ Port ${PORT} is already in use`);
+        apiDebugLogger.error(`Server startup failed - Port ${PORT} already in use`, {
+          port: PORT,
+          errorCode: error.code
+        });
       } else {
         console.error('❌ Server error:', error);
+        apiDebugLogger.error('Server startup failed', {
+          error: error.message,
+          stack: error.stack
+        });
       }
       process.exit(1);
     });
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
+    apiDebugLogger.error('Server initialization failed', {
+      error: error.message,
+      stack: error.stack
+    });
     process.exit(1);
   }
 }

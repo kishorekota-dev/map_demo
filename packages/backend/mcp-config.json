@@ -1,6 +1,16 @@
 {
   "mcpServers": {
     "credit-card-enterprise": {
+      "transport": "http",
+      "url": "http://localhost:3001",
+      "healthEndpoint": "/health",
+      "toolsEndpoint": "/tools",
+      "env": {
+        "API_BASE_URL": "http://localhost:3000/api/v1",
+        "MCP_PORT": "3001"
+      }
+    },
+    "credit-card-enterprise-stdio": {
       "command": "node",
       "args": ["./mcp-server.js"],
       "env": {

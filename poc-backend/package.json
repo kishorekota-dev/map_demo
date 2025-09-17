@@ -1,0 +1,49 @@
+{
+  "name": "chatbot-poc-backend",
+  "version": "1.0.0",
+  "description": "Node.js Express backend for Chatbot POC with Intent Detection",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src --ext .js --fix",
+    "format": "prettier --write \"src/**/*.js\"",
+    "health-check": "node scripts/health-check.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "morgan": "^1.10.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.8.1",
+    "express-validator": "^7.0.1",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.0",
+    "winston": "^3.10.0",
+    "joi": "^17.9.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.2",
+    "supertest": "^6.3.3",
+    "eslint": "^8.45.0",
+    "prettier": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "chatbot",
+    "intent-detection",
+    "express",
+    "nodejs",
+    "rest-api"
+  ],
+  "author": "POC Developer",
+  "license": "MIT"
+}

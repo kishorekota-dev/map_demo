@@ -1,0 +1,95 @@
+{
+  "debug": {
+    "enabled": true,
+    "components": {
+      "mcp-server": {
+        "enabled": true,
+        "logLevel": "DEBUG",
+        "logRequests": true,
+        "logResponses": true,
+        "logHeaders": false,
+        "logTimings": true,
+        "sanitizeSensitiveData": true
+      },
+      "mcp-client": {
+        "enabled": true,
+        "logLevel": "DEBUG",
+        "logRequests": true,
+        "logResponses": true,
+        "logStateChanges": true,
+        "logUserActions": true,
+        "sanitizeSensitiveData": true
+      },
+      "chatbot-ui": {
+        "enabled": true,
+        "logLevel": "DEBUG",
+        "logStateChanges": true,
+        "logUserActions": true,
+        "logComponentEvents": true,
+        "logMessageFlow": true
+      },
+      "backend-api": {
+        "enabled": true,
+        "logLevel": "DEBUG",
+        "logRequests": true,
+        "logResponses": true,
+        "logDatabaseOperations": true,
+        "logAuthOperations": true,
+        "logBusinessOperations": true,
+        "logSecurityEvents": true,
+        "logPerformanceMetrics": true,
+        "sanitizeSensitiveData": true
+      },
+      "startup-scripts": {
+        "enabled": true,
+        "logLevel": "DEBUG",
+        "logServiceHealth": true,
+        "logPortChecks": true,
+        "logDependencyInstalls": true
+      }
+    },
+    "filters": {
+      "excludeEndpoints": [
+        "/health",
+        "/ping"
+      ],
+      "excludeUserAgents": [
+        "curl"
+      ],
+      "maxLogSize": "10MB",
+      "rotateAfterDays": 7
+    },
+    "environment": {
+      "variables": {
+        "DEBUG": "true",
+        "NODE_ENV": "development",
+        "MCP_DEBUG": "true",
+        "NEXT_PUBLIC_DEBUG": "true",
+        "LOG_LEVEL": "DEBUG"
+      }
+    },
+    "performance": {
+      "logSlowRequests": true,
+      "slowRequestThreshold": "2000ms",
+      "logMemoryUsage": false,
+      "logCpuUsage": false
+    }
+  },
+  "production": {
+    "enabled": false,
+    "logLevel": "INFO",
+    "sanitizeSensitiveData": true,
+    "logOnlyErrors": true
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Debug configuration for Enterprise Banking HTTP MCP System",
+    "lastUpdated": "2025-09-03T15:30:00.000Z",
+    "documentation": {
+      "usage": "Set DEBUG=true environment variable to enable debug mode",
+      "levels": ["ERROR", "WARN", "INFO", "DEBUG"],
+      "components": "Each component can be individually configured",
+      "sensitive_data": "Passwords, tokens, SSNs, and card numbers are sanitized"
+    }
+  }
+}

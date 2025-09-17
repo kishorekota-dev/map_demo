@@ -18,8 +18,19 @@ const {
   findAccountsByUserId,
   findTransactionsByAccountId 
 } = require('../models/mockData');
+const AccountModel = require('../models/Account');
+const {
+  createRouteDebugLogger,
+  logBusinessOperation,
+  logAuthEvent,
+  logError,
+  withPerformanceLogging
+} = require('../middleware/apiDebugLogger');
 
 const router = express.Router();
+
+// Create route-specific debug logger
+const debugLogger = createRouteDebugLogger('accounts');
 
 // Validation schemas
 const createAccountSchema = Joi.object({
@@ -50,46 +61,107 @@ const querySchema = Joi.object({
 });
 
 // GET /api/v1/accounts
-router.get('/', auth, createResourceSecurityMiddleware('accounts', 'read'), validateQuery(querySchema), (req, res) => {
+router.get('/', auth, createResourceSecurityMiddleware('accounts', 'read'), validateQuery(querySchema), async (req, res) => {
   try {
+    const startTime = Date.now();
     const { page, limit, offset } = getPaginationParams(req);
     const { status, accountType } = req.query;
     const { user } = req;
 
-    // Get all accounts
-    let accounts = Array.from(mockData.accounts.values());
-    
-    // Apply security filtering
-    accounts = SecurityUtils.filterDataByAccess(user, 'accounts', accounts);
+    debugLogger.info('Fetching accounts list', {
+      requestId: req.requestId,
+      userId: user.userId,
+      role: user.role,
+      filters: { status, accountType },
+      pagination: { page, limit, offset }
+    });
 
-    // Apply query filters
+    // Build database filters
+    const dbFilters = {};
     if (status) {
-      accounts = accounts.filter(account => account.status === status);
+      dbFilters.status = status;
     }
     if (accountType) {
-      accounts = accounts.filter(account => account.accountType === accountType);
+      dbFilters.account_type = accountType;
     }
 
-    // Sort by creation date (newest first)
-    accounts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // For customers, only show their own accounts
+    if (user.role === 'CUSTOMER') {
+      dbFilters.user_id = user.userId;
+    }
 
-    // Paginate
-    const totalCount = accounts.length;
-    const paginatedAccounts = accounts.slice(offset, offset + limit);
+    debugLogger.debug('Database filters applied', {
+      requestId: req.requestId,
+      filters: dbFilters,
+      userRole: user.role,
+      userId: user.userId
+    });
 
-    // Format response with currency formatting
-    const formattedAccounts = paginatedAccounts.map(account => ({
-      ...account,
-      formattedCreditLimit: formatCurrency(account.creditLimit),
-      formattedCurrentBalance: formatCurrency(account.currentBalance),
-      formattedAvailableCredit: formatCurrency(account.availableCredit),
-      formattedMinimumPayment: formatCurrency(account.minimumPayment)
+    // Get accounts from database
+    const accountsResult = await AccountModel.findAll(dbFilters, page, limit, 'created_at', 'DESC');
+    
+    debugLogger.debug('Retrieved accounts from database', {
+      requestId: req.requestId,
+      totalAccounts: accountsResult.total,
+      returnedAccounts: accountsResult.accounts.length,
+      page: accountsResult.page,
+      totalPages: accountsResult.totalPages
+    });
+
+    const { accounts, total: totalCount } = accountsResult;
+
+    debugLogger.debug('Applied pagination', {
+      requestId: req.requestId,
+      totalCount,
+      returnedCount: paginatedAccounts.length,
+      page,
+      limit,
+      offset
+    });
+
+    // Format response with currency formatting and field mapping
+    const formattedAccounts = accounts.map(account => ({
+      id: account.id,
+      userId: account.user_id,
+      accountNumber: account.account_number,
+      accountType: account.account_type,
+      status: account.status,
+      creditLimit: parseFloat(account.credit_limit),
+      currentBalance: parseFloat(account.current_balance),
+      availableCredit: parseFloat(account.available_credit),
+      minimumPayment: parseFloat(account.minimum_payment),
+      paymentDueDate: account.payment_due_date,
+      interestRate: parseFloat(account.interest_rate),
+      createdAt: account.created_at,
+      updatedAt: account.updated_at,
+      // User info from join
+      customerName: `${account.first_name} ${account.last_name}`,
+      customerEmail: account.email,
+      // Formatted currency fields
+      formattedCreditLimit: formatCurrency(account.credit_limit),
+      formattedCurrentBalance: formatCurrency(account.current_balance),
+      formattedAvailableCredit: formatCurrency(account.available_credit),
+      formattedMinimumPayment: formatCurrency(account.minimum_payment)
     }));
 
     // Apply security sanitization
     const sanitizedAccounts = SecurityUtils.sanitizeDataForRole(user, 'accounts', formattedAccounts);
 
     const response = createPaginatedResponse(sanitizedAccounts, totalCount, page, limit);
+
+    const duration = Date.now() - startTime;
+    debugLogger.performance('Accounts list retrieved', duration, {
+      requestId: req.requestId,
+      accountsReturned: sanitizedAccounts.length,
+      totalAccounts: totalCount
+    });
+
+    logBusinessOperation('Accounts list accessed', {
+      userId: user.userId,
+      role: user.role,
+      accountsReturned: sanitizedAccounts.length,
+      requestId: req.requestId
+    });
 
     res.json({
       message: 'Accounts retrieved successfully',
@@ -100,6 +172,12 @@ router.get('/', auth, createResourceSecurityMiddleware('accounts', 'read'), vali
       }
     });
   } catch (error) {
+    logError(error, {
+      requestId: req.requestId,
+      operation: 'GET /accounts',
+      userId: req.user?.userId
+    });
+    
     console.error('Get accounts error:', error);
     res.status(500).json({
       error: 'Failed to retrieve accounts',
@@ -111,15 +189,36 @@ router.get('/', auth, createResourceSecurityMiddleware('accounts', 'read'), vali
 // GET /api/v1/accounts/:id
 router.get('/:id', auth, createResourceSecurityMiddleware('accounts', 'read', { requireItemAccess: true }), (req, res) => {
   try {
+    const startTime = Date.now();
     const account = mockData.accounts.get(req.params.id);
     const { user } = req;
 
+    debugLogger.info('Fetching specific account', {
+      requestId: req.requestId,
+      accountId: req.params.id,
+      userId: user.userId,
+      role: user.role
+    });
+
     if (!account) {
+      debugLogger.warn('Account not found', {
+        requestId: req.requestId,
+        accountId: req.params.id,
+        userId: user.userId
+      });
+      
       return res.status(404).json({
         error: 'Account not found',
         message: 'Account not found'
       });
     }
+
+    debugLogger.debug('Account found in data source', {
+      requestId: req.requestId,
+      accountId: account.id,
+      accountType: account.accountType,
+      accountStatus: account.status
+    });
 
     // Check if user can access this specific account
     if (!SecurityUtils.canAccessResourceItem(user, 'accounts', account)) {
@@ -132,16 +231,35 @@ router.get('/:id', auth, createResourceSecurityMiddleware('accounts', 'read', { 
         { reason: 'item_access_denied', accountId: req.params.id }
       );
       
+      debugLogger.security('Account access denied', {
+        requestId: req.requestId,
+        accountId: req.params.id,
+        userId: user.userId,
+        reason: 'item_access_denied'
+      });
+      
       return res.status(403).json({
         error: 'Access denied',
         message: 'You can only access your own accounts'
       });
     }
 
+    debugLogger.debug('Account access authorized', {
+      requestId: req.requestId,
+      accountId: account.id,
+      userId: user.userId
+    });
+
     // Get recent transactions
     const recentTransactions = findTransactionsByAccountId(account.id)
       .sort((a, b) => new Date(b.transactionDate) - new Date(a.transactionDate))
       .slice(0, 5);
+
+    debugLogger.debug('Retrieved recent transactions', {
+      requestId: req.requestId,
+      accountId: account.id,
+      transactionCount: recentTransactions.length
+    });
 
     // Format response with currency formatting
     const formattedAccount = {
@@ -159,6 +277,20 @@ router.get('/:id', auth, createResourceSecurityMiddleware('accounts', 'read', { 
     // Apply security sanitization
     const sanitizedAccount = SecurityUtils.sanitizeDataForRole(user, 'accounts', formattedAccount);
 
+    const duration = Date.now() - startTime;
+    debugLogger.performance('Account details retrieved', duration, {
+      requestId: req.requestId,
+      accountId: account.id,
+      includesTransactions: recentTransactions.length > 0
+    });
+
+    logBusinessOperation('Account details accessed', {
+      userId: user.userId,
+      accountId: account.id,
+      accountType: account.accountType,
+      requestId: req.requestId
+    });
+
     res.json({
       message: 'Account retrieved successfully',
       account: sanitizedAccount,
@@ -167,6 +299,13 @@ router.get('/:id', auth, createResourceSecurityMiddleware('accounts', 'read', { 
       }
     });
   } catch (error) {
+    logError(error, {
+      requestId: req.requestId,
+      operation: 'GET /accounts/:id',
+      accountId: req.params.id,
+      userId: req.user?.userId
+    });
+    
     console.error('Get account error:', error);
     res.status(500).json({
       error: 'Failed to retrieve account',
