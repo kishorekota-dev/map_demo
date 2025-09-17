@@ -1,0 +1,704 @@
+openapi: 3.0.3
+info:
+  title: POC Chat Backend Service
+  description: |
+    Chat Backend Service for POC Banking System providing real-time chat functionality,
+    WebSocket connections, message processing, and integration with AI services.
+    
+    ## Features
+    - Real-time WebSocket chat connections
+    - Message queue processing with Redis
+    - AI-enhanced conversation flows
+    - Chat session management
+    - Message history and persistence
+    - Agent escalation workflows
+    - Multi-channel support (web, mobile, agent)
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3006
+    description: Development server
+  - url: https://chat-backend.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Chat Sessions
+  /api/sessions:
+    get:
+      tags: [Sessions]
+      summary: Get user chat sessions
+      description: Retrieve all chat sessions for the authenticated user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed, escalated]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Chat sessions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatSession'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags: [Sessions]
+      summary: Create new chat session
+      description: Initialize a new chat session for the user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Chat session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+  /api/sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: Get specific chat session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chat session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+        '404':
+          description: Session not found
+
+    patch:
+      tags: [Sessions]
+      summary: Update chat session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSessionRequest'
+      responses:
+        '200':
+          description: Session updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+    delete:
+      tags: [Sessions]
+      summary: End chat session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session ended successfully
+
+  # Messages
+  /api/sessions/{sessionId}/messages:
+    get:
+      tags: [Messages]
+      summary: Get session messages
+      description: Retrieve message history for a chat session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Get messages before this timestamp
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Get messages after this timestamp
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+    post:
+      tags: [Messages]
+      summary: Send message
+      description: Send a new message in the chat session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '201':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+
+  # WebSocket Connection
+  /ws/chat/{sessionId}:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket chat connection
+      description: |
+        Establish WebSocket connection for real-time chat.
+        
+        **Connection Flow:**
+        1. Authenticate with JWT token in query param or header
+        2. Join specific session room
+        3. Receive real-time messages and events
+        
+        **Events Sent:**
+        - `message`: New chat message
+        - `typing`: User typing indicator
+        - `agent_joined`: Agent joined the conversation
+        - `session_escalated`: Session escalated to human agent
+        - `ai_response`: AI-generated response
+        
+        **Events Received:**
+        - `send_message`: Send a new message
+        - `start_typing`: Start typing indicator
+        - `stop_typing`: Stop typing indicator
+        - `request_escalation`: Request human agent
+        
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JWT authentication token
+      responses:
+        '101':
+          description: WebSocket connection established
+        '401':
+          description: Authentication failed
+        '404':
+          description: Session not found
+
+  # Agent Operations
+  /api/agents/sessions:
+    get:
+      tags: [Agent Operations]
+      summary: Get assigned agent sessions
+      description: Get chat sessions assigned to the authenticated agent
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, completed]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, urgent]
+      responses:
+        '200':
+          description: Agent sessions retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentSession'
+
+  /api/agents/sessions/{sessionId}/join:
+    post:
+      tags: [Agent Operations]
+      summary: Join chat session as agent
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent joined session successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+  # AI Integration
+  /api/ai/process:
+    post:
+      tags: [AI Integration]
+      summary: Process message with AI
+      description: Send message to AI service for processing and response generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIProcessRequest'
+      responses:
+        '200':
+          description: AI processing completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProcessResponse'
+
+  # Chat Analytics
+  /api/analytics/sessions:
+    get:
+      tags: [Analytics]
+      summary: Get session analytics
+      description: Retrieve analytics data for chat sessions
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month]
+      responses:
+        '200':
+          description: Analytics data retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAnalytics'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        connections:
+          type: object
+          properties:
+            websocket:
+              type: integer
+            redis:
+              type: string
+              enum: [connected, disconnected]
+            database:
+              type: string
+              enum: [connected, disconnected]
+
+    ChatSession:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        agentId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, completed, escalated, waiting]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        channel:
+          type: string
+          enum: [web, mobile, agent]
+        subject:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastMessage:
+          $ref: '#/components/schemas/ChatMessage'
+        messageCount:
+          type: integer
+        waitTime:
+          type: integer
+          description: Wait time in seconds
+        responseTime:
+          type: integer
+          description: Average response time in seconds
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        senderId:
+          type: string
+        senderType:
+          type: string
+          enum: [user, agent, system, ai]
+        content:
+          type: string
+        messageType:
+          type: string
+          enum: [text, image, file, system, ai_response]
+        metadata:
+          type: object
+          properties:
+            aiProcessed:
+              type: boolean
+            sentiment:
+              type: string
+              enum: [positive, negative, neutral]
+            intent:
+              type: string
+            confidence:
+              type: number
+            tools:
+              type: array
+              items:
+                type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageAttachment'
+        timestamp:
+          type: string
+          format: date-time
+        readBy:
+          type: array
+          items:
+            type: object
+            properties:
+              userId:
+                type: string
+              readAt:
+                type: string
+                format: date-time
+
+    MessageAttachment:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+
+    CreateSessionRequest:
+      type: object
+      required: [channel]
+      properties:
+        channel:
+          type: string
+          enum: [web, mobile, agent]
+        subject:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          default: medium
+        metadata:
+          type: object
+          additionalProperties: true
+
+    UpdateSessionRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, completed, escalated, waiting]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        agentId:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        messageType:
+          type: string
+          enum: [text, image, file]
+          default: text
+        attachments:
+          type: array
+          items:
+            type: string
+            description: Attachment IDs
+        metadata:
+          type: object
+          additionalProperties: true
+
+    AgentSession:
+      allOf:
+        - $ref: '#/components/schemas/ChatSession'
+        - type: object
+          properties:
+            assignedAt:
+              type: string
+              format: date-time
+            escalationReason:
+              type: string
+            customerInfo:
+              type: object
+              properties:
+                name:
+                  type: string
+                accountNumber:
+                  type: string
+                tier:
+                  type: string
+                  enum: [basic, premium, vip]
+
+    AIProcessRequest:
+      type: object
+      required: [sessionId, message]
+      properties:
+        sessionId:
+          type: string
+        message:
+          type: string
+        context:
+          type: object
+          properties:
+            conversationHistory:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChatMessage'
+            userProfile:
+              type: object
+              additionalProperties: true
+            sessionMetadata:
+              type: object
+              additionalProperties: true
+
+    AIProcessResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        intent:
+          type: string
+        confidence:
+          type: number
+        sentiment:
+          type: string
+          enum: [positive, negative, neutral]
+        requiredActions:
+          type: array
+          items:
+            type: string
+        toolsUsed:
+          type: array
+          items:
+            type: string
+        escalationRecommended:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ChatAnalytics:
+      type: object
+      properties:
+        totalSessions:
+          type: integer
+        activeSessions:
+          type: integer
+        completedSessions:
+          type: integer
+        escalatedSessions:
+          type: integer
+        averageWaitTime:
+          type: number
+        averageResponseTime:
+          type: number
+        averageSessionDuration:
+          type: number
+        customerSatisfactionScore:
+          type: number
+        agentUtilization:
+          type: number
+        peakHours:
+          type: array
+          items:
+            type: object
+            properties:
+              hour:
+                type: integer
+              sessionCount:
+                type: integer
+        topIntents:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+              count:
+                type: integer
+              percentage:
+                type: number
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+tags:
+  - name: Health
+    description: Health checks and status monitoring
+  - name: Sessions
+    description: Chat session management
+  - name: Messages
+    description: Chat message operations
+  - name: WebSocket
+    description: Real-time WebSocket connections
+  - name: Agent Operations
+    description: Agent-specific operations
+  - name: AI Integration
+    description: AI service integration
+  - name: Analytics
+    description: Chat analytics and reporting

@@ -1,0 +1,1717 @@
+openapi: 3.0.3
+info:
+  title: POC Agent UI (Agent Dashboard)
+  description: |
+    Agent Dashboard and UI for POC Banking Chat System providing comprehensive
+    agent interface for managing customer conversations, queue management, and
+    banking operations support.
+    
+    ## Features
+    - Real-time agent dashboard with queue management
+    - Multi-conversation handling and context switching
+    - Customer information and account access
+    - Agent collaboration and escalation tools
+    - Performance analytics and reporting
+    - AI assistance and suggested responses
+    - Case management and resolution tracking
+    - Agent training and knowledge base access
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3007
+    description: Development server
+  - url: https://agents.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - SessionAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Application health check
+      security: []
+      responses:
+        '200':
+          description: Application is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Agent Authentication
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Agent login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentLoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAuthResponse'
+        '401':
+          description: Invalid credentials
+
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Agent logout
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # Agent Profile and Status
+  /api/agent/profile:
+    get:
+      tags: [Agent Profile]
+      summary: Get agent profile
+      responses:
+        '200':
+          description: Agent profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+
+    patch:
+      tags: [Agent Profile]
+      summary: Update agent profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentProfileRequest'
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProfile'
+
+  /api/agent/status:
+    get:
+      tags: [Agent Profile]
+      summary: Get agent status
+      responses:
+        '200':
+          description: Agent status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+
+    patch:
+      tags: [Agent Profile]
+      summary: Update agent status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentStatusRequest'
+      responses:
+        '200':
+          description: Status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+
+  # Queue Management
+  /api/queue:
+    get:
+      tags: [Queue Management]
+      summary: Get conversation queue
+      description: Retrieve pending and assigned conversations for the agent
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, assigned, active, completed]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, urgent]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Queue retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QueueConversation'
+                  stats:
+                    $ref: '#/components/schemas/QueueStats'
+
+  /api/queue/next:
+    post:
+      tags: [Queue Management]
+      summary: Get next conversation from queue
+      description: Automatically assign the next highest priority conversation
+      responses:
+        '200':
+          description: Next conversation assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueConversation'
+        '204':
+          description: No conversations available in queue
+
+  # Conversation Management
+  /api/conversations:
+    get:
+      tags: [Conversations]
+      summary: Get agent conversations
+      description: Retrieve all conversations assigned to or handled by the agent
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed, escalated, transferred]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: customerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversations retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentConversation'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /api/conversations/{conversationId}:
+    get:
+      tags: [Conversations]
+      summary: Get conversation details
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetails'
+
+    patch:
+      tags: [Conversations]
+      summary: Update conversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConversationRequest'
+      responses:
+        '200':
+          description: Conversation updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentConversation'
+
+  /api/conversations/{conversationId}/join:
+    post:
+      tags: [Conversations]
+      summary: Join conversation
+      description: Assign the conversation to the agent and join it
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successfully joined conversation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetails'
+
+  /api/conversations/{conversationId}/transfer:
+    post:
+      tags: [Conversations]
+      summary: Transfer conversation
+      description: Transfer conversation to another agent or queue
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferConversationRequest'
+      responses:
+        '200':
+          description: Conversation transferred successfully
+
+  /api/conversations/{conversationId}/escalate:
+    post:
+      tags: [Conversations]
+      summary: Escalate conversation
+      description: Escalate conversation to supervisor or specialist
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalateConversationRequest'
+      responses:
+        '200':
+          description: Conversation escalated successfully
+
+  /api/conversations/{conversationId}/resolve:
+    post:
+      tags: [Conversations]
+      summary: Resolve conversation
+      description: Mark conversation as resolved and close it
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveConversationRequest'
+      responses:
+        '200':
+          description: Conversation resolved successfully
+
+  # Message Management
+  /api/conversations/{conversationId}/messages:
+    get:
+      tags: [Messages]
+      summary: Get conversation messages
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConversationMessage'
+
+    post:
+      tags: [Messages]
+      summary: Send message
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendAgentMessageRequest'
+      responses:
+        '201':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationMessage'
+
+  # Customer Information
+  /api/customers/{customerId}:
+    get:
+      tags: [Customer Information]
+      summary: Get customer information
+      description: Retrieve comprehensive customer information for agent view
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Customer information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerInfo'
+
+  /api/customers/{customerId}/accounts:
+    get:
+      tags: [Customer Information]
+      summary: Get customer accounts
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Customer accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomerAccount'
+
+  /api/customers/{customerId}/history:
+    get:
+      tags: [Customer Information]
+      summary: Get customer interaction history
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [chat, call, email, branch]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Customer history retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomerInteraction'
+
+  # AI Assistance
+  /api/ai/suggestions:
+    post:
+      tags: [AI Assistance]
+      summary: Get AI response suggestions
+      description: Get AI-powered response suggestions based on conversation context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AISuggestionRequest'
+      responses:
+        '200':
+          description: AI suggestions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISuggestionResponse'
+
+  /api/ai/summarize:
+    post:
+      tags: [AI Assistance]
+      summary: Summarize conversation
+      description: Generate AI-powered conversation summary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummarizeRequest'
+      responses:
+        '200':
+          description: Conversation summarized successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummarizeResponse'
+
+  # Knowledge Base
+  /api/knowledge/search:
+    get:
+      tags: [Knowledge Base]
+      summary: Search knowledge base
+      description: Search internal knowledge base for relevant information
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [policies, procedures, products, troubleshooting]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Knowledge base search completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KnowledgeItem'
+
+  /api/knowledge/articles/{articleId}:
+    get:
+      tags: [Knowledge Base]
+      summary: Get knowledge article
+      parameters:
+        - name: articleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Knowledge article retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeArticle'
+
+  # Agent Analytics
+  /api/analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Get agent dashboard analytics
+      description: Retrieve performance metrics and analytics for the agent
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [today, week, month, quarter]
+            default: today
+      responses:
+        '200':
+          description: Analytics dashboard retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAnalytics'
+
+  /api/analytics/performance:
+    get:
+      tags: [Analytics]
+      summary: Get performance metrics
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Performance metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceMetrics'
+
+  # Notifications and Alerts
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: Get agent notifications
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unread, read, all]
+            default: all
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [queue, escalation, system, training]
+      responses:
+        '200':
+          description: Notifications retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentNotification'
+                  unread_count:
+                    type: integer
+
+  # Settings and Preferences
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Get agent settings
+      responses:
+        '200':
+          description: Agent settings retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSettings'
+
+    patch:
+      tags: [Settings]
+      summary: Update agent settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentSettingsRequest'
+      responses:
+        '200':
+          description: Settings updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSettings'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: agent_session_id
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        environment:
+          type: string
+        dependencies:
+          type: object
+          properties:
+            api_gateway:
+              type: string
+              enum: [connected, disconnected]
+            chat_backend:
+              type: string
+              enum: [connected, disconnected]
+            websocket:
+              type: string
+              enum: [connected, disconnected]
+
+    AgentLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "agent@example.com"
+        password:
+          type: string
+          format: password
+        remember_me:
+          type: boolean
+          default: false
+        device_info:
+          type: object
+          properties:
+            device_id:
+              type: string
+            platform:
+              type: string
+            browser:
+              type: string
+
+    AgentAuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+        agent:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            name:
+              type: string
+            employee_id:
+              type: string
+            department:
+              type: string
+            role:
+              type: string
+            permissions:
+              type: array
+              items:
+                type: string
+            last_login:
+              type: string
+              format: date-time
+
+    AgentProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        employee_id:
+          type: string
+        email:
+          type: string
+        name:
+          type: object
+          properties:
+            first:
+              type: string
+            last:
+              type: string
+        department:
+          type: string
+          enum: [customer_service, technical_support, sales, compliance]
+        role:
+          type: string
+          enum: [agent, senior_agent, supervisor, manager]
+        specializations:
+          type: array
+          items:
+            type: string
+            enum: [general, banking, technical, fraud, vip]
+        languages:
+          type: array
+          items:
+            type: string
+        hire_date:
+          type: string
+          format: date
+        certifications:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              issued_date:
+                type: string
+                format: date
+              expires_date:
+                type: string
+                format: date
+        contact:
+          type: object
+          properties:
+            phone:
+              type: string
+            extension:
+              type: string
+            location:
+              type: string
+
+    UpdateAgentProfileRequest:
+      type: object
+      properties:
+        name:
+          type: object
+        contact:
+          type: object
+        specializations:
+          type: array
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            type: string
+
+    AgentStatus:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        status:
+          type: string
+          enum: [online, away, busy, offline]
+        availability:
+          type: string
+          enum: [available, unavailable, break, lunch, training]
+        current_conversations:
+          type: integer
+        max_conversations:
+          type: integer
+        queue_assignments:
+          type: array
+          items:
+            type: string
+        status_message:
+          type: string
+        last_activity:
+          type: string
+          format: date-time
+        shift:
+          type: object
+          properties:
+            start_time:
+              type: string
+              format: time
+            end_time:
+              type: string
+              format: time
+            timezone:
+              type: string
+
+    UpdateAgentStatusRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [online, away, busy, offline]
+        availability:
+          type: string
+          enum: [available, unavailable, break, lunch, training]
+        status_message:
+          type: string
+        max_conversations:
+          type: integer
+
+    QueueConversation:
+      type: object
+      properties:
+        id:
+          type: string
+        customer_id:
+          type: string
+        customer_name:
+          type: string
+        customer_tier:
+          type: string
+          enum: [basic, premium, vip]
+        subject:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        estimated_wait_time:
+          type: integer
+          description: Wait time in seconds
+        created_at:
+          type: string
+          format: date-time
+        last_message:
+          type: string
+        category:
+          type: string
+        language:
+          type: string
+        channel:
+          type: string
+          enum: [web, mobile, phone, email]
+        metadata:
+          type: object
+          properties:
+            previous_interactions:
+              type: integer
+            account_issues:
+              type: boolean
+            technical_issue:
+              type: boolean
+
+    QueueStats:
+      type: object
+      properties:
+        total_in_queue:
+          type: integer
+        my_assigned:
+          type: integer
+        average_wait_time:
+          type: integer
+        longest_wait_time:
+          type: integer
+        by_priority:
+          type: object
+          properties:
+            urgent:
+              type: integer
+            high:
+              type: integer
+            medium:
+              type: integer
+            low:
+              type: integer
+
+    AgentConversation:
+      type: object
+      properties:
+        id:
+          type: string
+        customer_id:
+          type: string
+        customer_name:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, escalated, transferred, paused]
+        subject:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        created_at:
+          type: string
+          format: date-time
+        assigned_at:
+          type: string
+          format: date-time
+        last_activity:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+          description: Duration in seconds
+        message_count:
+          type: integer
+        unread_messages:
+          type: integer
+        category:
+          type: string
+        resolution_status:
+          type: string
+          enum: [pending, resolved, escalated, transferred]
+        satisfaction_score:
+          type: number
+          minimum: 1
+          maximum: 5
+
+    ConversationDetails:
+      allOf:
+        - $ref: '#/components/schemas/AgentConversation'
+        - type: object
+          properties:
+            customer_info:
+              $ref: '#/components/schemas/CustomerInfo'
+            conversation_history:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConversationMessage'
+            notes:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  content:
+                    type: string
+                  created_by:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  visibility:
+                    type: string
+                    enum: [private, team, public]
+            tags:
+              type: array
+              items:
+                type: string
+            escalation_history:
+              type: array
+              items:
+                type: object
+                properties:
+                  escalated_to:
+                    type: string
+                  reason:
+                    type: string
+                  escalated_at:
+                    type: string
+                    format: date-time
+                  resolved_at:
+                    type: string
+                    format: date-time
+
+    UpdateConversationRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, paused, completed]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+
+    TransferConversationRequest:
+      type: object
+      required: [transfer_type]
+      properties:
+        transfer_type:
+          type: string
+          enum: [agent, queue, department]
+        target_agent_id:
+          type: string
+        target_queue:
+          type: string
+        target_department:
+          type: string
+        reason:
+          type: string
+        notes:
+          type: string
+        customer_notification:
+          type: boolean
+          default: true
+
+    EscalateConversationRequest:
+      type: object
+      required: [escalation_type, reason]
+      properties:
+        escalation_type:
+          type: string
+          enum: [supervisor, specialist, management]
+        reason:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [medium, high, urgent]
+        requested_specialist:
+          type: string
+
+    ResolveConversationRequest:
+      type: object
+      required: [resolution_type]
+      properties:
+        resolution_type:
+          type: string
+          enum: [resolved, transferred, escalated, cancelled]
+        resolution_notes:
+          type: string
+        customer_satisfaction:
+          type: integer
+          minimum: 1
+          maximum: 5
+        follow_up_required:
+          type: boolean
+        follow_up_date:
+          type: string
+          format: date
+        tags:
+          type: array
+          items:
+            type: string
+
+    ConversationMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        conversation_id:
+          type: string
+        sender_type:
+          type: string
+          enum: [customer, agent, system, ai]
+        sender_id:
+          type: string
+        sender_name:
+          type: string
+        content:
+          type: string
+        message_type:
+          type: string
+          enum: [text, image, file, system, ai_suggestion]
+        timestamp:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+        edited:
+          type: boolean
+        edited_at:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              filename:
+                type: string
+              url:
+                type: string
+              size:
+                type: integer
+              mime_type:
+                type: string
+        metadata:
+          type: object
+          properties:
+            ai_generated:
+              type: boolean
+            sentiment:
+              type: string
+            intent:
+              type: string
+
+    SendAgentMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        message_type:
+          type: string
+          enum: [text, image, file, system]
+          default: text
+        attachments:
+          type: array
+          items:
+            type: string
+        internal_note:
+          type: boolean
+          default: false
+        ai_assisted:
+          type: boolean
+          default: false
+
+    CustomerInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: object
+          properties:
+            first:
+              type: string
+            last:
+              type: string
+            full:
+              type: string
+        email:
+          type: string
+        phone:
+          type: string
+        tier:
+          type: string
+          enum: [basic, premium, vip]
+        customer_since:
+          type: string
+          format: date
+        account_summary:
+          type: object
+          properties:
+            total_accounts:
+              type: integer
+            total_balance:
+              type: number
+            primary_account:
+              type: string
+        risk_profile:
+          type: string
+          enum: [low, medium, high]
+        preferences:
+          type: object
+          properties:
+            communication_method:
+              type: string
+            language:
+              type: string
+            timezone:
+              type: string
+        flags:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [fraud_alert, vip, complaint, deceased]
+              description:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+
+    CustomerAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        account_number:
+          type: string
+        type:
+          type: string
+          enum: [checking, savings, credit, investment, loan]
+        name:
+          type: string
+        balance:
+          type: number
+        available_balance:
+          type: number
+        status:
+          type: string
+          enum: [active, inactive, frozen, closed]
+        opened_date:
+          type: string
+          format: date
+        last_activity:
+          type: string
+          format: date-time
+        flags:
+          type: array
+          items:
+            type: string
+
+    CustomerInteraction:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [chat, call, email, branch, online]
+        subject:
+          type: string
+        summary:
+          type: string
+        agent_name:
+          type: string
+        department:
+          type: string
+        status:
+          type: string
+          enum: [completed, escalated, pending]
+        created_at:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+        resolution:
+          type: string
+        satisfaction_score:
+          type: number
+
+    AISuggestionRequest:
+      type: object
+      required: [conversation_id, context]
+      properties:
+        conversation_id:
+          type: string
+        context:
+          type: object
+          properties:
+            recent_messages:
+              type: array
+              items:
+                type: object
+            customer_info:
+              type: object
+            intent:
+              type: string
+        suggestion_type:
+          type: string
+          enum: [response, action, escalation, knowledge]
+          default: response
+        tone:
+          type: string
+          enum: [professional, friendly, empathetic, direct]
+          default: professional
+
+    AISuggestionResponse:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [response, action, escalation, knowledge]
+              content:
+                type: string
+              confidence:
+                type: number
+              reasoning:
+                type: string
+        recommended_actions:
+          type: array
+          items:
+            type: object
+            properties:
+              action:
+                type: string
+              description:
+                type: string
+              priority:
+                type: string
+        knowledge_articles:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              relevance_score:
+                type: number
+
+    SummarizeRequest:
+      type: object
+      required: [conversation_id]
+      properties:
+        conversation_id:
+          type: string
+        include_actions:
+          type: boolean
+          default: true
+        include_sentiment:
+          type: boolean
+          default: true
+
+    SummarizeResponse:
+      type: object
+      properties:
+        summary:
+          type: string
+        key_points:
+          type: array
+          items:
+            type: string
+        actions_taken:
+          type: array
+          items:
+            type: string
+        customer_sentiment:
+          type: string
+          enum: [positive, negative, neutral]
+        resolution_status:
+          type: string
+        follow_up_required:
+          type: boolean
+
+    KnowledgeItem:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        category:
+          type: string
+        relevance_score:
+          type: number
+        last_updated:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+
+    KnowledgeArticle:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        category:
+          type: string
+        subcategory:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        author:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: string
+        approval_status:
+          type: string
+          enum: [draft, approved, archived]
+        related_articles:
+          type: array
+          items:
+            type: string
+
+    AgentAnalytics:
+      type: object
+      properties:
+        performance:
+          type: object
+          properties:
+            conversations_handled:
+              type: integer
+            average_resolution_time:
+              type: number
+            customer_satisfaction:
+              type: number
+            first_contact_resolution:
+              type: number
+        productivity:
+          type: object
+          properties:
+            time_online:
+              type: integer
+            time_in_conversation:
+              type: integer
+            utilization_rate:
+              type: number
+            response_time:
+              type: number
+        quality:
+          type: object
+          properties:
+            escalation_rate:
+              type: number
+            transfer_rate:
+              type: number
+            compliance_score:
+              type: number
+        goals:
+          type: object
+          properties:
+            daily_conversations:
+              type: object
+              properties:
+                target:
+                  type: integer
+                achieved:
+                  type: integer
+            satisfaction_target:
+              type: object
+              properties:
+                target:
+                  type: number
+                achieved:
+                  type: number
+
+    PerformanceMetrics:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            start_date:
+              type: string
+              format: date
+            end_date:
+              type: string
+              format: date
+        metrics:
+          type: object
+          properties:
+            total_conversations:
+              type: integer
+            completed_conversations:
+              type: integer
+            average_handle_time:
+              type: number
+            average_response_time:
+              type: number
+            customer_satisfaction_score:
+              type: number
+            first_contact_resolution_rate:
+              type: number
+            escalation_rate:
+              type: number
+        comparisons:
+          type: object
+          properties:
+            previous_period:
+              type: object
+            team_average:
+              type: object
+            department_average:
+              type: object
+
+    AgentNotification:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [queue, escalation, system, training, announcement]
+        title:
+          type: string
+        message:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        action_url:
+          type: string
+        action_required:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+
+    AgentSettings:
+      type: object
+      properties:
+        general:
+          type: object
+          properties:
+            language:
+              type: string
+            timezone:
+              type: string
+            theme:
+              type: string
+              enum: [light, dark, auto]
+        notifications:
+          type: object
+          properties:
+            new_conversation:
+              type: boolean
+            escalation:
+              type: boolean
+            queue_updates:
+              type: boolean
+            system_announcements:
+              type: boolean
+            sound_alerts:
+              type: boolean
+        conversation:
+          type: object
+          properties:
+            auto_accept:
+              type: boolean
+            max_concurrent:
+              type: integer
+            typing_indicator:
+              type: boolean
+            read_receipts:
+              type: boolean
+        ai_assistance:
+          type: object
+          properties:
+            enable_suggestions:
+              type: boolean
+            auto_summarize:
+              type: boolean
+            sentiment_analysis:
+              type: boolean
+
+    UpdateAgentSettingsRequest:
+      type: object
+      properties:
+        general:
+          type: object
+        notifications:
+          type: object
+        conversation:
+          type: object
+        ai_assistance:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+tags:
+  - name: Health
+    description: Application health and status
+  - name: Authentication
+    description: Agent authentication and session management
+  - name: Agent Profile
+    description: Agent profile and status management
+  - name: Queue Management
+    description: Conversation queue and assignment
+  - name: Conversations
+    description: Conversation management and operations
+  - name: Messages
+    description: Message handling and communication
+  - name: Customer Information
+    description: Customer data and account access
+  - name: AI Assistance
+    description: AI-powered agent assistance tools
+  - name: Knowledge Base
+    description: Knowledge management and search
+  - name: Analytics
+    description: Agent performance and analytics
+  - name: Notifications
+    description: Agent notifications and alerts
+  - name: Settings
+    description: Agent preferences and configuration

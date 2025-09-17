@@ -1,0 +1,1120 @@
+openapi: 3.0.3
+info:
+  title: POC MCP Service (Model Context Protocol)
+  description: |
+    Model Context Protocol Service for POC Banking Chat System providing tool calling,
+    function execution, and integration with banking operations through standardized
+    MCP protocol implementation.
+    
+    ## Features
+    - MCP-compliant tool registration and discovery
+    - Secure function execution sandbox
+    - Banking operation tools (balance, transfer, payment)
+    - Account management and transaction tools
+    - Real-time tool execution monitoring
+    - Tool result caching and optimization
+    - Error handling and fallback mechanisms
+    - Audit logging for all tool executions
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3004
+    description: Development server
+  - url: https://mcp-service.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # MCP Protocol Implementation
+  /api/mcp/initialize:
+    post:
+      tags: [MCP Protocol]
+      summary: Initialize MCP connection
+      description: Initialize MCP protocol connection and capabilities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPInitializeRequest'
+      responses:
+        '200':
+          description: MCP connection initialized successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPInitializeResponse'
+
+  /api/mcp/tools:
+    get:
+      tags: [MCP Protocol]
+      summary: List available tools
+      description: Get list of all available MCP tools and their schemas
+      responses:
+        '200':
+          description: Tools retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPTool'
+
+  /api/mcp/tools/{toolName}/call:
+    post:
+      tags: [MCP Protocol]
+      summary: Execute MCP tool
+      description: Execute a specific MCP tool with provided parameters
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "get_account_balance"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPToolCallRequest'
+      responses:
+        '200':
+          description: Tool executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPToolCallResponse'
+        '400':
+          description: Invalid tool parameters
+        '404':
+          description: Tool not found
+        '500':
+          description: Tool execution failed
+
+  # Banking Tools
+  /api/tools/banking/accounts:
+    post:
+      tags: [Banking Tools]
+      summary: Execute account-related tools
+      description: Execute banking tools related to account operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BankingToolRequest'
+      responses:
+        '200':
+          description: Banking tool executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BankingToolResponse'
+
+  /api/tools/banking/transactions:
+    post:
+      tags: [Banking Tools]
+      summary: Execute transaction-related tools
+      description: Execute banking tools related to transaction operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionToolRequest'
+      responses:
+        '200':
+          description: Transaction tool executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionToolResponse'
+
+  /api/tools/banking/transfers:
+    post:
+      tags: [Banking Tools]
+      summary: Execute transfer-related tools
+      description: Execute banking tools related to money transfer operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferToolRequest'
+      responses:
+        '200':
+          description: Transfer tool executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferToolResponse'
+
+  # Tool Management
+  /api/tools/register:
+    post:
+      tags: [Tool Management]
+      summary: Register new tool
+      description: Register a new MCP tool with the service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterToolRequest'
+      responses:
+        '201':
+          description: Tool registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPTool'
+
+  /api/tools/{toolId}:
+    get:
+      tags: [Tool Management]
+      summary: Get tool details
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tool details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPTool'
+
+    put:
+      tags: [Tool Management]
+      summary: Update tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateToolRequest'
+      responses:
+        '200':
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPTool'
+
+    delete:
+      tags: [Tool Management]
+      summary: Unregister tool
+      parameters:
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tool unregistered successfully
+
+  # Tool Execution History
+  /api/executions:
+    get:
+      tags: [Execution History]
+      summary: Get tool execution history
+      description: Retrieve history of tool executions with filtering options
+      parameters:
+        - name: toolName
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [success, failure, timeout, cancelled]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Execution history retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  executions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ToolExecution'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /api/executions/{executionId}:
+    get:
+      tags: [Execution History]
+      summary: Get execution details
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolExecutionDetails'
+
+  # Tool Analytics
+  /api/analytics/tools:
+    get:
+      tags: [Analytics]
+      summary: Get tool analytics
+      description: Retrieve analytics data for tool usage and performance
+      parameters:
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [1h, 24h, 7d, 30d]
+            default: 24h
+        - name: toolName
+          in: query
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [hour, day, week]
+            default: hour
+      responses:
+        '200':
+          description: Tool analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolAnalytics'
+
+  # Resource Management
+  /api/resources:
+    get:
+      tags: [Resources]
+      summary: List available resources
+      description: Get list of all available MCP resources
+      responses:
+        '200':
+          description: Resources retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPResource'
+
+  /api/resources/{resourceUri}:
+    get:
+      tags: [Resources]
+      summary: Get resource content
+      description: Retrieve content of a specific MCP resource
+      parameters:
+        - name: resourceUri
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "mcp://banking/accounts/summary"
+      responses:
+        '200':
+          description: Resource content retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPResourceContent'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        mcp:
+          type: object
+          properties:
+            protocol_version:
+              type: string
+            connection_status:
+              type: string
+              enum: [connected, disconnected]
+            registered_tools:
+              type: integer
+            active_executions:
+              type: integer
+        resources:
+          type: object
+          properties:
+            cpu_usage:
+              type: number
+            memory_usage:
+              type: number
+            disk_usage:
+              type: number
+
+    MCPInitializeRequest:
+      type: object
+      required: [clientInfo]
+      properties:
+        clientInfo:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "POC Banking Chat"
+            version:
+              type: string
+              example: "1.0.0"
+        capabilities:
+          type: object
+          properties:
+            experimental:
+              type: object
+              additionalProperties: true
+            sampling:
+              type: object
+              additionalProperties: true
+
+    MCPInitializeResponse:
+      type: object
+      properties:
+        protocolVersion:
+          type: string
+          example: "2024-11-05"
+        serverInfo:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "POC MCP Banking Service"
+            version:
+              type: string
+              example: "1.0.0"
+        capabilities:
+          type: object
+          properties:
+            tools:
+              type: object
+              properties:
+                listChanged:
+                  type: boolean
+            resources:
+              type: object
+              properties:
+                subscribe:
+                  type: boolean
+                listChanged:
+                  type: boolean
+            experimental:
+              type: object
+              additionalProperties: true
+
+    MCPTool:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "get_account_balance"
+        description:
+          type: string
+          example: "Retrieve account balance for a specific account"
+        inputSchema:
+          type: object
+          properties:
+            type:
+              type: string
+              example: "object"
+            properties:
+              type: object
+              example:
+                accountId:
+                  type: "string"
+                  description: "Account identifier"
+            required:
+              type: array
+              items:
+                type: string
+              example: ["accountId"]
+        category:
+          type: string
+          enum: [banking, account, transaction, transfer, payment, information]
+        permissions:
+          type: array
+          items:
+            type: string
+          example: ["read:accounts"]
+        executionTime:
+          type: object
+          properties:
+            averageMs:
+              type: number
+            maxMs:
+              type: number
+        rateLimit:
+          type: object
+          properties:
+            requestsPerMinute:
+              type: integer
+            requestsPerHour:
+              type: integer
+
+    MCPToolCallRequest:
+      type: object
+      required: [name, arguments]
+      properties:
+        name:
+          type: string
+          example: "get_account_balance"
+        arguments:
+          type: object
+          example:
+            accountId: "acc_12345"
+            includePending: true
+        _meta:
+          type: object
+          properties:
+            userId:
+              type: string
+            sessionId:
+              type: string
+            requestId:
+              type: string
+
+    MCPToolCallResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [text, image, resource]
+              text:
+                type: string
+              mimeType:
+                type: string
+              data:
+                type: string
+                format: base64
+        isError:
+          type: boolean
+        _meta:
+          type: object
+          properties:
+            executionId:
+              type: string
+            executionTime:
+              type: number
+            cost:
+              type: number
+            cacheHit:
+              type: boolean
+
+    BankingToolRequest:
+      type: object
+      required: [tool, parameters]
+      properties:
+        tool:
+          type: string
+          enum: [get_account_balance, get_account_details, list_accounts, get_account_statements]
+        parameters:
+          type: object
+          properties:
+            accountId:
+              type: string
+            customerId:
+              type: string
+            includePending:
+              type: boolean
+            includeHolds:
+              type: boolean
+            statementPeriod:
+              type: string
+              enum: [current, last_month, last_3_months, last_6_months, year_to_date]
+
+    BankingToolResponse:
+      type: object
+      properties:
+        tool:
+          type: string
+        result:
+          type: object
+          oneOf:
+            - $ref: '#/components/schemas/AccountBalance'
+            - $ref: '#/components/schemas/AccountDetails'
+            - $ref: '#/components/schemas/AccountList'
+            - $ref: '#/components/schemas/AccountStatements'
+        executionTime:
+          type: number
+        cacheHit:
+          type: boolean
+
+    TransactionToolRequest:
+      type: object
+      required: [tool, parameters]
+      properties:
+        tool:
+          type: string
+          enum: [get_transaction_history, get_transaction_details, search_transactions, categorize_transaction]
+        parameters:
+          type: object
+          properties:
+            accountId:
+              type: string
+            transactionId:
+              type: string
+            startDate:
+              type: string
+              format: date
+            endDate:
+              type: string
+              format: date
+            limit:
+              type: integer
+            category:
+              type: string
+            minAmount:
+              type: number
+            maxAmount:
+              type: number
+            searchQuery:
+              type: string
+
+    TransactionToolResponse:
+      type: object
+      properties:
+        tool:
+          type: string
+        result:
+          type: object
+          oneOf:
+            - $ref: '#/components/schemas/TransactionHistory'
+            - $ref: '#/components/schemas/TransactionDetails'
+            - $ref: '#/components/schemas/TransactionSearch'
+            - $ref: '#/components/schemas/TransactionCategory'
+        executionTime:
+          type: number
+
+    TransferToolRequest:
+      type: object
+      required: [tool, parameters]
+      properties:
+        tool:
+          type: string
+          enum: [create_transfer, get_transfer_status, list_transfers, cancel_transfer]
+        parameters:
+          type: object
+          properties:
+            transferId:
+              type: string
+            fromAccountId:
+              type: string
+            toAccountId:
+              type: string
+            amount:
+              type: number
+            currency:
+              type: string
+            description:
+              type: string
+            scheduledDate:
+              type: string
+              format: date
+            status:
+              type: string
+              enum: [pending, completed, cancelled, failed]
+
+    TransferToolResponse:
+      type: object
+      properties:
+        tool:
+          type: string
+        result:
+          type: object
+          oneOf:
+            - $ref: '#/components/schemas/TransferResult'
+            - $ref: '#/components/schemas/TransferStatus'
+            - $ref: '#/components/schemas/TransferList'
+        executionTime:
+          type: number
+
+    RegisterToolRequest:
+      type: object
+      required: [name, description, inputSchema, handler]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        inputSchema:
+          type: object
+        category:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        handler:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [http, function, external]
+            config:
+              type: object
+              additionalProperties: true
+        rateLimit:
+          type: object
+          properties:
+            requestsPerMinute:
+              type: integer
+            requestsPerHour:
+              type: integer
+
+    UpdateToolRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        inputSchema:
+          type: object
+        permissions:
+          type: array
+          items:
+            type: string
+        rateLimit:
+          type: object
+          properties:
+            requestsPerMinute:
+              type: integer
+            requestsPerHour:
+              type: integer
+        enabled:
+          type: boolean
+
+    ToolExecution:
+      type: object
+      properties:
+        id:
+          type: string
+        toolName:
+          type: string
+        userId:
+          type: string
+        sessionId:
+          type: string
+        status:
+          type: string
+          enum: [success, failure, timeout, cancelled]
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        executionTime:
+          type: number
+        parameters:
+          type: object
+          additionalProperties: true
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    ToolExecutionDetails:
+      allOf:
+        - $ref: '#/components/schemas/ToolExecution'
+        - type: object
+          properties:
+            logs:
+              type: array
+              items:
+                type: object
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  level:
+                    type: string
+                    enum: [debug, info, warn, error]
+                  message:
+                    type: string
+            metrics:
+              type: object
+              properties:
+                cpuUsage:
+                  type: number
+                memoryUsage:
+                  type: number
+                networkCalls:
+                  type: integer
+                cacheHits:
+                  type: integer
+
+    ToolAnalytics:
+      type: object
+      properties:
+        totalExecutions:
+          type: integer
+        successRate:
+          type: number
+        averageExecutionTime:
+          type: number
+        errorRate:
+          type: number
+        topTools:
+          type: array
+          items:
+            type: object
+            properties:
+              toolName:
+                type: string
+              executions:
+                type: integer
+              successRate:
+                type: number
+              averageTime:
+                type: number
+        executionsByTime:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              count:
+                type: integer
+              successCount:
+                type: integer
+              failureCount:
+                type: integer
+        resourceUsage:
+          type: object
+          properties:
+            averageCpuUsage:
+              type: number
+            averageMemoryUsage:
+              type: number
+            peakCpuUsage:
+              type: number
+            peakMemoryUsage:
+              type: number
+
+    MCPResource:
+      type: object
+      properties:
+        uri:
+          type: string
+          example: "mcp://banking/accounts/summary"
+        name:
+          type: string
+        description:
+          type: string
+        mimeType:
+          type: string
+        annotations:
+          type: object
+          properties:
+            audience:
+              type: array
+              items:
+                type: string
+            priority:
+              type: number
+
+    MCPResourceContent:
+      type: object
+      properties:
+        contents:
+          type: array
+          items:
+            type: object
+            properties:
+              uri:
+                type: string
+              mimeType:
+                type: string
+              text:
+                type: string
+              blob:
+                type: string
+                format: base64
+
+    # Supporting schemas for tool responses
+    AccountBalance:
+      type: object
+      properties:
+        accountId:
+          type: string
+        currentBalance:
+          type: number
+        availableBalance:
+          type: number
+        currency:
+          type: string
+        lastUpdated:
+          type: string
+          format: date-time
+
+    AccountDetails:
+      type: object
+      properties:
+        accountId:
+          type: string
+        accountNumber:
+          type: string
+        accountType:
+          type: string
+        name:
+          type: string
+        balance:
+          type: number
+        status:
+          type: string
+
+    AccountList:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountDetails'
+        totalCount:
+          type: integer
+
+    AccountStatements:
+      type: object
+      properties:
+        statements:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              period:
+                type: string
+              statementDate:
+                type: string
+                format: date
+              downloadUrl:
+                type: string
+
+    TransactionHistory:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              amount:
+                type: number
+              description:
+                type: string
+              date:
+                type: string
+                format: date-time
+        totalCount:
+          type: integer
+
+    TransactionDetails:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: number
+        description:
+          type: string
+        category:
+          type: string
+        date:
+          type: string
+          format: date-time
+        merchant:
+          type: string
+        reference:
+          type: string
+
+    TransactionSearch:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionDetails'
+        totalMatches:
+          type: integer
+        searchQuery:
+          type: string
+
+    TransactionCategory:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        category:
+          type: string
+        subcategory:
+          type: string
+        confidence:
+          type: number
+
+    TransferResult:
+      type: object
+      properties:
+        transferId:
+          type: string
+        status:
+          type: string
+        amount:
+          type: number
+        fromAccount:
+          type: string
+        toAccount:
+          type: string
+        scheduledDate:
+          type: string
+          format: date
+
+    TransferStatus:
+      type: object
+      properties:
+        transferId:
+          type: string
+        status:
+          type: string
+        currentStep:
+          type: string
+        estimatedCompletion:
+          type: string
+          format: date-time
+
+    TransferList:
+      type: object
+      properties:
+        transfers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferResult'
+        totalCount:
+          type: integer
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+tags:
+  - name: Health
+    description: Health checks and service status
+  - name: MCP Protocol
+    description: Model Context Protocol implementation
+  - name: Banking Tools
+    description: Banking-specific MCP tools
+  - name: Tool Management
+    description: Tool registration and management
+  - name: Execution History
+    description: Tool execution tracking and history
+  - name: Analytics
+    description: Tool usage analytics and performance
+  - name: Resources
+    description: MCP resource management

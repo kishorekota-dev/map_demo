@@ -1,0 +1,1196 @@
+openapi: 3.0.3
+info:
+  title: POC NLP Service
+  description: |
+    Natural Language Processing Service for POC Banking Chat System providing
+    text analysis, entity extraction, sentiment analysis, and language understanding.
+    
+    ## Features
+    - Intent classification and entity extraction
+    - Sentiment analysis and emotion detection
+    - Language detection and translation
+    - Text preprocessing and normalization
+    - Named entity recognition (NER)
+    - Keyword and topic extraction
+    - Text similarity and clustering
+    - Banking domain-specific NLP models
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3002
+    description: Development server
+  - url: https://nlp-service.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /models:
+    get:
+      tags: [Models]
+      summary: Get available NLP models
+      description: Retrieve list of available NLP models and their capabilities
+      responses:
+        '200':
+          description: Available models retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NLPModel'
+
+  # Intent Classification
+  /api/intent/classify:
+    post:
+      tags: [Intent]
+      summary: Classify user intent
+      description: Analyze text and classify the user's intent for banking operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntentClassificationRequest'
+      responses:
+        '200':
+          description: Intent classification completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentClassificationResponse'
+
+  /api/intent/batch:
+    post:
+      tags: [Intent]
+      summary: Batch intent classification
+      description: Classify multiple texts for intent analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchIntentRequest'
+      responses:
+        '200':
+          description: Batch intent classification completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchIntentResponse'
+
+  # Entity Extraction
+  /api/entities/extract:
+    post:
+      tags: [Entities]
+      summary: Extract named entities
+      description: Extract banking-related entities from text (amounts, account numbers, dates, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityExtractionRequest'
+      responses:
+        '200':
+          description: Entity extraction completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityExtractionResponse'
+
+  /api/entities/validate:
+    post:
+      tags: [Entities]
+      summary: Validate extracted entities
+      description: Validate and normalize extracted entities for banking operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityValidationRequest'
+      responses:
+        '200':
+          description: Entity validation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityValidationResponse'
+
+  # Sentiment Analysis
+  /api/sentiment/analyze:
+    post:
+      tags: [Sentiment]
+      summary: Analyze text sentiment
+      description: Analyze sentiment and emotional tone of customer messages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SentimentAnalysisRequest'
+      responses:
+        '200':
+          description: Sentiment analysis completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentimentAnalysisResponse'
+
+  /api/sentiment/batch:
+    post:
+      tags: [Sentiment]
+      summary: Batch sentiment analysis
+      description: Analyze sentiment for multiple texts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSentimentRequest'
+      responses:
+        '200':
+          description: Batch sentiment analysis completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSentimentResponse'
+
+  # Language Processing
+  /api/language/detect:
+    post:
+      tags: [Language]
+      summary: Detect text language
+      description: Detect the language of input text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LanguageDetectionRequest'
+      responses:
+        '200':
+          description: Language detection completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LanguageDetectionResponse'
+
+  /api/language/translate:
+    post:
+      tags: [Language]
+      summary: Translate text
+      description: Translate text between supported languages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranslationRequest'
+      responses:
+        '200':
+          description: Translation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationResponse'
+
+  # Text Processing
+  /api/text/preprocess:
+    post:
+      tags: [Text Processing]
+      summary: Preprocess text
+      description: Clean, normalize, and preprocess text for further analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextPreprocessingRequest'
+      responses:
+        '200':
+          description: Text preprocessing completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TextPreprocessingResponse'
+
+  /api/text/keywords:
+    post:
+      tags: [Text Processing]
+      summary: Extract keywords
+      description: Extract important keywords and key phrases from text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeywordExtractionRequest'
+      responses:
+        '200':
+          description: Keyword extraction completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeywordExtractionResponse'
+
+  /api/text/similarity:
+    post:
+      tags: [Text Processing]
+      summary: Calculate text similarity
+      description: Calculate semantic similarity between texts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextSimilarityRequest'
+      responses:
+        '200':
+          description: Text similarity calculation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TextSimilarityResponse'
+
+  # Topic Analysis
+  /api/topics/extract:
+    post:
+      tags: [Topics]
+      summary: Extract topics
+      description: Extract main topics and themes from text or conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopicExtractionRequest'
+      responses:
+        '200':
+          description: Topic extraction completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicExtractionResponse'
+
+  /api/topics/model:
+    post:
+      tags: [Topics]
+      summary: Train topic model
+      description: Train a topic model on a collection of documents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopicModelTrainingRequest'
+      responses:
+        '202':
+          description: Topic model training started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicModelTrainingResponse'
+
+    get:
+      tags: [Topics]
+      summary: Get topic models
+      description: Retrieve available topic models and their status
+      responses:
+        '200':
+          description: Topic models retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TopicModel'
+
+  # Banking-Specific NLP
+  /api/banking/extract-financial:
+    post:
+      tags: [Banking NLP]
+      summary: Extract financial information
+      description: Extract banking-specific information like amounts, account numbers, transaction types
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinancialExtractionRequest'
+      responses:
+        '200':
+          description: Financial information extraction completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialExtractionResponse'
+
+  /api/banking/classify-transaction:
+    post:
+      tags: [Banking NLP]
+      summary: Classify transaction description
+      description: Classify and categorize transaction descriptions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionClassificationRequest'
+      responses:
+        '200':
+          description: Transaction classification completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionClassificationResponse'
+
+  /api/banking/risk-assessment:
+    post:
+      tags: [Banking NLP]
+      summary: Assess text-based risk
+      description: Analyze text for potential fraud or risk indicators
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RiskAssessmentRequest'
+      responses:
+        '200':
+          description: Risk assessment completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskAssessmentResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        models:
+          type: object
+          properties:
+            intent_classifier:
+              type: string
+              enum: [loaded, loading, error]
+            entity_extractor:
+              type: string
+              enum: [loaded, loading, error]
+            sentiment_analyzer:
+              type: string
+              enum: [loaded, loading, error]
+        memory_usage:
+          type: number
+        cpu_usage:
+          type: number
+
+    NLPModel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [intent_classification, entity_extraction, sentiment_analysis, language_detection]
+        version:
+          type: string
+        status:
+          type: string
+          enum: [loaded, loading, error, unavailable]
+        accuracy:
+          type: number
+        trainingDate:
+          type: string
+          format: date-time
+        supportedLanguages:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    IntentClassificationRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "I want to transfer money to my savings account"
+        context:
+          type: object
+          properties:
+            conversationHistory:
+              type: array
+              items:
+                type: string
+            userProfile:
+              type: object
+              additionalProperties: true
+            sessionMetadata:
+              type: object
+              additionalProperties: true
+        options:
+          type: object
+          properties:
+            confidence_threshold:
+              type: number
+              default: 0.5
+            max_intents:
+              type: integer
+              default: 3
+            include_subintents:
+              type: boolean
+              default: false
+
+    IntentClassificationResponse:
+      type: object
+      properties:
+        intents:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+                example: "transfer_money"
+              confidence:
+                type: number
+                example: 0.95
+              subintents:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    subintent:
+                      type: string
+                    confidence:
+                      type: number
+        primary_intent:
+          type: string
+        confidence:
+          type: number
+        processing_time:
+          type: number
+        model_version:
+          type: string
+
+    BatchIntentRequest:
+      type: object
+      required: [texts]
+      properties:
+        texts:
+          type: array
+          items:
+            type: string
+          example: ["Check my balance", "Transfer $100", "Pay my credit card bill"]
+        options:
+          $ref: '#/components/schemas/IntentClassificationRequest/properties/options'
+
+    BatchIntentResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              intents:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    intent:
+                      type: string
+                    confidence:
+                      type: number
+        processing_time:
+          type: number
+        model_version:
+          type: string
+
+    EntityExtractionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "Transfer $500 from checking account 1234 to savings account 5678 tomorrow"
+        entity_types:
+          type: array
+          items:
+            type: string
+            enum: [AMOUNT, ACCOUNT_NUMBER, DATE, TIME, PERSON, ORGANIZATION, LOCATION, CARD_NUMBER, PHONE, EMAIL]
+        context:
+          type: object
+          properties:
+            domain:
+              type: string
+              enum: [banking, general]
+            user_accounts:
+              type: array
+              items:
+                type: string
+
+    EntityExtractionResponse:
+      type: object
+      properties:
+        entities:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+                example: "$500"
+              label:
+                type: string
+                example: "AMOUNT"
+              start:
+                type: integer
+                example: 9
+              end:
+                type: integer
+                example: 13
+              confidence:
+                type: number
+                example: 0.98
+              normalized_value:
+                type: string
+                example: "500.00"
+              metadata:
+                type: object
+                additionalProperties: true
+        processing_time:
+          type: number
+        model_version:
+          type: string
+
+    EntityValidationRequest:
+      type: object
+      required: [entities]
+      properties:
+        entities:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              label:
+                type: string
+              value:
+                type: string
+        validation_rules:
+          type: object
+          properties:
+            strict_account_format:
+              type: boolean
+            validate_amounts:
+              type: boolean
+            check_date_validity:
+              type: boolean
+
+    EntityValidationResponse:
+      type: object
+      properties:
+        validated_entities:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              label:
+                type: string
+              value:
+                type: string
+              is_valid:
+                type: boolean
+              validation_errors:
+                type: array
+                items:
+                  type: string
+              normalized_value:
+                type: string
+              suggestions:
+                type: array
+                items:
+                  type: string
+
+    SentimentAnalysisRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "I'm really frustrated with the long wait times at your bank"
+        options:
+          type: object
+          properties:
+            include_emotions:
+              type: boolean
+              default: false
+            include_aspects:
+              type: boolean
+              default: false
+            granularity:
+              type: string
+              enum: [sentence, document]
+              default: document
+
+    SentimentAnalysisResponse:
+      type: object
+      properties:
+        sentiment:
+          type: string
+          enum: [positive, negative, neutral]
+          example: "negative"
+        confidence:
+          type: number
+          example: 0.87
+        scores:
+          type: object
+          properties:
+            positive:
+              type: number
+              example: 0.05
+            negative:
+              type: number
+              example: 0.87
+            neutral:
+              type: number
+              example: 0.08
+        emotions:
+          type: array
+          items:
+            type: object
+            properties:
+              emotion:
+                type: string
+                enum: [joy, anger, fear, sadness, surprise, disgust]
+              confidence:
+                type: number
+        aspects:
+          type: array
+          items:
+            type: object
+            properties:
+              aspect:
+                type: string
+              sentiment:
+                type: string
+              confidence:
+                type: number
+        processing_time:
+          type: number
+
+    BatchSentimentRequest:
+      type: object
+      required: [texts]
+      properties:
+        texts:
+          type: array
+          items:
+            type: string
+        options:
+          $ref: '#/components/schemas/SentimentAnalysisRequest/properties/options'
+
+    BatchSentimentResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              sentiment:
+                type: string
+              confidence:
+                type: number
+              scores:
+                type: object
+        processing_time:
+          type: number
+
+    LanguageDetectionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "Hola, me gustaría consultar mi saldo"
+        options:
+          type: object
+          properties:
+            confidence_threshold:
+              type: number
+              default: 0.7
+            max_languages:
+              type: integer
+              default: 3
+
+    LanguageDetectionResponse:
+      type: object
+      properties:
+        languages:
+          type: array
+          items:
+            type: object
+            properties:
+              language:
+                type: string
+                example: "es"
+              language_name:
+                type: string
+                example: "Spanish"
+              confidence:
+                type: number
+                example: 0.95
+        primary_language:
+          type: string
+          example: "es"
+        confidence:
+          type: number
+        processing_time:
+          type: number
+
+    TranslationRequest:
+      type: object
+      required: [text, target_language]
+      properties:
+        text:
+          type: string
+          example: "What is my account balance?"
+        source_language:
+          type: string
+          example: "en"
+          description: "Source language code (auto-detected if not provided)"
+        target_language:
+          type: string
+          example: "es"
+        options:
+          type: object
+          properties:
+            formal_tone:
+              type: boolean
+              default: true
+            banking_terminology:
+              type: boolean
+              default: true
+
+    TranslationResponse:
+      type: object
+      properties:
+        translated_text:
+          type: string
+          example: "¿Cuál es el saldo de mi cuenta?"
+        source_language:
+          type: string
+        target_language:
+          type: string
+        confidence:
+          type: number
+        processing_time:
+          type: number
+
+    TextPreprocessingRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "  HeLLo!!! I need HELP with my account... "
+        operations:
+          type: array
+          items:
+            type: string
+            enum: [lowercase, remove_punctuation, remove_extra_spaces, remove_numbers, remove_stopwords, lemmatization, stemming]
+          default: [lowercase, remove_extra_spaces]
+
+    TextPreprocessingResponse:
+      type: object
+      properties:
+        original_text:
+          type: string
+        processed_text:
+          type: string
+          example: "hello i need help with my account"
+        operations_applied:
+          type: array
+          items:
+            type: string
+        processing_time:
+          type: number
+
+    KeywordExtractionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        options:
+          type: object
+          properties:
+            max_keywords:
+              type: integer
+              default: 10
+            min_score:
+              type: number
+              default: 0.1
+            include_phrases:
+              type: boolean
+              default: true
+            banking_domain:
+              type: boolean
+              default: true
+
+    KeywordExtractionResponse:
+      type: object
+      properties:
+        keywords:
+          type: array
+          items:
+            type: object
+            properties:
+              keyword:
+                type: string
+              score:
+                type: number
+              type:
+                type: string
+                enum: [single_word, phrase]
+        processing_time:
+          type: number
+
+    TextSimilarityRequest:
+      type: object
+      required: [text1, text2]
+      properties:
+        text1:
+          type: string
+        text2:
+          type: string
+        similarity_method:
+          type: string
+          enum: [cosine, jaccard, semantic]
+          default: semantic
+
+    TextSimilarityResponse:
+      type: object
+      properties:
+        similarity_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        method_used:
+          type: string
+        processing_time:
+          type: number
+
+    TopicExtractionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        options:
+          type: object
+          properties:
+            max_topics:
+              type: integer
+              default: 5
+            min_topic_probability:
+              type: number
+              default: 0.1
+
+    TopicExtractionResponse:
+      type: object
+      properties:
+        topics:
+          type: array
+          items:
+            type: object
+            properties:
+              topic:
+                type: string
+              probability:
+                type: number
+              keywords:
+                type: array
+                items:
+                  type: string
+        processing_time:
+          type: number
+
+    TopicModelTrainingRequest:
+      type: object
+      required: [documents]
+      properties:
+        documents:
+          type: array
+          items:
+            type: string
+        model_name:
+          type: string
+        parameters:
+          type: object
+          properties:
+            num_topics:
+              type: integer
+              default: 10
+            alpha:
+              type: number
+              default: 0.1
+            beta:
+              type: number
+              default: 0.01
+
+    TopicModelTrainingResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, training, completed, failed]
+        estimated_completion:
+          type: string
+          format: date-time
+
+    TopicModel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [training, ready, error]
+        num_topics:
+          type: integer
+        accuracy:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    FinancialExtractionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          example: "Transfer $1,500.00 from my checking account ending in 1234 to John's savings"
+        extract_types:
+          type: array
+          items:
+            type: string
+            enum: [amounts, account_references, transaction_types, recipients, dates, currencies]
+          default: [amounts, account_references, transaction_types]
+
+    FinancialExtractionResponse:
+      type: object
+      properties:
+        financial_entities:
+          type: object
+          properties:
+            amounts:
+              type: array
+              items:
+                type: object
+                properties:
+                  value:
+                    type: number
+                  currency:
+                    type: string
+                  text:
+                    type: string
+                  confidence:
+                    type: number
+            account_references:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: [account_number, account_name, card_reference]
+                  value:
+                    type: string
+                  confidence:
+                    type: number
+            transaction_types:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: [transfer, payment, deposit, withdrawal, purchase]
+                  confidence:
+                    type: number
+        processing_time:
+          type: number
+
+    TransactionClassificationRequest:
+      type: object
+      required: [description]
+      properties:
+        description:
+          type: string
+          example: "AMAZON.COM AMZN.COM/BILL WA"
+        amount:
+          type: number
+        merchant_info:
+          type: object
+          properties:
+            name:
+              type: string
+            category:
+              type: string
+            location:
+              type: string
+
+    TransactionClassificationResponse:
+      type: object
+      properties:
+        category:
+          type: string
+          example: "Shopping"
+        subcategory:
+          type: string
+          example: "Online Retail"
+        confidence:
+          type: number
+        merchant:
+          type: object
+          properties:
+            name:
+              type: string
+            standardized_name:
+              type: string
+            category:
+              type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    RiskAssessmentRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        context:
+          type: object
+          properties:
+            user_profile:
+              type: object
+            transaction_history:
+              type: array
+            session_metadata:
+              type: object
+
+    RiskAssessmentResponse:
+      type: object
+      properties:
+        risk_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        risk_level:
+          type: string
+          enum: [low, medium, high, critical]
+        risk_factors:
+          type: array
+          items:
+            type: object
+            properties:
+              factor:
+                type: string
+              severity:
+                type: string
+              description:
+                type: string
+        recommendations:
+          type: array
+          items:
+            type: string
+        processing_time:
+          type: number
+
+tags:
+  - name: Health
+    description: Health checks and model status
+  - name: Models
+    description: NLP model management
+  - name: Intent
+    description: Intent classification and analysis
+  - name: Entities
+    description: Named entity recognition and extraction
+  - name: Sentiment
+    description: Sentiment and emotion analysis
+  - name: Language
+    description: Language detection and translation
+  - name: Text Processing
+    description: Text preprocessing and analysis
+  - name: Topics
+    description: Topic extraction and modeling
+  - name: Banking NLP
+    description: Banking-specific NLP operations

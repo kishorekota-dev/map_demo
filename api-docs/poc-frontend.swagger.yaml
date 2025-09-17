@@ -1,0 +1,1435 @@
+openapi: 3.0.3
+info:
+  title: POC Frontend (Customer Web App)
+  description: |
+    Customer Frontend Web Application for POC Banking Chat System providing
+    modern, responsive web interface for customer banking interactions and chat.
+    
+    ## Features
+    - Responsive React-based web interface
+    - Real-time chat with WebSocket integration
+    - Account dashboard and transaction views
+    - Secure authentication and session management
+    - Multi-device support and PWA capabilities
+    - Accessibility compliance (WCAG 2.1)
+    - Real-time notifications and alerts
+    - Mobile-first design with desktop optimization
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://app.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - SessionAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Application health check
+      security: []
+      responses:
+        '200':
+          description: Application is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Authentication Routes
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Customer login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Customer logout
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh authentication token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  # Customer Profile
+  /api/profile:
+    get:
+      tags: [Profile]
+      summary: Get customer profile
+      responses:
+        '200':
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+
+    patch:
+      tags: [Profile]
+      summary: Update customer profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+
+  /api/profile/preferences:
+    get:
+      tags: [Profile]
+      summary: Get customer preferences
+      responses:
+        '200':
+          description: Preferences retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerPreferences'
+
+    patch:
+      tags: [Profile]
+      summary: Update customer preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferences updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerPreferences'
+
+  # Dashboard Data
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard data
+      description: Retrieve customer dashboard with account summaries and recent activity
+      responses:
+        '200':
+          description: Dashboard data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardData'
+
+  /api/dashboard/widgets:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard widgets
+      description: Retrieve customizable dashboard widgets based on user preferences
+      parameters:
+        - name: layout
+          in: query
+          schema:
+            type: string
+            enum: [grid, list, compact]
+            default: grid
+      responses:
+        '200':
+          description: Dashboard widgets retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  widgets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DashboardWidget'
+
+  # Account Operations (Proxy to Banking Service)
+  /api/accounts:
+    get:
+      tags: [Accounts]
+      summary: Get customer accounts
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [checking, savings, credit, investment]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive]
+      responses:
+        '200':
+          description: Accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AccountSummary'
+
+  /api/accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get account details
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDetails'
+
+  /api/accounts/{accountId}/transactions:
+    get:
+      tags: [Accounts]
+      summary: Get account transactions
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # Chat Interface
+  /api/chat/sessions:
+    get:
+      tags: [Chat]
+      summary: Get customer chat sessions
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Chat sessions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatSession'
+
+    post:
+      tags: [Chat]
+      summary: Start new chat session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartChatRequest'
+      responses:
+        '201':
+          description: Chat session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+  /api/chat/sessions/{sessionId}/messages:
+    get:
+      tags: [Chat]
+      summary: Get chat messages
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Chat messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+
+    post:
+      tags: [Chat]
+      summary: Send chat message
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '201':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+
+  # Transfer Operations
+  /api/transfers:
+    get:
+      tags: [Transfers]
+      summary: Get customer transfers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, completed, failed]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Transfers retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transfer'
+
+    post:
+      tags: [Transfers]
+      summary: Create money transfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferRequest'
+      responses:
+        '201':
+          description: Transfer created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+
+  # Notifications
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: Get customer notifications
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unread, read, all]
+            default: all
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [security, transaction, marketing, system]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Notifications retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  unread_count:
+                    type: integer
+
+  /api/notifications/{notificationId}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification as read
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Notification marked as read
+
+  # Settings
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Get application settings
+      responses:
+        '200':
+          description: Settings retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppSettings'
+
+    patch:
+      tags: [Settings]
+      summary: Update application settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingsRequest'
+      responses:
+        '200':
+          description: Settings updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppSettings'
+
+  # Help and Support
+  /api/support/tickets:
+    get:
+      tags: [Support]
+      summary: Get customer support tickets
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, resolved, closed]
+      responses:
+        '200':
+          description: Support tickets retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tickets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupportTicket'
+
+    post:
+      tags: [Support]
+      summary: Create support ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportTicketRequest'
+      responses:
+        '201':
+          description: Support ticket created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportTicket'
+
+  # Static Assets and PWA
+  /manifest.json:
+    get:
+      tags: [PWA]
+      summary: Get PWA manifest
+      security: []
+      responses:
+        '200':
+          description: PWA manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PWAManifest'
+
+  /service-worker.js:
+    get:
+      tags: [PWA]
+      summary: Get service worker
+      security: []
+      responses:
+        '200':
+          description: Service worker script
+          content:
+            application/javascript:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        build:
+          type: string
+        environment:
+          type: string
+        dependencies:
+          type: object
+          properties:
+            api_gateway:
+              type: string
+              enum: [connected, disconnected]
+            websocket:
+              type: string
+              enum: [connected, disconnected]
+            cache:
+              type: string
+              enum: [connected, disconnected]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "customer@example.com"
+        password:
+          type: string
+          format: password
+        remember_me:
+          type: boolean
+          default: false
+        device_info:
+          type: object
+          properties:
+            device_id:
+              type: string
+            platform:
+              type: string
+            browser:
+              type: string
+            user_agent:
+              type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            name:
+              type: string
+            customer_id:
+              type: string
+            last_login:
+              type: string
+              format: date-time
+            preferences:
+              type: object
+        session:
+          type: object
+          properties:
+            session_id:
+              type: string
+            device_info:
+              type: object
+            expires_at:
+              type: string
+              format: date-time
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    CustomerProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        customer_id:
+          type: string
+        email:
+          type: string
+        name:
+          type: object
+          properties:
+            first:
+              type: string
+            last:
+              type: string
+            middle:
+              type: string
+        phone:
+          type: string
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+            state:
+              type: string
+            zip:
+              type: string
+            country:
+              type: string
+        date_of_birth:
+          type: string
+          format: date
+        customer_since:
+          type: string
+          format: date
+        tier:
+          type: string
+          enum: [basic, premium, vip]
+        kyc_status:
+          type: string
+          enum: [pending, verified, failed]
+        account_summary:
+          type: object
+          properties:
+            total_accounts:
+              type: integer
+            total_balance:
+              type: number
+            primary_account:
+              type: string
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: object
+          properties:
+            first:
+              type: string
+            last:
+              type: string
+            middle:
+              type: string
+        phone:
+          type: string
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+            state:
+              type: string
+            zip:
+              type: string
+
+    CustomerPreferences:
+      type: object
+      properties:
+        language:
+          type: string
+          default: "en"
+        timezone:
+          type: string
+          default: "UTC"
+        currency:
+          type: string
+          default: "USD"
+        notifications:
+          type: object
+          properties:
+            email:
+              type: boolean
+              default: true
+            sms:
+              type: boolean
+              default: false
+            push:
+              type: boolean
+              default: true
+            marketing:
+              type: boolean
+              default: false
+        dashboard:
+          type: object
+          properties:
+            default_view:
+              type: string
+              enum: [overview, accounts, transactions]
+              default: "overview"
+            widgets:
+              type: array
+              items:
+                type: string
+            theme:
+              type: string
+              enum: [light, dark, auto]
+              default: "auto"
+        privacy:
+          type: object
+          properties:
+            data_sharing:
+              type: boolean
+              default: false
+            analytics:
+              type: boolean
+              default: true
+            personalization:
+              type: boolean
+              default: true
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        language:
+          type: string
+        timezone:
+          type: string
+        currency:
+          type: string
+        notifications:
+          type: object
+        dashboard:
+          type: object
+        privacy:
+          type: object
+
+    DashboardData:
+      type: object
+      properties:
+        accounts_summary:
+          type: object
+          properties:
+            total_balance:
+              type: number
+            total_accounts:
+              type: integer
+            by_type:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  balance:
+                    type: number
+        recent_transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        quick_actions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              description:
+                type: string
+              icon:
+                type: string
+              url:
+                type: string
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+                enum: [info, warning, error, success]
+              title:
+                type: string
+              message:
+                type: string
+              action_url:
+                type: string
+        upcoming_payments:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              payee:
+                type: string
+              amount:
+                type: number
+              due_date:
+                type: string
+                format: date
+        market_data:
+          type: object
+          properties:
+            indices:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  value:
+                    type: number
+                  change:
+                    type: number
+                  change_percent:
+                    type: number
+
+    DashboardWidget:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [account_balance, recent_transactions, quick_transfer, alerts, market_data, spending_insights]
+        title:
+          type: string
+        description:
+          type: string
+        size:
+          type: string
+          enum: [small, medium, large]
+        position:
+          type: object
+          properties:
+            x:
+              type: integer
+            y:
+              type: integer
+        config:
+          type: object
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties: true
+        last_updated:
+          type: string
+          format: date-time
+
+    AccountSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        account_number:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [checking, savings, credit, investment]
+        balance:
+          type: number
+        available_balance:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, frozen]
+        last_transaction:
+          type: string
+          format: date-time
+
+    AccountDetails:
+      allOf:
+        - $ref: '#/components/schemas/AccountSummary'
+        - type: object
+          properties:
+            opened_date:
+              type: string
+              format: date
+            interest_rate:
+              type: number
+            minimum_balance:
+              type: number
+            overdraft_limit:
+              type: number
+            routing_number:
+              type: string
+            branch:
+              type: object
+              properties:
+                name:
+                  type: string
+                address:
+                  type: string
+                phone:
+                  type: string
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        account_id:
+          type: string
+        type:
+          type: string
+          enum: [debit, credit, transfer, payment]
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        merchant:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        date:
+          type: string
+          format: date-time
+        running_balance:
+          type: number
+        reference:
+          type: string
+
+    ChatSession:
+      type: object
+      properties:
+        id:
+          type: string
+        customer_id:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, escalated]
+        subject:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+        agent_assigned:
+          type: boolean
+        last_message:
+          $ref: '#/components/schemas/ChatMessage'
+
+    StartChatRequest:
+      type: object
+      properties:
+        subject:
+          type: string
+        initial_message:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+        category:
+          type: string
+          enum: [general, account, transfer, technical, complaint]
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        sender_type:
+          type: string
+          enum: [customer, agent, system, ai]
+        content:
+          type: string
+        message_type:
+          type: string
+          enum: [text, image, file, system]
+        timestamp:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              filename:
+                type: string
+              url:
+                type: string
+              size:
+                type: integer
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        message_type:
+          type: string
+          enum: [text, image, file]
+          default: text
+        attachments:
+          type: array
+          items:
+            type: string
+
+    Transfer:
+      type: object
+      properties:
+        id:
+          type: string
+        from_account:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            account_number:
+              type: string
+        to_account:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            account_number:
+              type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, failed, cancelled]
+        scheduled_date:
+          type: string
+          format: date
+        completed_date:
+          type: string
+          format: date-time
+        fees:
+          type: number
+        reference:
+          type: string
+
+    CreateTransferRequest:
+      type: object
+      required: [from_account_id, to_account_id, amount]
+      properties:
+        from_account_id:
+          type: string
+        to_account_id:
+          type: string
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        description:
+          type: string
+        scheduled_date:
+          type: string
+          format: date
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [security, transaction, marketing, system]
+        title:
+          type: string
+        message:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        action_url:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    AppSettings:
+      type: object
+      properties:
+        general:
+          type: object
+          properties:
+            app_name:
+              type: string
+            version:
+              type: string
+            support_email:
+              type: string
+            support_phone:
+              type: string
+        features:
+          type: object
+          properties:
+            chat_enabled:
+              type: boolean
+            transfers_enabled:
+              type: boolean
+            mobile_deposit:
+              type: boolean
+            bill_pay:
+              type: boolean
+        limits:
+          type: object
+          properties:
+            daily_transfer_limit:
+              type: number
+            monthly_transfer_limit:
+              type: number
+            session_timeout:
+              type: integer
+        ui:
+          type: object
+          properties:
+            theme:
+              type: string
+              enum: [light, dark, auto]
+            language:
+              type: string
+            currency_format:
+              type: string
+            date_format:
+              type: string
+
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        ui:
+          type: object
+          properties:
+            theme:
+              type: string
+            language:
+              type: string
+
+    SupportTicket:
+      type: object
+      properties:
+        id:
+          type: string
+        customer_id:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [technical, account, billing, general]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        status:
+          type: string
+          enum: [open, in_progress, resolved, closed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        assigned_agent:
+          type: string
+        resolution:
+          type: string
+
+    CreateSupportTicketRequest:
+      type: object
+      required: [subject, description, category]
+      properties:
+        subject:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [technical, account, billing, general]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          default: medium
+        attachments:
+          type: array
+          items:
+            type: string
+
+    PWAManifest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "POC Banking"
+        short_name:
+          type: string
+          example: "POC Bank"
+        description:
+          type: string
+        start_url:
+          type: string
+          example: "/"
+        display:
+          type: string
+          example: "standalone"
+        theme_color:
+          type: string
+          example: "#1976d2"
+        background_color:
+          type: string
+          example: "#ffffff"
+        icons:
+          type: array
+          items:
+            type: object
+            properties:
+              src:
+                type: string
+              sizes:
+                type: string
+              type:
+                type: string
+              purpose:
+                type: string
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        has_more:
+          type: boolean
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+tags:
+  - name: Health
+    description: Application health and status
+  - name: Authentication
+    description: User authentication and session management
+  - name: Profile
+    description: Customer profile management
+  - name: Dashboard
+    description: Customer dashboard and overview
+  - name: Accounts
+    description: Account information and operations
+  - name: Chat
+    description: Customer chat interface
+  - name: Transfers
+    description: Money transfer operations
+  - name: Notifications
+    description: Customer notifications
+  - name: Settings
+    description: Application settings
+  - name: Support
+    description: Customer support and help
+  - name: PWA
+    description: Progressive Web App features

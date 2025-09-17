@@ -1,0 +1,1149 @@
+openapi: 3.0.3
+info:
+  title: POC NLU Service (DialogFlow Integration)
+  description: |
+    Natural Language Understanding Service for POC Banking Chat System integrating
+    with Google DialogFlow for advanced conversation management, context handling,
+    and multi-turn dialogue processing.
+    
+    ## Features
+    - DialogFlow CX integration for conversation flows
+    - Intent matching with context awareness
+    - Entity extraction and parameter collection
+    - Session management and context tracking
+    - Webhook fulfillment for custom business logic
+    - Multi-language conversation support
+    - Agent training and model updates
+    - Conversation analytics and insights
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3003
+    description: Development server
+  - url: https://nlu-service.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # DialogFlow Session Management
+  /api/sessions:
+    post:
+      tags: [Sessions]
+      summary: Create DialogFlow session
+      description: Create a new DialogFlow session for conversation management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DialogFlowSession'
+
+  /api/sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: Get session details
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DialogFlowSession'
+
+    delete:
+      tags: [Sessions]
+      summary: End DialogFlow session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session ended successfully
+
+  /api/sessions/{sessionId}/context:
+    get:
+      tags: [Sessions]
+      summary: Get session context
+      description: Retrieve current context and parameters for the session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session context retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionContext'
+
+    patch:
+      tags: [Sessions]
+      summary: Update session context
+      description: Update context parameters for the session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContextRequest'
+      responses:
+        '200':
+          description: Session context updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionContext'
+
+  # Intent Detection and Processing
+  /api/detect-intent:
+    post:
+      tags: [Intent Detection]
+      summary: Detect intent from text
+      description: Send user input to DialogFlow for intent detection and response generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectIntentRequest'
+      responses:
+        '200':
+          description: Intent detected successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectIntentResponse'
+
+  /api/detect-intent/streaming:
+    post:
+      tags: [Intent Detection]
+      summary: Streaming intent detection
+      description: Stream audio input for real-time intent detection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamingDetectIntentRequest'
+      responses:
+        '200':
+          description: Streaming intent detection initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamingDetectIntentResponse'
+
+  # Webhook Fulfillment
+  /api/webhook:
+    post:
+      tags: [Webhook]
+      summary: DialogFlow webhook fulfillment
+      description: Handle webhook calls from DialogFlow for custom business logic
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookRequest'
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+
+  # Agent Management
+  /api/agents:
+    get:
+      tags: [Agent Management]
+      summary: List DialogFlow agents
+      description: Get list of available DialogFlow agents
+      responses:
+        '200':
+          description: Agents retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DialogFlowAgent'
+
+  /api/agents/{agentId}/train:
+    post:
+      tags: [Agent Management]
+      summary: Train DialogFlow agent
+      description: Trigger training for the DialogFlow agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Training initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingResponse'
+
+  /api/agents/{agentId}/intents:
+    get:
+      tags: [Agent Management]
+      summary: Get agent intents
+      description: Retrieve all intents for a specific agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: languageCode
+          in: query
+          schema:
+            type: string
+            default: en
+      responses:
+        '200':
+          description: Intents retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  intents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DialogFlowIntent'
+
+    post:
+      tags: [Agent Management]
+      summary: Create new intent
+      description: Create a new intent in the DialogFlow agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIntentRequest'
+      responses:
+        '201':
+          description: Intent created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DialogFlowIntent'
+
+  /api/agents/{agentId}/entities:
+    get:
+      tags: [Agent Management]
+      summary: Get agent entities
+      description: Retrieve all entity types for a specific agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: languageCode
+          in: query
+          schema:
+            type: string
+            default: en
+      responses:
+        '200':
+          description: Entities retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DialogFlowEntity'
+
+  # Conversation Analytics
+  /api/analytics/conversations:
+    get:
+      tags: [Analytics]
+      summary: Get conversation analytics
+      description: Retrieve analytics data for conversations and intent performance
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: day
+      responses:
+        '200':
+          description: Analytics data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationAnalytics'
+
+  /api/analytics/intents:
+    get:
+      tags: [Analytics]
+      summary: Get intent analytics
+      description: Retrieve analytics data for intent recognition performance
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - name: intentName
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Intent analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentAnalytics'
+
+  # Testing and Validation
+  /api/test/intent:
+    post:
+      tags: [Testing]
+      summary: Test intent recognition
+      description: Test intent recognition without affecting session state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestIntentRequest'
+      responses:
+        '200':
+          description: Intent test completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestIntentResponse'
+
+  /api/test/conversation:
+    post:
+      tags: [Testing]
+      summary: Test conversation flow
+      description: Test complete conversation flow with multiple turns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestConversationRequest'
+      responses:
+        '200':
+          description: Conversation test completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConversationResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        dialogflow:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [connected, disconnected]
+            project_id:
+              type: string
+            location:
+              type: string
+            agents:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+        webhook_status:
+          type: string
+          enum: [active, inactive]
+
+    CreateSessionRequest:
+      type: object
+      required: [agentId, languageCode]
+      properties:
+        agentId:
+          type: string
+          example: "projects/poc-banking-bot/locations/us-central1/agents/default"
+        languageCode:
+          type: string
+          example: "en"
+          default: "en"
+        userId:
+          type: string
+          description: "Unique identifier for the user"
+        initialContext:
+          type: object
+          properties:
+            parameters:
+              type: object
+              additionalProperties: true
+            timezone:
+              type: string
+            location:
+              type: string
+
+    DialogFlowSession:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        sessionPath:
+          type: string
+        agentId:
+          type: string
+        languageCode:
+          type: string
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastInteraction:
+          type: string
+          format: date-time
+        turnCount:
+          type: integer
+        status:
+          type: string
+          enum: [active, completed, expired]
+        context:
+          $ref: '#/components/schemas/SessionContext'
+
+    SessionContext:
+      type: object
+      properties:
+        parameters:
+          type: object
+          additionalProperties: true
+        contexts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              lifespanCount:
+                type: integer
+              parameters:
+                type: object
+                additionalProperties: true
+        currentPage:
+          type: string
+        fulfillmentText:
+          type: string
+        webhookDisplayName:
+          type: string
+
+    UpdateContextRequest:
+      type: object
+      properties:
+        parameters:
+          type: object
+          additionalProperties: true
+        contexts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              lifespanCount:
+                type: integer
+              parameters:
+                type: object
+                additionalProperties: true
+
+    DetectIntentRequest:
+      type: object
+      required: [sessionId, queryInput]
+      properties:
+        sessionId:
+          type: string
+        queryInput:
+          type: object
+          properties:
+            text:
+              type: object
+              properties:
+                text:
+                  type: string
+                  example: "I want to check my account balance"
+                languageCode:
+                  type: string
+                  default: "en"
+            audio:
+              type: object
+              properties:
+                config:
+                  type: object
+                  properties:
+                    audioEncoding:
+                      type: string
+                      enum: [AUDIO_ENCODING_LINEAR_16, AUDIO_ENCODING_FLAC, AUDIO_ENCODING_MULAW]
+                    sampleRateHertz:
+                      type: integer
+                    languageCode:
+                      type: string
+                audio:
+                  type: string
+                  format: byte
+        queryParams:
+          type: object
+          properties:
+            timeZone:
+              type: string
+            geoLocation:
+              type: object
+              properties:
+                latitude:
+                  type: number
+                longitude:
+                  type: number
+            currentPage:
+              type: string
+            disableWebhook:
+              type: boolean
+            analyzeQueryTextSentiment:
+              type: boolean
+
+    DetectIntentResponse:
+      type: object
+      properties:
+        responseId:
+          type: string
+        queryResult:
+          type: object
+          properties:
+            text:
+              type: string
+            languageCode:
+              type: string
+            parameters:
+              type: object
+              additionalProperties: true
+            allRequiredParamsPresent:
+              type: boolean
+            fulfillmentText:
+              type: string
+            fulfillmentMessages:
+              type: array
+              items:
+                type: object
+            intent:
+              type: object
+              properties:
+                name:
+                  type: string
+                displayName:
+                  type: string
+                confidence:
+                  type: number
+            intentDetectionConfidence:
+              type: number
+            diagnosticInfo:
+              type: object
+              additionalProperties: true
+            match:
+              type: object
+              properties:
+                intent:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    displayName:
+                      type: string
+                event:
+                  type: string
+                parameters:
+                  type: object
+                  additionalProperties: true
+                resolvedInput:
+                  type: string
+                matchType:
+                  type: string
+                  enum: [INTENT, DIRECT_INTENT, PARAMETER_FILLING, NO_MATCH, NO_INPUT, EVENT]
+                confidence:
+                  type: number
+        webhookStatus:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+
+    StreamingDetectIntentRequest:
+      type: object
+      required: [sessionId, queryInput]
+      properties:
+        sessionId:
+          type: string
+        queryInput:
+          type: object
+          properties:
+            audioConfig:
+              type: object
+              properties:
+                audioEncoding:
+                  type: string
+                sampleRateHertz:
+                  type: integer
+                languageCode:
+                  type: string
+        inputAudio:
+          type: string
+          format: byte
+        enablePartialResponse:
+          type: boolean
+
+    StreamingDetectIntentResponse:
+      type: object
+      properties:
+        responseId:
+          type: string
+        recognitionResult:
+          type: object
+          properties:
+            transcript:
+              type: string
+            isFinal:
+              type: boolean
+            confidence:
+              type: number
+        queryResult:
+          $ref: '#/components/schemas/DetectIntentResponse/properties/queryResult'
+
+    WebhookRequest:
+      type: object
+      properties:
+        detectIntentResponseId:
+          type: string
+        pageInfo:
+          type: object
+          properties:
+            currentPage:
+              type: string
+            displayName:
+              type: string
+            formInfo:
+              type: object
+        sessionInfo:
+          type: object
+          properties:
+            session:
+              type: string
+            parameters:
+              type: object
+              additionalProperties: true
+        fulfillmentInfo:
+          type: object
+          properties:
+            tag:
+              type: string
+        text:
+          type: string
+        triggerIntent:
+          type: string
+        triggerEvent:
+          type: string
+        languageCode:
+          type: string
+
+    WebhookResponse:
+      type: object
+      properties:
+        fulfillmentResponse:
+          type: object
+          properties:
+            messages:
+              type: array
+              items:
+                type: object
+                properties:
+                  text:
+                    type: object
+                    properties:
+                      text:
+                        type: array
+                        items:
+                          type: string
+                  responseType:
+                    type: string
+                    enum: [HANDLER_PROMPT, FINAL]
+        pageInfo:
+          type: object
+          properties:
+            currentPage:
+              type: string
+            formInfo:
+              type: object
+              properties:
+                parameterInfo:
+                  type: array
+                  items:
+                    type: object
+        sessionInfo:
+          type: object
+          properties:
+            parameters:
+              type: object
+              additionalProperties: true
+        payload:
+          type: object
+          additionalProperties: true
+
+    DialogFlowAgent:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        defaultLanguageCode:
+          type: string
+        supportedLanguageCodes:
+          type: array
+          items:
+            type: string
+        timeZone:
+          type: string
+        description:
+          type: string
+        avatarUri:
+          type: string
+        enableLogging:
+          type: boolean
+        startFlow:
+          type: string
+        securitySettings:
+          type: string
+        enableSpellCheck:
+          type: boolean
+
+    TrainingResponse:
+      type: object
+      properties:
+        operationName:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING, DONE, CANCELLED]
+        startTime:
+          type: string
+          format: date-time
+        estimatedCompletion:
+          type: string
+          format: date-time
+
+    DialogFlowIntent:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        trainingPhrases:
+          type: array
+          items:
+            type: object
+            properties:
+              parts:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                    entityType:
+                      type: string
+                    alias:
+                      type: string
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              entityType:
+                type: string
+              isList:
+                type: boolean
+              redact:
+                type: boolean
+        labels:
+          type: object
+          additionalProperties: true
+        description:
+          type: string
+
+    CreateIntentRequest:
+      type: object
+      required: [displayName, trainingPhrases]
+      properties:
+        displayName:
+          type: string
+        trainingPhrases:
+          type: array
+          items:
+            type: object
+            properties:
+              parts:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                    entityType:
+                      type: string
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              entityType:
+                type: string
+              isList:
+                type: boolean
+        languageCode:
+          type: string
+          default: "en"
+
+    DialogFlowEntity:
+      type: object
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        kind:
+          type: string
+          enum: [KIND_MAP, KIND_LIST, KIND_REGEXP]
+        autoExpansionMode:
+          type: string
+          enum: [AUTO_EXPANSION_MODE_DEFAULT, AUTO_EXPANSION_MODE_UNSPECIFIED]
+        entities:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              synonyms:
+                type: array
+                items:
+                  type: string
+        excludedPhrases:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+        enableFuzzyExtraction:
+          type: boolean
+        redact:
+          type: boolean
+
+    ConversationAnalytics:
+      type: object
+      properties:
+        totalConversations:
+          type: integer
+        averageConversationLength:
+          type: number
+        completionRate:
+          type: number
+        escalationRate:
+          type: number
+        topIntents:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+              count:
+                type: integer
+              percentage:
+                type: number
+        sentimentDistribution:
+          type: object
+          properties:
+            positive:
+              type: number
+            neutral:
+              type: number
+            negative:
+              type: number
+        conversationsByTimeframe:
+          type: array
+          items:
+            type: object
+            properties:
+              period:
+                type: string
+              count:
+                type: integer
+              averageLength:
+                type: number
+
+    IntentAnalytics:
+      type: object
+      properties:
+        intentName:
+          type: string
+        totalMatches:
+          type: integer
+        averageConfidence:
+          type: number
+        successRate:
+          type: number
+        commonFollowUpIntents:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+              frequency:
+                type: number
+        parameters:
+          type: array
+          items:
+            type: object
+            properties:
+              parameter:
+                type: string
+              extractionRate:
+                type: number
+              averageConfidence:
+                type: number
+
+    TestIntentRequest:
+      type: object
+      required: [text, agentId]
+      properties:
+        text:
+          type: string
+        agentId:
+          type: string
+        languageCode:
+          type: string
+          default: "en"
+        includeConfidence:
+          type: boolean
+          default: true
+
+    TestIntentResponse:
+      type: object
+      properties:
+        detectedIntent:
+          type: object
+          properties:
+            name:
+              type: string
+            displayName:
+              type: string
+            confidence:
+              type: number
+        parameters:
+          type: object
+          additionalProperties: true
+        fulfillmentText:
+          type: string
+        allRequiredParamsPresent:
+          type: boolean
+        confidence:
+          type: number
+
+    TestConversationRequest:
+      type: object
+      required: [conversationFlow, agentId]
+      properties:
+        conversationFlow:
+          type: array
+          items:
+            type: object
+            properties:
+              userInput:
+                type: string
+              expectedIntent:
+                type: string
+              expectedParameters:
+                type: object
+                additionalProperties: true
+        agentId:
+          type: string
+        languageCode:
+          type: string
+          default: "en"
+
+    TestConversationResponse:
+      type: object
+      properties:
+        testResults:
+          type: array
+          items:
+            type: object
+            properties:
+              turn:
+                type: integer
+              userInput:
+                type: string
+              detectedIntent:
+                type: string
+              expectedIntent:
+                type: string
+              intentMatch:
+                type: boolean
+              confidence:
+                type: number
+              extractedParameters:
+                type: object
+                additionalProperties: true
+              expectedParameters:
+                type: object
+                additionalProperties: true
+              parametersMatch:
+                type: boolean
+        overallAccuracy:
+          type: number
+        intentAccuracy:
+          type: number
+        parameterAccuracy:
+          type: number
+
+tags:
+  - name: Health
+    description: Health checks and service status
+  - name: Sessions
+    description: DialogFlow session management
+  - name: Intent Detection
+    description: Intent detection and processing
+  - name: Webhook
+    description: Webhook fulfillment handling
+  - name: Agent Management
+    description: DialogFlow agent management
+  - name: Analytics
+    description: Conversation and intent analytics
+  - name: Testing
+    description: Testing and validation tools
