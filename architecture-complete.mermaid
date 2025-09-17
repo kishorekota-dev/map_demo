@@ -1,0 +1,94 @@
+flowchart TD
+    subgraph "Frontend Layer"
+        PF["poc-frontend<br/>Port: 3000<br/>Customer Chat UI"]
+        PAU["poc-agent-ui<br/>Port: 3007<br/>Agent Dashboard"]
+    end
+    
+    subgraph "API Gateway Layer"
+        PG["poc-api-gateway<br/>Port: 3001<br/>Routing & Auth"]
+    end
+    
+    subgraph "Backend Services Layer"
+        PCB["poc-chat-backend<br/>Port: 3006<br/>WebSocket & Chat"]
+        PBS["poc-banking-service<br/>Port: 3005<br/>Banking Operations"]
+        PNL["poc-nlp-service<br/>Port: 3002<br/>Text Processing"]
+        PNU["poc-nlu-service<br/>Port: 3003<br/>Intent Recognition"]
+        PMC["poc-mcp-service<br/>Port: 3004<br/>Tool Calling"]
+        PAI["poc-ai-service<br/>Port: 3008<br/>LLM & Generative AI"]
+    end
+    
+    subgraph "Data Layer"
+        PG2[(PostgreSQL<br/>Banking Data)]
+        RD[(Redis<br/>Sessions & Cache)]
+        VC[(Vector DB<br/>Embeddings & Context)]
+    end
+    
+    subgraph "External AI Services"
+        OAI[OpenAI API<br/>GPT-4 & GPT-3.5<br/>Text Generation]
+        OAE[OpenAI Embeddings<br/>text-embedding-ada-002<br/>Semantic Search]
+        DF[DialogFlow<br/>NLU & Conversation]
+    end
+    
+    %% Frontend to Gateway
+    PF -->|HTTP/REST| PG
+    PAU -->|HTTP/REST| PG
+    
+    %% Direct WebSocket Connections
+    PF -.->|WebSocket| PCB
+    PAU -.->|WebSocket| PCB
+    
+    %% Gateway to Services
+    PG -->|HTTP| PCB
+    PG -->|HTTP| PBS
+    PG -->|HTTP| PNL
+    PG -->|HTTP| PNU
+    PG -->|HTTP| PMC
+    PG -->|HTTP| PAI
+    
+    %% Service Interconnections
+    PCB -->|HTTP| PBS
+    PCB -->|HTTP| PNL
+    PCB -->|HTTP| PNU
+    PCB -->|HTTP| PMC
+    PCB -->|HTTP| PAI
+    
+    PNL -->|HTTP| PNU
+    PNU -->|HTTP| PMC
+    PNU -->|HTTP| PAI
+    PMC -->|HTTP| PBS
+    PMC -->|HTTP| PAI
+    PAI -->|HTTP| PBS
+    
+    %% AI Service Integration
+    PAI -->|Context + Tools| PMC
+    PAI -->|Intent + Entities| PNU
+    PAI -->|Banking Data| PBS
+    
+    %% Services to Data
+    PCB -->|TCP| RD
+    PBS -->|TCP| PG2
+    PBS -->|TCP| RD
+    PG -->|TCP| RD
+    PAI -->|TCP| VC
+    PAI -->|TCP| RD
+    
+    %% External AI Connections
+    PAI -.->|HTTPS/API| OAI
+    PAI -.->|HTTPS/API| OAE
+    PNU -.->|HTTPS/API| DF
+    PCB -.->|HTTPS/API| DF
+    
+    %% Styling
+    classDef frontend fill:#e1f5fe
+    classDef gateway fill:#f3e5f5
+    classDef backend fill:#e8f5e8
+    classDef data fill:#fff3e0
+    classDef external fill:#fce4ec
+    classDef ai fill:#f1f8e9
+    
+    class PF,PAU frontend
+    class PG gateway
+    class PCB,PBS,PNL,PNU,PMC backend
+    class PAI ai
+    class PG2,RD,VC data
+    class DF,OAI,OAE external
