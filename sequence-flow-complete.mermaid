@@ -1,0 +1,183 @@
+---
+title: POC Banking Chat - AI-Enhanced Communication Sequence Flow
+---
+sequenceDiagram
+    autonumber
+    participant Customer as Customer Browser
+    participant PocFrontend as poc-frontend<br/>(Port: 3000)
+    participant PocGateway as poc-api-gateway<br/>(Port: 3001)
+    participant PocChat as poc-chat-backend<br/>(Port: 3006)
+    participant PocNLP as poc-nlp-service<br/>(Port: 3002)
+    participant PocNLU as poc-nlu-service<br/>(Port: 3003)
+    participant PocAI as poc-ai-service<br/>(Port: 3008)
+    participant PocMCP as poc-mcp-service<br/>(Port: 3004)
+    participant PocBanking as poc-banking-service<br/>(Port: 3005)
+    participant OpenAI as OpenAI API<br/>(GPT-4/3.5)
+    participant OpenAIEmbed as OpenAI Embeddings<br/>(text-embedding-ada-002)
+    participant DialogFlow as DialogFlow API
+    participant Agent as Agent Browser
+    participant PocAgentUI as poc-agent-ui<br/>(Port: 3007)
+    participant Redis as Redis Cache
+    participant VectorDB as Vector Database
+    participant PostgreSQL as PostgreSQL DB
+
+    %% Customer Initiates Chat
+    rect rgb(240, 248, 255)
+    note over Customer, PocFrontend: Customer Chat Initiation
+    Customer->>PocFrontend: Open chat interface
+    PocFrontend->>PocGateway: GET /api/auth/session
+    PocGateway->>PocBanking: Validate customer session
+    PocBanking->>PostgreSQL: Query customer data
+    PostgreSQL-->>PocBanking: Customer details
+    PocBanking-->>PocGateway: Session validated
+    PocGateway-->>PocFrontend: Session token
+    end
+
+    %% WebSocket Connection
+    rect rgb(255, 248, 240)
+    note over Customer, PocChat: Real-time Connection Setup
+    Customer->>PocChat: WebSocket connect
+    PocChat->>Redis: Store session
+    Redis-->>PocChat: Session stored
+    PocChat-->>Customer: Connection established
+    end
+
+    %% AI-Enhanced Message Processing Flow
+    rect rgb(248, 255, 248)
+    note over Customer, OpenAI: AI-Enhanced Natural Language Processing
+    Customer->>PocChat: "What's my account balance?"
+    PocChat->>PocNLP: Process message text
+    PocNLP->>PocNLU: Extract intent & entities
+    PocNLU->>DialogFlow: NLU analysis
+    DialogFlow-->>PocNLU: Intent: check_balance
+    
+    %% AI Context Enhancement
+    PocNLU->>PocAI: Enhance with context & history
+    PocAI->>OpenAIEmbed: Generate embeddings for query
+    OpenAIEmbed-->>PocAI: Query embeddings
+    PocAI->>VectorDB: Search similar conversations
+    VectorDB-->>PocAI: Relevant context & history
+    PocAI->>Redis: Get conversation history
+    Redis-->>PocAI: Previous messages
+    PocAI-->>PocNLU: Enhanced intent with context
+    PocNLU-->>PocNLP: Structured intent + context
+    PocNLP-->>PocChat: Intent: check_balance, entities: {account_type: checking}, context: enhanced
+    end
+
+    %% Tool Calling via MCP with AI Orchestration
+    rect rgb(255, 248, 255)
+    note over PocChat, PocBanking: AI-Orchestrated Banking Operation
+    PocChat->>PocAI: Plan banking operation with context
+    PocAI->>OpenAI: Generate tool execution plan
+    OpenAI-->>PocAI: Execution strategy & parameters
+    PocAI->>PocMCP: Execute banking tool with AI plan
+    PocMCP->>PocBanking: GET /api/accounts/balance
+    PocBanking->>PostgreSQL: Query account balance
+    PostgreSQL-->>PocBanking: Balance: $2,543.21
+    PocBanking-->>PocMCP: Account balance data
+    PocMCP-->>PocAI: Tool result with banking data
+    end
+
+    %% AI-Generated Response
+    rect rgb(248, 248, 255)
+    note over PocAI, Customer: Generative AI Response Creation
+    PocAI->>OpenAI: Generate natural response with context
+    Note over PocAI, OpenAI: Prompt: "Customer asks about balance.<br/>Context: Banking customer, previous interactions.<br/>Data: Balance $2,543.21<br/>Generate helpful, personalized response."
+    OpenAI-->>PocAI: "Hi! Your current checking account balance is $2,543.21. You've had consistent deposits this month. Is there anything specific about your account you'd like to know more about?"
+    PocAI->>VectorDB: Store conversation embedding
+    PocAI->>Redis: Cache AI-generated response
+    PocAI-->>PocChat: Personalized AI response
+    PocChat-->>Customer: AI-Enhanced Response via WebSocket
+    end
+
+    %% Complex Query with Multi-step AI Processing
+    rect rgb(255, 245, 238)
+    note over Customer, OpenAI: Complex AI Query Processing
+    Customer->>PocChat: "Can you help me understand why my credit score dropped and suggest ways to improve it?"
+    PocChat->>PocNLP: Process complex query
+    PocNLP->>PocNLU: Extract multiple intents
+    PocNLU->>PocAI: Complex intent analysis
+    
+    %% Multi-step AI reasoning
+    PocAI->>OpenAI: Analyze multi-part financial question
+    OpenAI-->>PocAI: Query plan: 1) Get credit history, 2) Analyze factors, 3) Generate recommendations
+    
+    %% Step 1: Get data
+    PocAI->>PocMCP: Get credit score history
+    PocMCP->>PocBanking: GET /api/credit/history
+    PocBanking->>PostgreSQL: Query credit data
+    PostgreSQL-->>PocBanking: Credit history & factors
+    PocBanking-->>PocMCP: Credit analysis data
+    PocMCP-->>PocAI: Comprehensive credit info
+    
+    %% Step 2: AI Analysis
+    PocAI->>OpenAI: Analyze credit factors with banking data
+    Note over PocAI, OpenAI: Prompt: "Analyze credit drop factors:<br/>- Payment history, utilization, etc.<br/>- Recent transactions and patterns<br/>- Generate personalized improvement plan"
+    OpenAI-->>PocAI: Detailed analysis + improvement recommendations
+    
+    %% Step 3: Generate comprehensive response
+    PocAI->>OpenAI: Create educational response with action items
+    OpenAI-->>PocAI: "Your credit score dropped mainly due to increased utilization (65% vs recommended 30%). Here's your personalized improvement plan: 1) Pay down Card ending in 4567 to reduce utilization, 2) Set up autopay for consistent payments, 3) Consider requesting credit limit increase. Would you like me to help you set up any of these actions?"
+    PocAI-->>PocChat: Comprehensive AI-generated advice
+    PocChat-->>Customer: Detailed Financial Guidance via WebSocket
+    end
+
+    %% Escalation Scenario with AI Assessment
+    rect rgb(255, 240, 240)
+    note over Customer, PocAgentUI: AI-Assisted Agent Escalation
+    Customer->>PocChat: "I need to dispute a fraudulent charge immediately"
+    PocChat->>PocNLP: Analyze urgency and sentiment
+    PocNLP->>PocAI: Assess escalation necessity
+    PocAI->>OpenAI: Evaluate urgency and complexity
+    OpenAI-->>PocAI: High urgency: fraud dispute requires human agent
+    PocAI-->>PocChat: Intent: dispute_charge (escalation_required: true, urgency: high, reason: fraud)
+    
+    PocChat->>PocAgentUI: Queue customer for agent with AI context
+    PocAI->>VectorDB: Prepare agent briefing embedding
+    PocAgentUI->>Redis: Add to priority queue with AI summary
+    
+    Agent->>PocAgentUI: Accept chat assignment
+    PocAgentUI->>PocAI: Generate agent briefing
+    PocAI->>OpenAI: Create agent context summary
+    OpenAI-->>PocAI: "Customer reports fraud on account. Recent transaction history shows unusual activity. Recommended actions: verify identity, review transactions, initiate dispute process."
+    PocAI-->>PocAgentUI: Agent briefing with AI insights
+    PocAgentUI->>PocChat: Agent assigned with context
+    PocChat->>Redis: Update session with agent + AI briefing
+    PocChat-->>Customer: "Connecting you with a specialist agent who has been briefed on your situation..."
+    PocChat-->>Agent: Customer connected with AI-generated context
+    end
+
+    %% AI-Assisted Agent Communication
+    rect rgb(240, 255, 240)
+    note over Agent, Customer: AI-Enhanced Live Agent Chat
+    Agent->>PocAgentUI: "I can help with your fraud dispute"
+    PocAgentUI->>PocAI: Generate suggested responses for agent
+    PocAI->>OpenAI: Create helpful response suggestions
+    OpenAI-->>PocAI: Suggested questions and next steps
+    PocAI-->>PocAgentUI: Agent assistance suggestions
+    PocAgentUI->>PocChat: Agent message + AI suggestions
+    PocChat-->>Customer: Agent message via WebSocket
+    
+    Customer->>PocChat: "The charge was for $500 at a store I've never been to"
+    PocChat->>PocAI: Analyze customer response for agent
+    PocAI->>OpenAI: Extract key fraud indicators
+    OpenAI-->>PocAI: Key points: amount, unfamiliar merchant, location mismatch
+    PocAI-->>PocAgentUI: Real-time analysis for agent
+    PocChat-->>Agent: Customer message + AI analysis via WebSocket
+    end
+
+    %% Session Completion with AI Learning
+    rect rgb(248, 248, 248)
+    note over Agent, VectorDB: AI-Enhanced Chat Resolution & Learning
+    Agent->>PocAgentUI: End chat session with resolution notes
+    PocAgentUI->>PocAI: Process resolution for learning
+    PocAI->>OpenAI: Generate session summary and learnings
+    OpenAI-->>PocAI: Structured summary with improvement insights
+    PocAI->>VectorDB: Store conversation embeddings for future reference
+    PocAI->>PostgreSQL: Store AI insights and patterns
+    PocAgentUI->>PocChat: Session ended with AI learnings
+    PocChat->>PocBanking: Log interaction with AI metadata
+    PocBanking->>PostgreSQL: Store enhanced chat transcript
+    PocChat->>Redis: Clear session cache
+    PocChat-->>Customer: "Chat session ended. We've learned from this interaction to serve you better next time."
+    end
