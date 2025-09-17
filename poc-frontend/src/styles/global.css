@@ -1,0 +1,33 @@
+:root{
+  --bg: #f6f8fa;
+  --text: #1f2937;
+  --accent: #2563eb;
+}
+
+html,body,#root{
+  height:100%;
+}
+
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background:var(--bg);
+  color:var(--text);
+}
+
+.app-root{
+  display:flex;
+  flex-direction:column;
+  min-height:100vh;
+}
+
+.app-header{
+  padding:24px;
+  background:white;
+  border-bottom:1px solid #e6e9ef;
+}
+
+.app-main{
+  padding:24px;
+  flex:1;
+}

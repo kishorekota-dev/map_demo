@@ -74,7 +74,8 @@ app.use(cors({
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Agent-Type', 'X-Session-ID']
+    // allow common custom headers including X-Request-Id (case-insensitive)
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Agent-Type', 'X-Session-ID', 'X-Request-Id', 'X-Request-ID', 'x-request-id']
 }));
 
 // Compression and parsing middleware
