@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Dashboard - Customer Support</title>
+    <link rel="stylesheet" href="/styles/dashboard.css">
+    <link rel="stylesheet" href="/styles/chat.css">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div id="app" class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1 class="dashboard-title">
+                    <span class="icon">🎧</span>
+                    Agent Dashboard
+                </h1>
+                <div class="agent-info">
+                    <span id="agent-name" class="agent-name">Loading...</span>
+                    <span id="agent-department" class="agent-department"></span>
+                </div>
+            </div>
+            
+            <div class="header-center">
+                <div class="status-controls">
+                    <label for="agent-status">Status:</label>
+                    <select id="agent-status" class="status-select">
+                        <option value="available">Available</option>
+                        <option value="busy">Busy</option>
+                        <option value="away">Away</option>
+                        <option value="break">On Break</option>
+                        <option value="offline">Offline</option>
+                    </select>
+                </div>
+                
+                <div class="connection-status">
+                    <span id="connection-indicator" class="connection-indicator connecting">
+                        <span class="indicator-dot"></span>
+                        <span id="connection-text">Connecting...</span>
+                    </span>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <div class="notification-center">
+                    <button id="notifications-btn" class="notification-btn">
+                        <span class="icon">🔔</span>
+                        <span id="notification-count" class="notification-count hidden">0</span>
+                    </button>
+                </div>
+                
+                <div class="agent-menu">
+                    <button id="settings-btn" class="settings-btn">
+                        <span class="icon">⚙️</span>
+                        Settings
+                    </button>
+                    <button id="logout-btn" class="logout-btn">
+                        <span class="icon">🚪</span>
+                        Logout
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="dashboard-main">
+            <!-- Sidebar -->
+            <aside class="dashboard-sidebar">
+                <!-- Queue Overview -->
+                <section class="queue-overview">
+                    <h3>Queue Overview</h3>
+                    <div class="queue-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Waiting</span>
+                            <span id="queue-waiting" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">My Chats</span>
+                            <span id="my-chats-count" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Avg Wait</span>
+                            <span id="avg-wait-time" class="stat-value">0m</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Active Chats -->
+                <section class="active-chats">
+                    <h3>Active Chats</h3>
+                    <div id="active-chats-list" class="chats-list">
+                        <div class="empty-state">
+                            <span class="icon">💬</span>
+                            <p>No active chats</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Available Agents -->
+                <section class="available-agents">
+                    <h3>Team Status</h3>
+                    <div id="agents-list" class="agents-list">
+                        <div class="loading">Loading agents...</div>
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Chat Area -->
+            <section class="chat-area">
+                <div id="no-chat-selected" class="no-chat-state">
+                    <div class="no-chat-content">
+                        <span class="icon">💬</span>
+                        <h2>Welcome to Agent Dashboard</h2>
+                        <p>Accept a chat from the queue or select an active chat to begin</p>
+                        <div class="quick-actions">
+                            <button id="refresh-queue-btn" class="action-btn">
+                                <span class="icon">🔄</span>
+                                Refresh Queue
+                            </button>
+                            <button id="view-history-btn" class="action-btn">
+                                <span class="icon">📋</span>
+                                View History
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Window -->
+                <div id="chat-window" class="chat-window hidden">
+                    <!-- Chat Header -->
+                    <div class="chat-header">
+                        <div class="customer-info">
+                            <div class="customer-avatar">
+                                <span id="customer-initial" class="customer-initial">?</span>
+                            </div>
+                            <div class="customer-details">
+                                <h4 id="customer-name" class="customer-name">Customer Name</h4>
+                                <p id="customer-status" class="customer-status">Online</p>
+                            </div>
+                        </div>
+                        
+                        <div class="chat-info">
+                            <span id="chat-duration" class="chat-duration">00:00</span>
+                            <span id="chat-priority" class="chat-priority">Medium</span>
+                        </div>
+                        
+                        <div class="chat-actions">
+                            <button id="transfer-chat-btn" class="chat-action-btn" title="Transfer Chat">
+                                <span class="icon">↗️</span>
+                            </button>
+                            <button id="escalate-chat-btn" class="chat-action-btn" title="Escalate Chat">
+                                <span class="icon">⬆️</span>
+                            </button>
+                            <button id="customer-info-btn" class="chat-action-btn" title="Customer Info">
+                                <span class="icon">ℹ️</span>
+                            </button>
+                            <button id="end-chat-btn" class="chat-action-btn end-chat" title="End Chat">
+                                <span class="icon">✖️</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages -->
+                    <div id="chat-messages" class="chat-messages">
+                        <!-- Messages will be dynamically inserted here -->
+                    </div>
+
+                    <!-- Chat Input -->
+                    <div class="chat-input-container">
+                        <div id="typing-indicator" class="typing-indicator hidden">
+                            <span class="typing-dots">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </span>
+                            <span class="typing-text">Customer is typing...</span>
+                        </div>
+                        
+                        <div class="chat-input-area">
+                            <button id="emoji-btn" class="input-action-btn" title="Add Emoji">
+                                <span class="icon">😊</span>
+                            </button>
+                            
+                            <textarea id="message-input" 
+                                     class="message-input" 
+                                     placeholder="Type your message..."
+                                     rows="1"></textarea>
+                            
+                            <button id="attachment-btn" class="input-action-btn" title="Attach File">
+                                <span class="icon">📎</span>
+                            </button>
+                            
+                            <button id="send-message-btn" class="send-btn" disabled title="Send Message">
+                                <span class="icon">➤</span>
+                            </button>
+                        </div>
+                        
+                        <div class="quick-responses">
+                            <button class="quick-response" data-message="Hello! How can I help you today?">
+                                👋 Hello
+                            </button>
+                            <button class="quick-response" data-message="Thank you for waiting. I'm looking into this for you.">
+                                ⏳ Please wait
+                            </button>
+                            <button class="quick-response" data-message="Is there anything else I can help you with?">
+                                ❓ Anything else
+                            </button>
+                            <button class="quick-response" data-message="Thank you for contacting us. Have a great day!">
+                                👋 Goodbye
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel -->
+            <aside class="right-panel">
+                <!-- Customer Information -->
+                <section id="customer-info-panel" class="info-panel hidden">
+                    <h3>Customer Information</h3>
+                    <div class="customer-profile">
+                        <div class="profile-header">
+                            <div class="profile-avatar">
+                                <span id="profile-initial" class="profile-initial">?</span>
+                            </div>
+                            <div class="profile-details">
+                                <h4 id="profile-name" class="profile-name">Customer Name</h4>
+                                <p id="profile-email" class="profile-email">email@example.com</p>
+                            </div>
+                        </div>
+                        
+                        <div class="profile-info">
+                            <div class="info-item">
+                                <span class="info-label">Account Type:</span>
+                                <span id="account-type" class="info-value">Standard</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Member Since:</span>
+                                <span id="member-since" class="info-value">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Total Chats:</span>
+                                <span id="total-chats" class="info-value">0</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Last Contact:</span>
+                                <span id="last-contact" class="info-value">-</span>
+                            </div>
+                        </div>
+                        
+                        <div class="chat-context">
+                            <h4>Current Issue</h4>
+                            <p id="issue-description" class="issue-description">
+                                No issue description available
+                            </p>
+                            
+                            <div class="issue-details">
+                                <div class="detail-item">
+                                    <span class="detail-label">Priority:</span>
+                                    <span id="issue-priority" class="detail-value">Medium</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Category:</span>
+                                    <span id="issue-category" class="detail-value">General</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Wait Time:</span>
+                                    <span id="wait-time" class="detail-value">0m</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Chat History -->
+                <section id="chat-history-panel" class="info-panel">
+                    <h3>Recent Activity</h3>
+                    <div id="recent-activity" class="activity-list">
+                        <div class="empty-state">
+                            <span class="icon">📝</span>
+                            <p>No recent activity</p>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+
+        <!-- Queue Notifications -->
+        <div id="queue-notifications" class="queue-notifications">
+            <!-- Queue items will be displayed here -->
+        </div>
+
+        <!-- Modals -->
+        <!-- Chat Assignment Modal -->
+        <div id="chat-assignment-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>New Chat Assignment</h3>
+                    <button class="modal-close" data-modal="chat-assignment-modal">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="assignment-info">
+                        <div class="customer-summary">
+                            <h4 id="assignment-customer-name">Customer Name</h4>
+                            <p id="assignment-issue-type">Issue Type</p>
+                            <p id="assignment-wait-time">Wait Time: 2m 15s</p>
+                        </div>
+                        <div class="assignment-details">
+                            <div class="detail">
+                                <span class="label">Priority:</span>
+                                <span id="assignment-priority" class="value">Medium</span>
+                            </div>
+                            <div class="detail">
+                                <span class="label">Department:</span>
+                                <span id="assignment-department" class="value">Customer Service</span>
+                            </div>
+                            <div class="detail">
+                                <span class="label">Language:</span>
+                                <span id="assignment-language" class="value">English</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="reject-chat-btn" class="btn btn-secondary">Reject</button>
+                    <button id="accept-chat-btn" class="btn btn-primary">Accept Chat</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transfer Chat Modal -->
+        <div id="transfer-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Transfer Chat</h3>
+                    <button class="modal-close" data-modal="transfer-modal">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="transfer-options">
+                        <label for="transfer-agent">Select Agent:</label>
+                        <select id="transfer-agent" class="form-select">
+                            <option value="">Choose an agent...</option>
+                        </select>
+                        
+                        <label for="transfer-department">Or Department:</label>
+                        <select id="transfer-department" class="form-select">
+                            <option value="">Choose department...</option>
+                            <option value="technical">Technical Support</option>
+                            <option value="billing">Billing</option>
+                            <option value="sales">Sales</option>
+                            <option value="management">Management</option>
+                        </select>
+                        
+                        <label for="transfer-reason">Transfer Reason:</label>
+                        <textarea id="transfer-reason" class="form-textarea" 
+                                 placeholder="Brief reason for transfer..." rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="cancel-transfer-btn" class="btn btn-secondary">Cancel</button>
+                    <button id="confirm-transfer-btn" class="btn btn-primary">Transfer</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- End Chat Modal -->
+        <div id="end-chat-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>End Chat Session</h3>
+                    <button class="modal-close" data-modal="end-chat-modal">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="end-chat-options">
+                        <label for="resolution-type">Resolution:</label>
+                        <select id="resolution-type" class="form-select">
+                            <option value="resolved">Resolved</option>
+                            <option value="escalated">Escalated</option>
+                            <option value="transferred">Transferred</option>
+                            <option value="abandoned">Customer Left</option>
+                        </select>
+                        
+                        <label for="chat-summary">Summary (Optional):</label>
+                        <textarea id="chat-summary" class="form-textarea" 
+                                 placeholder="Brief summary of the chat resolution..." rows="4"></textarea>
+                        
+                        <label for="follow-up">Follow-up Required:</label>
+                        <input type="checkbox" id="follow-up-required">
+                        <span>Schedule follow-up</span>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="cancel-end-chat-btn" class="btn btn-secondary">Cancel</button>
+                    <button id="confirm-end-chat-btn" class="btn btn-primary">End Chat</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content large">
+                <div class="modal-header">
+                    <h3>Agent Settings</h3>
+                    <button class="modal-close" data-modal="settings-modal">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-tabs">
+                        <button class="tab-btn active" data-tab="preferences">Preferences</button>
+                        <button class="tab-btn" data-tab="notifications">Notifications</button>
+                        <button class="tab-btn" data-tab="shortcuts">Shortcuts</button>
+                    </div>
+                    
+                    <div class="tab-content">
+                        <div id="preferences-tab" class="tab-pane active">
+                            <div class="setting-group">
+                                <label>Maximum Concurrent Chats:</label>
+                                <input type="number" id="max-chats" min="1" max="10" value="3">
+                            </div>
+                            <div class="setting-group">
+                                <label>Auto Accept Chats:</label>
+                                <input type="checkbox" id="auto-accept">
+                            </div>
+                            <div class="setting-group">
+                                <label>Default Status on Login:</label>
+                                <select id="default-status">
+                                    <option value="available">Available</option>
+                                    <option value="away">Away</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div id="notifications-tab" class="tab-pane hidden">
+                            <div class="setting-group">
+                                <label>New Chat Notifications:</label>
+                                <input type="checkbox" id="chat-notifications" checked>
+                            </div>
+                            <div class="setting-group">
+                                <label>Sound Notifications:</label>
+                                <input type="checkbox" id="sound-notifications" checked>
+                            </div>
+                            <div class="setting-group">
+                                <label>Desktop Notifications:</label>
+                                <input type="checkbox" id="desktop-notifications">
+                            </div>
+                        </div>
+                        
+                        <div id="shortcuts-tab" class="tab-pane hidden">
+                            <div class="shortcuts-list">
+                                <div class="shortcut-item">
+                                    <span>Send Message:</span>
+                                    <span class="shortcut-key">Ctrl + Enter</span>
+                                </div>
+                                <div class="shortcut-item">
+                                    <span>End Chat:</span>
+                                    <span class="shortcut-key">Ctrl + E</span>
+                                </div>
+                                <div class="shortcut-item">
+                                    <span>Transfer Chat:</span>
+                                    <span class="shortcut-key">Ctrl + T</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="cancel-settings-btn" class="btn btn-secondary">Cancel</button>
+                    <button id="save-settings-btn" class="btn btn-primary">Save Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Connecting to chat system...</p>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container">
+            <!-- Toast notifications will appear here -->
+        </div>
+    </div>
+
+    <!-- Audio for notifications -->
+    <audio id="notification-sound" preload="auto">
+        <source src="/sounds/notification.mp3" type="audio/mpeg">
+        <source src="/sounds/notification.ogg" type="audio/ogg">
+    </audio>
+
+    <!-- Scripts -->
+    <script src="/js/dashboard.js"></script>
+    <script src="/js/chat.js"></script>
+    <script src="/js/notifications.js"></script>
+    <script src="/js/utils.js"></script>
+</body>
+</html>
