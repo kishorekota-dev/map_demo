@@ -33,6 +33,24 @@ router.post('/message',
 );
 
 /**
+ * POST /api/chat/banking
+ * Send a banking-specific message
+ */
+router.post('/banking',
+  [
+    body('message')
+      .trim()
+      .isLength({ min: 1, max: 1000 })
+      .withMessage('Message must be between 1 and 1000 characters'),
+    body('userId')
+      .optional()
+      .isString()
+      .withMessage('User ID must be a string')
+  ],
+  asyncHandler(ChatController.sendBankingMessage)
+);
+
+/**
  * GET /api/chat/intents
  * Get available intents
  */

@@ -12,6 +12,78 @@ const { performance } = require('../utils/performance');
 
 class ChatController {
   /**
+   * Send a banking chat message and get response
+   * POST /api/chat/banking
+   */
+  async sendBankingMessage(req, res, next) {
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json(
+          createErrorResponse('Validation failed', 400, errors.array())
+        );
+      }
+
+      const { message, userId = 'user123' } = req.body;
+      const sessionId = req.headers['x-session-id'] || req.sessionId;
+      const requestId = req.headers['x-request-id'] || req.requestId;
+
+      logger.info('Processing banking chat message', {
+        requestId,
+        sessionId,
+        userId,
+        messageLength: message.length
+      });
+
+      // Process banking message
+      const bankingResult = await performance.measureAsync(
+        'banking_chat_processing',
+        () => chatService.processBankingChat(message, userId, sessionId),
+        { requestId, userId, messageLength: message.length }
+      );
+
+      if (!bankingResult.success) {
+        logger.error('Banking chat processing failed', {
+          requestId,
+          userId,
+          error: bankingResult.error.message
+        });
+        
+        return res.status(500).json(
+          createErrorResponse('Failed to process banking message', 500, null, requestId)
+        );
+      }
+
+      const result = bankingResult.result;
+
+      // Log successful processing
+      logger.info('Banking chat message processed successfully', {
+        requestId,
+        sessionId,
+        userId,
+        intent: result.data.intent,
+        action: result.data.action,
+        confidence: result.data.confidence,
+        isBankingRelated: result.data.isBankingRelated,
+        processingTime: bankingResult.timing.durationMs
+      });
+
+      // Send response
+      res.json(createResponse(result.data, 'Banking message processed successfully', requestId));
+
+    } catch (error) {
+      logger.error('Banking chat controller error', {
+        requestId: req.requestId,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      next(error);
+    }
+  }
+
+  /**
    * Send a chat message and get response
    * POST /api/chat/message
    */
