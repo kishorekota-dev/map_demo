@@ -3,6 +3,49 @@ const router = express.Router();
 const logger = require('../services/logger');
 
 /**
+ * Compatibility routes for frontend expectations
+ * - POST /api/chat/message -> maps to POST /api/sessions/:sessionId/messages
+ * - GET  /api/chat/history -> maps to GET /api/sessions/:sessionId/history
+ */
+
+// Convenience POST /api/chat/message
+router.post('/chat/message', async (req, res, next) => {
+    try {
+        // frontend sends { message, context } with X-Session-ID header
+        const sessionId = req.headers['x-session-id'] || req.body?.sessionId;
+
+        if (!sessionId) {
+            return res.status(400).json({ error: 'Session ID required in X-Session-ID header or body', timestamp: new Date().toISOString() });
+        }
+
+        // Reuse the session messages handler by forwarding to the internal route
+        req.params.sessionId = sessionId;
+        req.body.content = req.body.message;
+
+        return router.handle(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Convenience GET /api/chat/history
+router.get('/chat/history', async (req, res, next) => {
+    try {
+        // frontend may provide sessionId as query param
+        const sessionId = req.query.sessionId;
+        if (!sessionId) {
+            return res.status(400).json({ error: 'sessionId query parameter required', timestamp: new Date().toISOString() });
+        }
+
+        // Forward to the existing sessions/:sessionId/history handler
+        req.params.sessionId = sessionId;
+        return router.handle(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
  * @route POST /api/process
  * @desc Process incoming messages from external services
  * @access Private (inter-service communication)

@@ -23,7 +23,8 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3002,
+    port: parseInt(process.env.PORT as any) || 3002,
+    strictPort: true,
     host: true,
     proxy: {
       '/api': {
