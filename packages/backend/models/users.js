@@ -124,6 +124,27 @@ const mockUsers = [
     }
   },
   {
+    userId: 'user_customer_004',
+    email: 'john.doe@example.com',
+    password: '$2a$10$AiH8I6JBMSj5BH/SWzij2eHyVlrN49HkPPZi52JnsX8Zoj4TLiUl.', // 'password123'
+    firstName: 'John',
+    lastName: 'Doe',
+    role: 'CUSTOMER',
+    status: 'ACTIVE',
+    accountIds: ['10000000-0000-0000-0000-000000000001'], // Database account ID
+    createdAt: new Date('2024-01-01'),
+    lastLoginAt: new Date(),
+    customerId: 'CUST_004',
+    phone: '+1-555-0102',
+    address: {
+      street: '456 Oak Avenue',
+      city: 'San Francisco',
+      state: 'CA',
+      zipCode: '94102',
+      country: 'USA'
+    }
+  },
+  {
     userId: 'user_customer_002',
     email: 'jane.smith@email.com',
     password: '$2a$10$8K9wX2fX3qwRvLBY7FMZfOvYx1J3QpQrS4WzN8VmB5A2C7D6E9F8G0', // 'admin123'
@@ -162,6 +183,27 @@ const mockUsers = [
       city: 'Demo City',
       state: 'DC',
       zipCode: '12345',
+      country: 'USA'
+    }
+  },
+  {
+    userId: 'user_customer_004',
+    email: 'john.doe@example.com',
+    password: '$2a$10$AiH8I6JBMSj5BH/SWzij2eHyVlrN49HkPPZi52JnsX8Zoj4TLiUl.', // 'password123'
+    firstName: 'John',
+    lastName: 'Doe',
+    role: 'CUSTOMER',
+    status: 'ACTIVE',
+    accountIds: ['acc_006'], // Only their own account
+    createdAt: new Date('2024-02-01'),
+    lastLoginAt: new Date(),
+    customerId: 'CUST_004',
+    phone: '+1-555-0104',
+    address: {
+      street: '456 Example Ave',
+      city: 'Example City',
+      state: 'EX',
+      zipCode: '54321',
       country: 'USA'
     }
   }

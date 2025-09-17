@@ -187,8 +187,17 @@ class SecurityUtils {
     // Check if user role is allowed
     if (!policy.roles.includes(user.role)) return false;
 
-    // Check permission
-    return PermissionChecker.hasPermission(user.role, policy.permission);
+    // Check permission - first try exact match
+    if (PermissionChecker.hasPermission(user.role, policy.permission)) {
+      return true;
+    }
+
+    // For customers, also check scope-specific permissions (e.g., accounts:read:own)
+    if (user.role === 'CUSTOMER' && policy.scope === 'conditional') {
+      return PermissionChecker.hasPermission(user.role, `${policy.permission}:own`);
+    }
+
+    return false;
   }
 
   /**

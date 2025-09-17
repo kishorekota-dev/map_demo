@@ -15,10 +15,11 @@ import {
 } from '../types';
 import DialogFlowService from './dialogflow';
 import { MCPClientService } from './mcp-client';
+import { HTTPMCPClientService } from './mcp-client-http';
 
 export class ChatBotService {
   private dialogFlow: DialogFlowService;
-  private mcpClient: MCPClientService;
+  private mcpClient: MCPClientService | HTTPMCPClientService;
   private currentSession: ChatSession | null = null;
   private state: ChatBotState;
   private authContext: AuthenticationContext | null = null;
@@ -30,7 +31,13 @@ export class ChatBotService {
   ) {
     // Initialize services
     this.dialogFlow = new DialogFlowService(dialogFlowConfig);
-    this.mcpClient = new MCPClientService(mcpConfig);
+    
+    // Choose MCP client based on transport type
+    if (mcpConfig.transport === 'http') {
+      this.mcpClient = new HTTPMCPClientService(mcpConfig);
+    } else {
+      this.mcpClient = new MCPClientService(mcpConfig);
+    }
 
     // Initialize state
     this.state = {

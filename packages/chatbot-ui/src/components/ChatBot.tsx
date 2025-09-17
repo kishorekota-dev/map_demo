@@ -10,23 +10,142 @@ interface ChatBotProps {
   className?: string;
 }
 
+// Debug logging utility for ChatBot component
+class ChatBotDebugLogger {
+  private component: string;
+  private isDebugMode: boolean;
+
+  constructor(component = 'CHATBOT-UI') {
+    this.component = component;
+    this.isDebugMode = process.env.NODE_ENV === 'development' || 
+                      process.env.NEXT_PUBLIC_DEBUG === 'true' ||
+                      localStorage?.getItem('chatbot_debug') === 'true';
+  }
+
+  private formatMessage(level: string, message: string, data?: any): string {
+    const timestamp = new Date().toISOString();
+    const prefix = `[${timestamp}] [${this.component}] [${level}]`;
+    
+    if (data) {
+      return `${prefix} ${message} | Data: ${JSON.stringify(data, null, 2)}`;
+    }
+    return `${prefix} ${message}`;
+  }
+
+  info(message: string, data?: any): void {
+    console.log(this.formatMessage('INFO', message, data));
+  }
+
+  debug(message: string, data?: any): void {
+    if (this.isDebugMode) {
+      console.log(this.formatMessage('DEBUG', message, data));
+    }
+  }
+
+  warn(message: string, data?: any): void {
+    console.warn(this.formatMessage('WARN', message, data));
+  }
+
+  error(message: string, error?: any, data?: any): void {
+    const errorData = error ? { 
+      message: error.message, 
+      stack: error.stack, 
+      ...(data || {}) 
+    } : data;
+    console.error(this.formatMessage('ERROR', message, errorData));
+  }
+
+  stateChange(stateName: string, previousValue: any, newValue: any): void {
+    if (this.isDebugMode) {
+      this.debug(`🔄 State Change: ${stateName}`, {
+        previous: previousValue,
+        new: newValue,
+        changed: previousValue !== newValue
+      });
+    }
+  }
+
+  userAction(action: string, details?: any): void {
+    this.info(`👤 User Action: ${action}`, details);
+  }
+
+  componentEvent(event: string, details?: any): void {
+    if (this.isDebugMode) {
+      this.debug(`🔧 Component Event: ${event}`, details);
+    }
+  }
+}
+
 const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
+  const logger = new ChatBotDebugLogger('CHATBOT-UI');
   const [state, setState] = useState(chatBotStore.getState());
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Subscribe to store changes
+  // Enhanced debug state tracking
+  const [previousState, setPreviousState] = useState(state);
+
+  logger.componentEvent('ChatBot component mounted', {
+    className,
+    initialState: {
+      isInitialized: state.isInitialized,
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      messageCount: state.messages.length,
+      hasError: !!state.error
+    }
+  });
+
+  // Subscribe to store changes with enhanced logging
   useEffect(() => {
+    logger.debug('🔗 Setting up store subscription');
+    
     const unsubscribe = chatBotStore.subscribe(() => {
-      setState(chatBotStore.getState());
+      const newState = chatBotStore.getState();
+      
+      // Log state changes
+      if (newState.isInitialized !== previousState.isInitialized) {
+        logger.stateChange('isInitialized', previousState.isInitialized, newState.isInitialized);
+      }
+      if (newState.isAuthenticated !== previousState.isAuthenticated) {
+        logger.stateChange('isAuthenticated', previousState.isAuthenticated, newState.isAuthenticated);
+      }
+      if (newState.isLoading !== previousState.isLoading) {
+        logger.stateChange('isLoading', previousState.isLoading, newState.isLoading);
+      }
+      if (newState.messages.length !== previousState.messages.length) {
+        logger.stateChange('messageCount', previousState.messages.length, newState.messages.length);
+        logger.debug('📝 Messages updated', {
+          previousCount: previousState.messages.length,
+          newCount: newState.messages.length,
+          lastMessage: newState.messages[newState.messages.length - 1]
+        });
+      }
+      if (newState.error !== previousState.error) {
+        logger.stateChange('error', previousState.error, newState.error);
+        if (newState.error) {
+          logger.error('❌ Store error detected', null, { error: newState.error });
+        }
+      }
+
+      setPreviousState(newState);
+      setState(newState);
     });
 
-    return unsubscribe;
-  }, []);
+    logger.debug('✅ Store subscription established');
+
+    return () => {
+      logger.debug('🔌 Cleaning up store subscription');
+      unsubscribe();
+    };
+  }, [previousState]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      logger.debug('📜 Auto-scrolling to bottom of messages');
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [state.messages]);
 
   // Check for authentication requirements in new messages
@@ -37,19 +156,35 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
         lastMessage.metadata?.requiresAuth && 
         !state.isAuthenticated &&
         !showAuthDialog) {
-      // Auto-trigger authentication dialog when system requests auth
+      
+      logger.info('🔐 Auto-triggering authentication dialog', {
+        messageId: lastMessage.id,
+        messageContent: lastMessage.content.substring(0, 100) + '...',
+        currentAuthState: state.isAuthenticated,
+        dialogCurrentlyOpen: showAuthDialog
+      });
+      
       setShowAuthDialog(true);
     }
   }, [state.messages, state.isAuthenticated, showAuthDialog]);
 
   // Initialize ChatBot on mount
   useEffect(() => {
+    logger.componentEvent('ChatBot initialization check', {
+      isInitialized: state.isInitialized,
+      shouldInitialize: !state.isInitialized
+    });
+
     if (!state.isInitialized) {
+      logger.info('🚀 Initializing ChatBot...');
       initializeChatBot();
     }
   }, []);
 
   const initializeChatBot = async () => {
+    const startTime = Date.now();
+    logger.info('🔧 ChatBot initialization starting...');
+
     try {
       const config = {
         dialogFlow: {
@@ -58,6 +193,8 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
           languageCode: 'en-US',
         },
         mcp: {
+          transport: 'http' as const,
+          mcpServerUrl: process.env.NEXT_PUBLIC_MCP_SERVER_URL || 'http://localhost:3001',
           serverPath: process.env.NEXT_PUBLIC_MCP_SERVER_PATH || '../backend/mcp-server.js',
           apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1',
           timeout: 30000,
@@ -83,90 +220,205 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
         },
       };
 
+      logger.info('🔥 Initializing ChatBot with HTTP MCP config', {
+        mcpConfig: config.mcp,
+        dialogFlowConfig: config.dialogFlow,
+        agentConfig: {
+          name: config.agent.name,
+          model: config.agent.model,
+          temperature: config.agent.temperature
+        }
+      });
+
       await chatBotStore.initialize(config);
+      
+      const duration = Date.now() - startTime;
+      logger.info('✅ ChatBot initialization completed successfully', {
+        duration: `${duration}ms`,
+        transport: config.mcp.transport,
+        mcpServerUrl: config.mcp.mcpServerUrl
+      });
+
     } catch (error) {
-      console.error('Failed to initialize ChatBot:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ ChatBot initialization failed', error, {
+        duration: `${duration}ms`
+      });
     }
   };
 
   const handleSendMessage = async (message: string) => {
+    const startTime = Date.now();
+    logger.userAction('Send Message', {
+      messageLength: message.length,
+      messagePreview: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+      currentAuthState: state.isAuthenticated,
+      canSendMessage: state.canSendMessage
+    });
+
     try {
-      console.log('🔥 Message Sent:', message);
-      console.log('🔥 Current Auth State:', state.isAuthenticated);
-      
       // Check if this message requires authentication before sending
       const lowerMessage = message.toLowerCase();
       const authRequiredKeywords = ['balance', 'transfer', 'payment', 'card', 'transaction', 'account'];
       const requiresAuthMessage = authRequiredKeywords.some(keyword => lowerMessage.includes(keyword));
       
-      console.log('🔥 Requires Auth:', requiresAuthMessage);
+      logger.debug('� Message analysis', {
+        requiresAuth: requiresAuthMessage,
+        containsKeywords: authRequiredKeywords.filter(keyword => lowerMessage.includes(keyword)),
+        currentAuthState: state.isAuthenticated
+      });
       
       if (requiresAuthMessage && !state.isAuthenticated) {
-        console.log('🔥 Triggering Auth Dialog from Message');
-        // Immediately show auth dialog for banking operations
+        logger.info('� Authentication required for message - triggering dialog', {
+          message: message.substring(0, 100),
+          requiresAuth: requiresAuthMessage
+        });
         setShowAuthDialog(true);
         return;
       }
 
+      logger.debug('📤 Sending message to store...');
       await chatBotStore.sendMessage(message);
+      
+      const duration = Date.now() - startTime;
+      logger.info('✅ Message sent successfully', {
+        duration: `${duration}ms`,
+        messageLength: message.length
+      });
+
     } catch (error) {
-      console.error('Failed to send message:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ Failed to send message', error, {
+        duration: `${duration}ms`,
+        messageLength: message.length
+      });
     }
   };
 
   const handleQuickAction = async (action: { intent: string; parameters?: Record<string, any> }) => {
+    const startTime = Date.now();
+    logger.userAction('Quick Action', {
+      intent: action.intent,
+      hasParameters: !!action.parameters,
+      parameterKeys: action.parameters ? Object.keys(action.parameters) : [],
+      currentAuthState: state.isAuthenticated
+    });
+
     try {
-      console.log('🔥 Quick Action Clicked:', action);
-      console.log('🔥 Current Auth State:', state.isAuthenticated);
-      console.log('🔥 Current Show Auth Dialog:', showAuthDialog);
-      
       // Handle Login action specially
       if (action.intent === 'Login') {
-        console.log('🔥 Triggering Login Dialog');
+        logger.info('� Login quick action - triggering auth dialog');
         setShowAuthDialog(true);
         return;
       }
 
       // Check if authentication is required for other actions
       if (requiresAuth(action.intent) && !state.isAuthenticated) {
-        console.log('🔥 Auth Required - Triggering Dialog');
+        logger.info('� Auth required for quick action - triggering dialog', {
+          intent: action.intent,
+          requiresAuth: requiresAuth(action.intent)
+        });
         setShowAuthDialog(true);
         return;
       }
 
-      console.log('🔥 Executing Quick Action');
+      logger.debug('⚡ Executing quick action...');
       await chatBotStore.executeQuickAction(action);
+      
+      const duration = Date.now() - startTime;
+      logger.info('✅ Quick action executed successfully', {
+        intent: action.intent,
+        duration: `${duration}ms`
+      });
+
     } catch (error) {
-      console.error('Failed to execute quick action:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ Failed to execute quick action', error, {
+        intent: action.intent,
+        duration: `${duration}ms`
+      });
     }
   };
 
   const handleAuthenticate = async (email: string, password: string) => {
+    const startTime = Date.now();
+    logger.userAction('Authentication Attempt', {
+      email,
+      hasPassword: !!password
+    });
+
     try {
+      logger.debug('🔐 Attempting authentication...');
       const success = await chatBotStore.authenticate(email, password);
+      
+      const duration = Date.now() - startTime;
+      
       if (success) {
+        logger.info('✅ Authentication successful', {
+          email,
+          duration: `${duration}ms`
+        });
         setShowAuthDialog(false);
+      } else {
+        logger.warn('⚠️ Authentication failed', {
+          email,
+          duration: `${duration}ms`
+        });
       }
+      
       return success;
     } catch (error) {
-      console.error('Authentication failed:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ Authentication error', error, {
+        email,
+        duration: `${duration}ms`
+      });
       return false;
     }
   };
 
   const handleLogout = async () => {
+    const startTime = Date.now();
+    logger.userAction('Logout', {
+      wasAuthenticated: state.isAuthenticated
+    });
+
     try {
+      logger.debug('🚪 Attempting logout...');
       await chatBotStore.logout();
+      
+      const duration = Date.now() - startTime;
+      logger.info('✅ Logout successful', {
+        duration: `${duration}ms`
+      });
     } catch (error) {
-      console.error('Logout failed:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ Logout error', error, {
+        duration: `${duration}ms`
+      });
     }
   };
 
   const handleClearHistory = async () => {
+    const startTime = Date.now();
+    logger.userAction('Clear History', {
+      messageCount: state.messages.length
+    });
+
     try {
+      logger.debug('🗑️ Clearing chat history...');
       await chatBotStore.clearHistory();
+      
+      const duration = Date.now() - startTime;
+      logger.info('✅ History cleared successfully', {
+        duration: `${duration}ms`,
+        previousMessageCount: state.messages.length
+      });
     } catch (error) {
-      console.error('Failed to clear history:', error);
+      const duration = Date.now() - startTime;
+      logger.error('❌ Failed to clear history', error, {
+        duration: `${duration}ms`
+      });
     }
   };
 
@@ -183,21 +435,40 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
       'card.status',
       'payment.bill'
     ];
-    return authRequiredIntents.includes(intent);
+    
+    const required = authRequiredIntents.includes(intent);
+    logger.debug('🔍 Checking auth requirement', {
+      intent,
+      required,
+      authRequiredIntents
+    });
+    
+    return required;
   };
 
+  // Component render logic with enhanced logging
   if (!state.isInitialized && state.isLoading) {
+    logger.componentEvent('Rendering loading state', {
+      isInitialized: state.isInitialized,
+      isLoading: state.isLoading
+    });
+
     return (
       <div className={`chatbot-container ${className}`}>
         <div className="flex items-center justify-center h-96">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <span className="ml-3 text-gray-600">Initializing ChatBot...</span>
+          <span className="ml-3 text-gray-600">Initializing HTTP MCP ChatBot...</span>
         </div>
       </div>
     );
   }
 
   if (state.error && !state.isInitialized) {
+    logger.componentEvent('Rendering error state', {
+      error: state.error,
+      isInitialized: state.isInitialized
+    });
+
     return (
       <div className={`chatbot-container ${className}`}>
         <div className="flex flex-col items-center justify-center h-96 p-6">
@@ -206,7 +477,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
             <p className="text-sm">{state.error}</p>
           </div>
           <button
-            onClick={initializeChatBot}
+            onClick={() => {
+              logger.userAction('Retry Initialization');
+              initializeChatBot();
+            }}
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
             Retry
@@ -216,6 +490,14 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
     );
   }
 
+  logger.componentEvent('Rendering main ChatBot interface', {
+    isInitialized: state.isInitialized,
+    isAuthenticated: state.isAuthenticated,
+    messageCount: state.messages.length,
+    showAuthDialog,
+    canSendMessage: state.canSendMessage
+  });
+
   return (
     <div className={`chatbot-container flex flex-col h-full ${className}`}>
       {/* Header */}
@@ -223,7 +505,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             <div className="w-3 h-3 bg-green-400 rounded-full mr-2"></div>
-            <h2 className="text-lg font-semibold">Enterprise Banking Assistant</h2>
+            <h2 className="text-lg font-semibold">Enterprise Banking Assistant (HTTP MCP)</h2>
           </div>
           <div className="flex items-center space-x-2">
             {state.isAuthenticated && (
@@ -234,7 +516,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
             <div className="flex space-x-1">
               {state.isAuthenticated && (
                 <button
-                  onClick={handleLogout}
+                  onClick={() => {
+                    logger.userAction('Logout Button Clicked');
+                    handleLogout();
+                  }}
                   className="p-2 text-blue-100 hover:text-white hover:bg-blue-700 rounded"
                   title="Logout"
                 >
@@ -244,7 +529,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
                 </button>
               )}
               <button
-                onClick={handleClearHistory}
+                onClick={() => {
+                  logger.userAction('Clear History Button Clicked');
+                  handleClearHistory();
+                }}
                 className="p-2 text-blue-100 hover:text-white hover:bg-blue-700 rounded"
                 title="Clear History"
               >
@@ -260,7 +548,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
       {/* Quick Actions */}
       <QuickActions
         actions={chatBotStore.getQuickActions()}
-        onActionClick={handleQuickAction}
+        onActionClick={(action) => {
+          logger.debug('🎯 Quick action passed to component', { action });
+          handleQuickAction(action);
+        }}
         isAuthenticated={state.isAuthenticated}
         isLoading={state.isLoading}
       />
@@ -277,18 +568,30 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
 
       {/* Input */}
       <MessageInput
-        onSendMessage={handleSendMessage}
+        onSendMessage={(message) => {
+          logger.debug('💬 Message input submitted', { 
+            messageLength: message.length,
+            canSendMessage: state.canSendMessage
+          });
+          handleSendMessage(message);
+        }}
         disabled={!state.canSendMessage}
         isLoading={state.isLoading}
       />
 
       {/* Authentication Dialog */}
-      {(() => { console.log('🔥 Rendering Auth Dialog:', showAuthDialog); return null; })()}
       {showAuthDialog && (
         <AuthDialog
           isOpen={showAuthDialog}
-          onClose={() => setShowAuthDialog(false)}
-          onAuthenticate={handleAuthenticate}
+          onClose={() => {
+            logger.userAction('Auth Dialog Closed');
+            logger.debug('🔐 Auth dialog closed by user');
+            setShowAuthDialog(false);
+          }}
+          onAuthenticate={(email, password) => {
+            logger.debug('🔐 Auth dialog submitted', { email });
+            return handleAuthenticate(email, password);
+          }}
           isLoading={state.isLoading}
           error={state.error}
         />
@@ -300,7 +603,11 @@ const ChatBot: React.FC<ChatBotProps> = ({ className = '' }) => {
           <div className="flex items-center justify-between">
             <span className="text-sm">{state.error}</span>
             <button
-              onClick={() => chatBotStore.clearError()}
+              onClick={() => {
+                logger.userAction('Error Toast Dismissed');
+                logger.debug('❌ Error toast dismissed');
+                chatBotStore.clearError();
+              }}
               className="ml-2 text-red-200 hover:text-white"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

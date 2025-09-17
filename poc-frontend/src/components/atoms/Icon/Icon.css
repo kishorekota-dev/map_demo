@@ -1,0 +1,56 @@
+/* Icon Base Styles */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Icon Sizes */
+.icon--small {
+  font-size: 0.875rem;
+  width: 14px;
+  height: 14px;
+}
+
+.icon--medium {
+  font-size: 1rem;
+  width: 16px;
+  height: 16px;
+}
+
+.icon--large {
+  font-size: 1.25rem;
+  width: 20px;
+  height: 20px;
+}
+
+.icon--xlarge {
+  font-size: 1.5rem;
+  width: 24px;
+  height: 24px;
+}
+
+/* Icon Colors */
+.icon--primary {
+  color: #3b82f6;
+}
+
+.icon--secondary {
+  color: #6b7280;
+}
+
+.icon--success {
+  color: #10b981;
+}
+
+.icon--warning {
+  color: #f59e0b;
+}
+
+.icon--error {
+  color: #ef4444;
+}
+
+.icon--inherit {
+  color: inherit;
+}

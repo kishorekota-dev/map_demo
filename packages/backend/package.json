@@ -11,6 +11,7 @@
     "test:security": "./test-security.sh",
     "test:enterprise": "./test-enterprise-api.sh",
     "mcp:start": "node mcp-server.js",
+    "mcp:start:http": "node mcp-server-http.js",
     "mcp:test": "./test-mcp.sh",
     "mcp:example": "node mcp-example.js",
     "mcp:demo": "node mcp-example.js",
@@ -34,11 +35,12 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.5.1",
-    "helmet": "^7.0.0",
+    "helmet": "^7.2.0",
     "joi": "^17.9.2",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "pg": "^8.11.3",
+    "redis": "^4.7.1",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

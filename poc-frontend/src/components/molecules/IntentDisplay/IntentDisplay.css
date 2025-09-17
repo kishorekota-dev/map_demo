@@ -1,0 +1,244 @@
+/* Intent Display Container */
+.intent-display {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.intent-display__section {
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.intent-display__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+/* Intent Analysis */
+.intent-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.intent-analysis__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intent-analysis__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.intent-analysis__value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  padding: 4px 8px;
+  background-color: #f9fafb;
+  border-radius: 4px;
+  display: inline-block;
+  max-width: fit-content;
+}
+
+/* Confidence Display */
+.confidence-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confidence-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  max-width: fit-content;
+}
+
+.confidence-value--success {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.confidence-value--warning {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.confidence-value--error {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.confidence-bar {
+  width: 100%;
+  height: 6px;
+  background-color: #f3f4f6;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.confidence-bar__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease-in-out;
+}
+
+.confidence-bar__fill--success {
+  background-color: #10b981;
+}
+
+.confidence-bar__fill--warning {
+  background-color: #f59e0b;
+}
+
+.confidence-bar__fill--error {
+  background-color: #ef4444;
+}
+
+.confidence-level {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Entities */
+.entities-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entity-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.entity-tag__type {
+  font-weight: 600;
+  color: #374151;
+}
+
+.entity-tag__value {
+  color: #6b7280;
+}
+
+.entity-tag__confidence {
+  color: #9ca3af;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+/* Available Intents */
+.available-intents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.available-intent {
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background-color: #fafafa;
+  transition: all 0.2s ease-in-out;
+}
+
+.available-intent:hover {
+  border-color: #d1d5db;
+  background-color: #f9fafb;
+}
+
+.available-intent--active {
+  border-color: #3b82f6;
+  background-color: #eff6ff;
+}
+
+.available-intent__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.available-intent__name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.available-intent__category {
+  font-size: 0.75rem;
+  color: #6b7280;
+  background-color: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.available-intent__description {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.available-intent__examples {
+  font-size: 0.75rem;
+}
+
+.available-intent__examples label {
+  font-weight: 500;
+  color: #374151;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.available-intent__examples ul {
+  margin: 0;
+  padding-left: 16px;
+  color: #6b7280;
+}
+
+.available-intent__examples li {
+  margin-bottom: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .intent-display__section {
+    padding: 12px;
+  }
+  
+  .intent-display__title {
+    font-size: 0.875rem;
+  }
+  
+  .available-intents {
+    max-height: 200px;
+  }
+}

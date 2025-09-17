@@ -1,0 +1,97 @@
+/* TextArea Base Styles */
+.textarea-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.textarea-wrapper {
+  position: relative;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+  transition: all 0.2s ease-in-out;
+  background-color: white;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+
+.textarea--error {
+  border-color: #dc2626;
+}
+
+.textarea--error:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.2);
+}
+
+.textarea--auto-resize {
+  resize: none;
+  overflow: hidden;
+}
+
+.textarea::placeholder {
+  color: #9ca3af;
+}
+
+/* Label */
+.textarea__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+/* Character Count */
+.textarea__char-count {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  pointer-events: none;
+}
+
+.char-count {
+  font-size: 0.75rem;
+  color: #6b7280;
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.char-count--warning {
+  color: #d97706;
+}
+
+.char-count--error {
+  color: #dc2626;
+}
+
+/* Error and Helper Text */
+.textarea__error {
+  font-size: 0.875rem;
+  color: #dc2626;
+}
+
+.textarea__helper {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .textarea {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+}
