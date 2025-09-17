@@ -15,6 +15,7 @@ const { validateEnvironment } = require('./utils/validation');
 // Import routes
 const chatRoutes = require('./routes/chat');
 const healthRoutes = require('./routes/health');
+const pocBankingRoutes = require('./routes/poc-banking.routes');
 
 class ChatbotServer {
   constructor() {
@@ -134,6 +135,7 @@ class ChatbotServer {
     // API routes
     this.app.use('/api/chat', chatRoutes);
     this.app.use('/api/health', healthRoutes);
+    this.app.use('/api/banking', pocBankingRoutes);
 
     // API documentation route
     this.app.get('/api', (req, res) => {
@@ -143,7 +145,8 @@ class ChatbotServer {
         version: require('../package.json').version,
         endpoints: {
           chat: '/api/chat',
-          health: '/api/health'
+          health: '/api/health',
+          banking: '/api/banking'
         },
         documentation: {
           openapi: '/api/docs',
