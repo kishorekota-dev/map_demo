@@ -1,0 +1,1349 @@
+openapi: 3.0.3
+info:
+  title: POC Banking Service
+  description: |
+    Banking Service for POC Banking Chat System providing core banking operations,
+    account management, transaction processing, and financial data access.
+    
+    ## Features
+    - Account balance and transaction history
+    - Money transfers and payments
+    - Card management and controls
+    - Investment portfolio access
+    - Loan and credit information
+    - Fraud detection and alerts
+    - Compliance and audit trails
+    - Real-time transaction processing
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3005
+    description: Development server
+  - url: https://banking-service.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Customer Accounts
+  /api/customers/{customerId}/accounts:
+    get:
+      tags: [Accounts]
+      summary: Get customer accounts
+      description: Retrieve all accounts for a specific customer
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: accountType
+          in: query
+          schema:
+            type: string
+            enum: [checking, savings, credit, investment, loan]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, closed, frozen]
+      responses:
+        '200':
+          description: Customer accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+                  totalBalance:
+                    type: number
+                  summary:
+                    $ref: '#/components/schemas/AccountSummary'
+
+  # Account Details
+  /api/accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get account details
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDetails'
+        '404':
+          description: Account not found
+
+  /api/accounts/{accountId}/balance:
+    get:
+      tags: [Accounts]
+      summary: Get account balance
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: includeHolds
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Account balance retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalance'
+
+  # Transactions
+  /api/accounts/{accountId}/transactions:
+    get:
+      tags: [Transactions]
+      summary: Get account transactions
+      description: Retrieve transaction history for an account
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: transactionType
+          in: query
+          schema:
+            type: string
+            enum: [debit, credit, transfer, payment, deposit, withdrawal]
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: minAmount
+          in: query
+          schema:
+            type: number
+        - name: maxAmount
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  summary:
+                    $ref: '#/components/schemas/TransactionSummary'
+
+  /api/transactions/{transactionId}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction details
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionDetails'
+
+  # Transfers
+  /api/transfers:
+    post:
+      tags: [Transfers]
+      summary: Create money transfer
+      description: Transfer money between accounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferRequest'
+      responses:
+        '201':
+          description: Transfer created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        '400':
+          description: Invalid transfer request
+        '403':
+          description: Insufficient funds or authorization
+
+    get:
+      tags: [Transfers]
+      summary: Get user transfers
+      description: Retrieve transfer history for the authenticated user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, completed, failed, cancelled]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Transfers retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transfer'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /api/transfers/{transferId}:
+    get:
+      tags: [Transfers]
+      summary: Get transfer details
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transfer details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferDetails'
+
+    patch:
+      tags: [Transfers]
+      summary: Update transfer status
+      description: Cancel or modify a pending transfer
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTransferRequest'
+      responses:
+        '200':
+          description: Transfer updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+
+  # Cards
+  /api/customers/{customerId}/cards:
+    get:
+      tags: [Cards]
+      summary: Get customer cards
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cardType
+          in: query
+          schema:
+            type: string
+            enum: [debit, credit, prepaid]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, blocked, expired]
+      responses:
+        '200':
+          description: Customer cards retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cards:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Card'
+
+  /api/cards/{cardId}:
+    get:
+      tags: [Cards]
+      summary: Get card details
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Card details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDetails'
+
+    patch:
+      tags: [Cards]
+      summary: Update card settings
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCardRequest'
+      responses:
+        '200':
+          description: Card updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Card'
+
+  /api/cards/{cardId}/block:
+    post:
+      tags: [Cards]
+      summary: Block card
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  enum: [lost, stolen, fraud, customer_request]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Card blocked successfully
+
+  /api/cards/{cardId}/unblock:
+    post:
+      tags: [Cards]
+      summary: Unblock card
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Card unblocked successfully
+
+  # Payments
+  /api/payments:
+    post:
+      tags: [Payments]
+      summary: Create payment
+      description: Process a payment transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+    get:
+      tags: [Payments]
+      summary: Get user payments
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, completed, failed, cancelled]
+        - name: paymentType
+          in: query
+          schema:
+            type: string
+            enum: [bill_pay, peer_to_peer, merchant, loan_payment]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Payments retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+
+  # Investment Portfolio
+  /api/customers/{customerId}/portfolio:
+    get:
+      tags: [Investments]
+      summary: Get investment portfolio
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Portfolio retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Portfolio'
+
+  # Loans
+  /api/customers/{customerId}/loans:
+    get:
+      tags: [Loans]
+      summary: Get customer loans
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: loanType
+          in: query
+          schema:
+            type: string
+            enum: [personal, auto, mortgage, business]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, paid_off, defaulted, in_review]
+      responses:
+        '200':
+          description: Customer loans retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Loan'
+
+  # Fraud Detection
+  /api/fraud/alerts:
+    get:
+      tags: [Fraud]
+      summary: Get fraud alerts
+      description: Retrieve fraud alerts for the authenticated user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, investigating, resolved, false_positive]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+      responses:
+        '200':
+          description: Fraud alerts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FraudAlert'
+
+  /api/fraud/report:
+    post:
+      tags: [Fraud]
+      summary: Report fraudulent activity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FraudReportRequest'
+      responses:
+        '201':
+          description: Fraud report submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudReport'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        database:
+          type: string
+          enum: [connected, disconnected]
+        externalServices:
+          type: object
+          properties:
+            paymentProcessor:
+              type: string
+              enum: [connected, disconnected]
+            fraudDetection:
+              type: string
+              enum: [connected, disconnected]
+            creditBureau:
+              type: string
+              enum: [connected, disconnected]
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        accountNumber:
+          type: string
+        accountType:
+          type: string
+          enum: [checking, savings, credit, investment, loan]
+        name:
+          type: string
+        balance:
+          type: number
+        availableBalance:
+          type: number
+        currency:
+          type: string
+          default: USD
+        status:
+          type: string
+          enum: [active, inactive, closed, frozen]
+        openedDate:
+          type: string
+          format: date
+        lastActivity:
+          type: string
+          format: date-time
+        interestRate:
+          type: number
+        minimumBalance:
+          type: number
+        overdraftLimit:
+          type: number
+
+    AccountDetails:
+      allOf:
+        - $ref: '#/components/schemas/Account'
+        - type: object
+          properties:
+            branch:
+              type: object
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                address:
+                  type: string
+                phone:
+                  type: string
+            statements:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  period:
+                    type: string
+                  statementDate:
+                    type: string
+                    format: date
+                  downloadUrl:
+                    type: string
+            alerts:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  threshold:
+                    type: number
+                  enabled:
+                    type: boolean
+
+    AccountSummary:
+      type: object
+      properties:
+        totalAccounts:
+          type: integer
+        totalBalance:
+          type: number
+        byType:
+          type: object
+          properties:
+            checking:
+              type: object
+              properties:
+                count:
+                  type: integer
+                balance:
+                  type: number
+            savings:
+              type: object
+              properties:
+                count:
+                  type: integer
+                balance:
+                  type: number
+            credit:
+              type: object
+              properties:
+                count:
+                  type: integer
+                balance:
+                  type: number
+                availableCredit:
+                  type: number
+
+    AccountBalance:
+      type: object
+      properties:
+        accountId:
+          type: string
+        currentBalance:
+          type: number
+        availableBalance:
+          type: number
+        pendingTransactions:
+          type: number
+        holds:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              amount:
+                type: number
+              description:
+                type: string
+              expiresAt:
+                type: string
+                format: date-time
+        lastUpdated:
+          type: string
+          format: date-time
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+        type:
+          type: string
+          enum: [debit, credit, transfer, payment, deposit, withdrawal]
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        merchant:
+          type: object
+          properties:
+            name:
+              type: string
+            category:
+              type: string
+            location:
+              type: string
+        status:
+          type: string
+          enum: [pending, completed, failed, cancelled]
+        timestamp:
+          type: string
+          format: date-time
+        runningBalance:
+          type: number
+        reference:
+          type: string
+        channel:
+          type: string
+          enum: [online, mobile, atm, branch, pos]
+
+    TransactionDetails:
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          properties:
+            fees:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  amount:
+                    type: number
+                  description:
+                    type: string
+            exchangeRate:
+              type: number
+            originalAmount:
+              type: number
+            originalCurrency:
+              type: string
+            authorizationCode:
+              type: string
+            cardDetails:
+              type: object
+              properties:
+                lastFour:
+                  type: string
+                cardType:
+                  type: string
+
+    TransactionSummary:
+      type: object
+      properties:
+        totalTransactions:
+          type: integer
+        totalDebits:
+          type: number
+        totalCredits:
+          type: number
+        netAmount:
+          type: number
+        byCategory:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              count:
+                type: integer
+              amount:
+                type: number
+
+    Transfer:
+      type: object
+      properties:
+        id:
+          type: string
+        fromAccountId:
+          type: string
+        toAccountId:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, failed, cancelled]
+        scheduledDate:
+          type: string
+          format: date
+        completedDate:
+          type: string
+          format: date-time
+        fees:
+          type: number
+        exchangeRate:
+          type: number
+        reference:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateTransferRequest:
+      type: object
+      required: [fromAccountId, toAccountId, amount]
+      properties:
+        fromAccountId:
+          type: string
+        toAccountId:
+          type: string
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        description:
+          type: string
+        scheduledDate:
+          type: string
+          format: date
+        recurring:
+          type: object
+          properties:
+            frequency:
+              type: string
+              enum: [weekly, bi-weekly, monthly, quarterly]
+            endDate:
+              type: string
+              format: date
+
+    TransferDetails:
+      allOf:
+        - $ref: '#/components/schemas/Transfer'
+        - type: object
+          properties:
+            fromAccount:
+              type: object
+              properties:
+                accountNumber:
+                  type: string
+                name:
+                  type: string
+            toAccount:
+              type: object
+              properties:
+                accountNumber:
+                  type: string
+                name:
+                  type: string
+                bankName:
+                  type: string
+            auditTrail:
+              type: array
+              items:
+                type: object
+                properties:
+                  action:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  userId:
+                    type: string
+
+    UpdateTransferRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [cancelled]
+        description:
+          type: string
+
+    Card:
+      type: object
+      properties:
+        id:
+          type: string
+        cardNumber:
+          type: string
+          description: Masked card number
+        cardType:
+          type: string
+          enum: [debit, credit, prepaid]
+        brand:
+          type: string
+          enum: [visa, mastercard, amex, discover]
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, blocked, expired]
+        expiryDate:
+          type: string
+          pattern: '^(0[1-9]|1[0-2])\/\d{2}$'
+        linkedAccountId:
+          type: string
+        dailyLimit:
+          type: number
+        monthlyLimit:
+          type: number
+        lastUsed:
+          type: string
+          format: date-time
+        issuedDate:
+          type: string
+          format: date
+
+    CardDetails:
+      allOf:
+        - $ref: '#/components/schemas/Card'
+        - type: object
+          properties:
+            limits:
+              type: object
+              properties:
+                daily:
+                  type: object
+                  properties:
+                    withdrawal:
+                      type: number
+                    purchase:
+                      type: number
+                monthly:
+                  type: object
+                  properties:
+                    withdrawal:
+                      type: number
+                    purchase:
+                      type: number
+            settings:
+              type: object
+              properties:
+                contactless:
+                  type: boolean
+                onlineTransactions:
+                  type: boolean
+                internationalTransactions:
+                  type: boolean
+                notifications:
+                  type: object
+                  properties:
+                    email:
+                      type: boolean
+                    sms:
+                      type: boolean
+                    push:
+                      type: boolean
+
+    UpdateCardRequest:
+      type: object
+      properties:
+        dailyLimit:
+          type: number
+        monthlyLimit:
+          type: number
+        settings:
+          type: object
+          properties:
+            contactless:
+              type: boolean
+            onlineTransactions:
+              type: boolean
+            internationalTransactions:
+              type: boolean
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+        fromAccountId:
+          type: string
+        paymentType:
+          type: string
+          enum: [bill_pay, peer_to_peer, merchant, loan_payment]
+        amount:
+          type: number
+        currency:
+          type: string
+        recipient:
+          type: object
+          properties:
+            name:
+              type: string
+            accountNumber:
+              type: string
+            routingNumber:
+              type: string
+            email:
+              type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, completed, failed, cancelled]
+        scheduledDate:
+          type: string
+          format: date
+        completedDate:
+          type: string
+          format: date-time
+        reference:
+          type: string
+        fees:
+          type: number
+
+    CreatePaymentRequest:
+      type: object
+      required: [fromAccountId, amount, recipient, paymentType]
+      properties:
+        fromAccountId:
+          type: string
+        paymentType:
+          type: string
+          enum: [bill_pay, peer_to_peer, merchant, loan_payment]
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        recipient:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+            accountNumber:
+              type: string
+            routingNumber:
+              type: string
+            email:
+              type: string
+        description:
+          type: string
+        scheduledDate:
+          type: string
+          format: date
+
+    Portfolio:
+      type: object
+      properties:
+        customerId:
+          type: string
+        totalValue:
+          type: number
+        totalGainLoss:
+          type: number
+        totalGainLossPercentage:
+          type: number
+        holdings:
+          type: array
+          items:
+            type: object
+            properties:
+              symbol:
+                type: string
+              name:
+                type: string
+              type:
+                type: string
+                enum: [stock, bond, mutual_fund, etf]
+              quantity:
+                type: number
+              currentPrice:
+                type: number
+              marketValue:
+                type: number
+              gainLoss:
+                type: number
+              gainLossPercentage:
+                type: number
+        assetAllocation:
+          type: object
+          properties:
+            stocks:
+              type: number
+            bonds:
+              type: number
+            cash:
+              type: number
+            other:
+              type: number
+
+    Loan:
+      type: object
+      properties:
+        id:
+          type: string
+        accountNumber:
+          type: string
+        loanType:
+          type: string
+          enum: [personal, auto, mortgage, business]
+        originalAmount:
+          type: number
+        currentBalance:
+          type: number
+        interestRate:
+          type: number
+        monthlyPayment:
+          type: number
+        nextPaymentDate:
+          type: string
+          format: date
+        maturityDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, paid_off, defaulted, in_review]
+        paymentsRemaining:
+          type: integer
+        lastPaymentDate:
+          type: string
+          format: date
+        lastPaymentAmount:
+          type: number
+
+    FraudAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        alertType:
+          type: string
+          enum: [suspicious_transaction, unusual_location, high_amount, multiple_attempts]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [open, investigating, resolved, false_positive]
+        description:
+          type: string
+        relatedTransactionId:
+          type: string
+        detectedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+        resolution:
+          type: string
+        riskScore:
+          type: number
+          minimum: 0
+          maximum: 100
+
+    FraudReportRequest:
+      type: object
+      required: [reportType, description]
+      properties:
+        reportType:
+          type: string
+          enum: [unauthorized_transaction, identity_theft, card_fraud, account_takeover]
+        description:
+          type: string
+        relatedTransactionIds:
+          type: array
+          items:
+            type: string
+        relatedCardIds:
+          type: array
+          items:
+            type: string
+        incidentDate:
+          type: string
+          format: date-time
+        contactInfo:
+          type: object
+          properties:
+            phone:
+              type: string
+            email:
+              type: string
+            preferredMethod:
+              type: string
+              enum: [phone, email, mail]
+
+    FraudReport:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        reportType:
+          type: string
+        status:
+          type: string
+          enum: [submitted, under_review, investigating, resolved]
+        caseNumber:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        assignedAgent:
+          type: string
+        estimatedResolutionDate:
+          type: string
+          format: date
+        updates:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              message:
+                type: string
+              updatedBy:
+                type: string
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+tags:
+  - name: Health
+    description: Health checks and status monitoring
+  - name: Accounts
+    description: Account management and information
+  - name: Transactions
+    description: Transaction history and details
+  - name: Transfers
+    description: Money transfer operations
+  - name: Cards
+    description: Card management and controls
+  - name: Payments
+    description: Payment processing
+  - name: Investments
+    description: Investment portfolio management
+  - name: Loans
+    description: Loan and credit information
+  - name: Fraud
+    description: Fraud detection and reporting

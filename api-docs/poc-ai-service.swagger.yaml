@@ -1,0 +1,1427 @@
+openapi: 3.0.3
+info:
+  title: POC AI Service (OpenAI Integration)
+  description: |
+    AI Service for POC Banking Chat System providing OpenAI integration,
+    conversation enhancement, response generation, and intelligent banking assistance.
+    
+    ## Features
+    - OpenAI GPT-4/3.5 integration for conversation AI
+    - Vector embeddings for semantic search and context
+    - Banking domain-specific AI models and prompts
+    - Conversation context management and memory
+    - AI-powered response generation and enhancement
+    - Real-time streaming responses
+    - Safety filters and content moderation
+    - AI model performance monitoring and optimization
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+
+servers:
+  - url: http://localhost:3008
+    description: Development server
+  - url: https://ai-service.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Chat Completion
+  /api/chat/completions:
+    post:
+      tags: [Chat Completion]
+      summary: Generate AI chat completion
+      description: Generate AI-powered responses for banking conversations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Chat completion generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionStreamResponse'
+
+  /api/chat/completions/stream:
+    post:
+      tags: [Chat Completion]
+      summary: Generate streaming AI chat completion
+      description: Generate AI responses with real-time streaming
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamingChatRequest'
+      responses:
+        '200':
+          description: Streaming response initiated
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-sent events stream
+
+  # Embeddings
+  /api/embeddings:
+    post:
+      tags: [Embeddings]
+      summary: Generate text embeddings
+      description: Generate vector embeddings for text using OpenAI models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingsRequest'
+      responses:
+        '200':
+          description: Embeddings generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingsResponse'
+
+  /api/embeddings/search:
+    post:
+      tags: [Embeddings]
+      summary: Semantic search using embeddings
+      description: Perform semantic search on stored embeddings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SemanticSearchRequest'
+      responses:
+        '200':
+          description: Search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SemanticSearchResponse'
+
+  # Banking AI Features
+  /api/banking/conversation-enhance:
+    post:
+      tags: [Banking AI]
+      summary: Enhance banking conversation
+      description: Enhance conversation with banking domain knowledge and context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationEnhanceRequest'
+      responses:
+        '200':
+          description: Conversation enhanced successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationEnhanceResponse'
+
+  /api/banking/intent-enhancement:
+    post:
+      tags: [Banking AI]
+      summary: Enhance intent with AI
+      description: Use AI to enhance and refine detected banking intents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntentEnhancementRequest'
+      responses:
+        '200':
+          description: Intent enhanced successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentEnhancementResponse'
+
+  /api/banking/response-generation:
+    post:
+      tags: [Banking AI]
+      summary: Generate banking response
+      description: Generate contextual banking responses using AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResponseGenerationRequest'
+      responses:
+        '200':
+          description: Response generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseGenerationResponse'
+
+  # Context Management
+  /api/context/sessions:
+    post:
+      tags: [Context Management]
+      summary: Create AI context session
+      description: Create a new AI context session for conversation management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContextSessionRequest'
+      responses:
+        '201':
+          description: Context session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextSession'
+
+  /api/context/sessions/{sessionId}:
+    get:
+      tags: [Context Management]
+      summary: Get context session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Context session retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextSession'
+
+    patch:
+      tags: [Context Management]
+      summary: Update context session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContextSessionRequest'
+      responses:
+        '200':
+          description: Context session updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextSession'
+
+    delete:
+      tags: [Context Management]
+      summary: Delete context session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Context session deleted successfully
+
+  # Model Management
+  /api/models:
+    get:
+      tags: [Model Management]
+      summary: List available AI models
+      description: Get list of available OpenAI models and their capabilities
+      responses:
+        '200':
+          description: Models retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AIModel'
+
+  /api/models/optimize:
+    post:
+      tags: [Model Management]
+      summary: Optimize model usage
+      description: Optimize AI model selection based on requirements
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelOptimizationRequest'
+      responses:
+        '200':
+          description: Model optimization completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelOptimizationResponse'
+
+  # Content Moderation
+  /api/moderation:
+    post:
+      tags: [Content Moderation]
+      summary: Moderate content
+      description: Check content for safety and compliance using AI moderation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModerationRequest'
+      responses:
+        '200':
+          description: Content moderation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationResponse'
+
+  # AI Analytics
+  /api/analytics/usage:
+    get:
+      tags: [Analytics]
+      summary: Get AI usage analytics
+      description: Retrieve analytics data for AI service usage and performance
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: model
+          in: query
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [hour, day, week]
+            default: day
+      responses:
+        '200':
+          description: Usage analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIUsageAnalytics'
+
+  /api/analytics/performance:
+    get:
+      tags: [Analytics]
+      summary: Get AI performance metrics
+      description: Retrieve performance metrics for AI operations
+      parameters:
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [1h, 24h, 7d, 30d]
+            default: 24h
+        - name: operation
+          in: query
+          schema:
+            type: string
+            enum: [chat_completion, embeddings, moderation]
+      responses:
+        '200':
+          description: Performance metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIPerformanceMetrics'
+
+  # Knowledge Base
+  /api/knowledge/index:
+    post:
+      tags: [Knowledge Base]
+      summary: Index knowledge content
+      description: Index banking knowledge content for AI retrieval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeIndexRequest'
+      responses:
+        '201':
+          description: Content indexed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeIndexResponse'
+
+  /api/knowledge/search:
+    post:
+      tags: [Knowledge Base]
+      summary: Search knowledge base
+      description: Search indexed knowledge content for relevant information
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeSearchRequest'
+      responses:
+        '200':
+          description: Knowledge search completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeSearchResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        openai:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [connected, disconnected]
+            api_version:
+              type: string
+            available_models:
+              type: array
+              items:
+                type: string
+        vector_db:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [connected, disconnected]
+            indexed_documents:
+              type: integer
+        cache:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [connected, disconnected]
+            hit_rate:
+              type: number
+
+    ChatCompletionRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [system, user, assistant, function]
+              content:
+                type: string
+              name:
+                type: string
+              function_call:
+                type: object
+        model:
+          type: string
+          enum: [gpt-4, gpt-4-turbo, gpt-3.5-turbo]
+          default: gpt-4
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          default: 0.7
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 4096
+        top_p:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1
+        frequency_penalty:
+          type: number
+          minimum: -2
+          maximum: 2
+          default: 0
+        presence_penalty:
+          type: number
+          minimum: -2
+          maximum: 2
+          default: 0
+        functions:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              parameters:
+                type: object
+        function_call:
+          type: string
+          enum: [none, auto]
+        stream:
+          type: boolean
+          default: false
+        banking_context:
+          type: object
+          properties:
+            customer_id:
+              type: string
+            account_info:
+              type: object
+            conversation_history:
+              type: array
+              items:
+                type: object
+            session_metadata:
+              type: object
+
+    ChatCompletionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: "chat.completion"
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              message:
+                type: object
+                properties:
+                  role:
+                    type: string
+                  content:
+                    type: string
+                  function_call:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      arguments:
+                        type: string
+              finish_reason:
+                type: string
+                enum: [stop, length, function_call, content_filter]
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+        banking_metadata:
+          type: object
+          properties:
+            confidence:
+              type: number
+            intent_detected:
+              type: string
+            tools_suggested:
+              type: array
+              items:
+                type: string
+            escalation_recommended:
+              type: boolean
+
+    ChatCompletionStreamResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: "chat.completion.chunk"
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              delta:
+                type: object
+                properties:
+                  role:
+                    type: string
+                  content:
+                    type: string
+                  function_call:
+                    type: object
+              finish_reason:
+                type: string
+
+    StreamingChatRequest:
+      allOf:
+        - $ref: '#/components/schemas/ChatCompletionRequest'
+        - type: object
+          properties:
+            stream:
+              type: boolean
+              example: true
+
+    EmbeddingsRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          example: "What is my account balance?"
+        model:
+          type: string
+          enum: [text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large]
+          default: text-embedding-ada-002
+        dimensions:
+          type: integer
+          minimum: 1
+          maximum: 3072
+        encoding_format:
+          type: string
+          enum: [float, base64]
+          default: float
+        user:
+          type: string
+
+    EmbeddingsResponse:
+      type: object
+      properties:
+        object:
+          type: string
+          example: "list"
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              object:
+                type: string
+                example: "embedding"
+              index:
+                type: integer
+              embedding:
+                type: array
+                items:
+                  type: number
+        model:
+          type: string
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+
+    SemanticSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          example: "balance transfer options"
+        collection:
+          type: string
+          enum: [banking_knowledge, conversation_history, customer_data]
+          default: banking_knowledge
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.7
+        filters:
+          type: object
+          properties:
+            customer_id:
+              type: string
+            document_type:
+              type: string
+            date_range:
+              type: object
+              properties:
+                start:
+                  type: string
+                  format: date
+                end:
+                  type: string
+                  format: date
+
+    SemanticSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              content:
+                type: string
+              metadata:
+                type: object
+                additionalProperties: true
+              similarity_score:
+                type: number
+              rank:
+                type: integer
+        total_results:
+          type: integer
+        query_time:
+          type: number
+        embedding_time:
+          type: number
+
+    ConversationEnhanceRequest:
+      type: object
+      required: [conversation_history, current_message]
+      properties:
+        conversation_history:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+              content:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+        current_message:
+          type: string
+        customer_context:
+          type: object
+          properties:
+            customer_id:
+              type: string
+            account_summary:
+              type: object
+            preferences:
+              type: object
+        enhancement_options:
+          type: object
+          properties:
+            add_context:
+              type: boolean
+              default: true
+            suggest_actions:
+              type: boolean
+              default: true
+            detect_emotion:
+              type: boolean
+              default: true
+            recommend_escalation:
+              type: boolean
+              default: true
+
+    ConversationEnhanceResponse:
+      type: object
+      properties:
+        enhanced_response:
+          type: string
+        context_added:
+          type: array
+          items:
+            type: string
+        suggested_actions:
+          type: array
+          items:
+            type: object
+            properties:
+              action:
+                type: string
+              description:
+                type: string
+              priority:
+                type: string
+                enum: [low, medium, high]
+        emotion_detected:
+          type: object
+          properties:
+            primary_emotion:
+              type: string
+            confidence:
+              type: number
+            valence:
+              type: string
+              enum: [positive, negative, neutral]
+        escalation_recommendation:
+          type: object
+          properties:
+            recommended:
+              type: boolean
+            reason:
+              type: string
+            urgency:
+              type: string
+              enum: [low, medium, high, urgent]
+
+    IntentEnhancementRequest:
+      type: object
+      required: [detected_intent, message, confidence]
+      properties:
+        detected_intent:
+          type: string
+        message:
+          type: string
+        confidence:
+          type: number
+        context:
+          type: object
+          properties:
+            conversation_history:
+              type: array
+            customer_data:
+              type: object
+            session_metadata:
+              type: object
+
+    IntentEnhancementResponse:
+      type: object
+      properties:
+        enhanced_intent:
+          type: string
+        confidence:
+          type: number
+        sub_intents:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+              confidence:
+                type: number
+        extracted_entities:
+          type: array
+          items:
+            type: object
+            properties:
+              entity:
+                type: string
+              value:
+                type: string
+              confidence:
+                type: number
+        suggested_clarifications:
+          type: array
+          items:
+            type: string
+
+    ResponseGenerationRequest:
+      type: object
+      required: [intent, context]
+      properties:
+        intent:
+          type: string
+        context:
+          type: object
+          properties:
+            customer_info:
+              type: object
+            account_data:
+              type: object
+            conversation_history:
+              type: array
+            extracted_entities:
+              type: object
+        response_style:
+          type: string
+          enum: [formal, friendly, concise, detailed]
+          default: friendly
+        include_suggestions:
+          type: boolean
+          default: true
+        max_length:
+          type: integer
+          default: 500
+
+    ResponseGenerationResponse:
+      type: object
+      properties:
+        generated_response:
+          type: string
+        confidence:
+          type: number
+        suggestions:
+          type: array
+          items:
+            type: string
+        follow_up_questions:
+          type: array
+          items:
+            type: string
+        response_metadata:
+          type: object
+          properties:
+            word_count:
+              type: integer
+            sentiment:
+              type: string
+            formality_score:
+              type: number
+
+    CreateContextSessionRequest:
+      type: object
+      required: [customer_id]
+      properties:
+        customer_id:
+          type: string
+        session_type:
+          type: string
+          enum: [chat, voice, email]
+          default: chat
+        initial_context:
+          type: object
+          properties:
+            account_info:
+              type: object
+            customer_preferences:
+              type: object
+            conversation_goal:
+              type: string
+        retention_policy:
+          type: object
+          properties:
+            max_age_hours:
+              type: integer
+              default: 24
+            auto_cleanup:
+              type: boolean
+              default: true
+
+    ContextSession:
+      type: object
+      properties:
+        session_id:
+          type: string
+        customer_id:
+          type: string
+        session_type:
+          type: string
+        context:
+          type: object
+          properties:
+            conversation_history:
+              type: array
+            customer_profile:
+              type: object
+            session_metadata:
+              type: object
+            learned_preferences:
+              type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+        total_tokens_used:
+          type: integer
+
+    UpdateContextSessionRequest:
+      type: object
+      properties:
+        add_message:
+          type: object
+          properties:
+            role:
+              type: string
+            content:
+              type: string
+            metadata:
+              type: object
+        update_context:
+          type: object
+          additionalProperties: true
+        extend_expiry:
+          type: integer
+          description: "Hours to extend session expiry"
+
+    AIModel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+          enum: [openai, anthropic, google]
+        type:
+          type: string
+          enum: [chat, embedding, moderation]
+        max_tokens:
+          type: integer
+        cost_per_1k_tokens:
+          type: number
+        capabilities:
+          type: array
+          items:
+            type: string
+        recommended_use_cases:
+          type: array
+          items:
+            type: string
+        availability:
+          type: string
+          enum: [available, limited, deprecated]
+
+    ModelOptimizationRequest:
+      type: object
+      required: [use_case, requirements]
+      properties:
+        use_case:
+          type: string
+          enum: [chat_completion, embedding, moderation, function_calling]
+        requirements:
+          type: object
+          properties:
+            response_time:
+              type: string
+              enum: [fast, balanced, accurate]
+            cost_priority:
+              type: string
+              enum: [low, medium, high]
+            quality_requirement:
+              type: string
+              enum: [basic, good, excellent]
+            token_limit:
+              type: integer
+        context:
+          type: object
+          properties:
+            expected_volume:
+              type: integer
+            conversation_length:
+              type: integer
+            complexity:
+              type: string
+              enum: [simple, medium, complex]
+
+    ModelOptimizationResponse:
+      type: object
+      properties:
+        recommended_model:
+          type: string
+        alternatives:
+          type: array
+          items:
+            type: object
+            properties:
+              model:
+                type: string
+              score:
+                type: number
+              reasoning:
+                type: string
+        optimization_settings:
+          type: object
+          properties:
+            temperature:
+              type: number
+            max_tokens:
+              type: integer
+            top_p:
+              type: number
+        estimated_cost:
+          type: object
+          properties:
+            per_request:
+              type: number
+            per_month:
+              type: number
+
+    ModerationRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        model:
+          type: string
+          default: "text-moderation-latest"
+
+    ModerationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              flagged:
+                type: boolean
+              categories:
+                type: object
+                properties:
+                  sexual:
+                    type: boolean
+                  hate:
+                    type: boolean
+                  harassment:
+                    type: boolean
+                  self-harm:
+                    type: boolean
+                  sexual/minors:
+                    type: boolean
+                  hate/threatening:
+                    type: boolean
+                  violence/graphic:
+                    type: boolean
+                  self-harm/intent:
+                    type: boolean
+                  self-harm/instructions:
+                    type: boolean
+                  harassment/threatening:
+                    type: boolean
+                  violence:
+                    type: boolean
+              category_scores:
+                type: object
+                properties:
+                  sexual:
+                    type: number
+                  hate:
+                    type: number
+                  harassment:
+                    type: number
+                  self-harm:
+                    type: number
+                  sexual/minors:
+                    type: number
+                  hate/threatening:
+                    type: number
+                  violence/graphic:
+                    type: number
+                  self-harm/intent:
+                    type: number
+                  self-harm/instructions:
+                    type: number
+                  harassment/threatening:
+                    type: number
+                  violence:
+                    type: number
+
+    AIUsageAnalytics:
+      type: object
+      properties:
+        total_requests:
+          type: integer
+        total_tokens:
+          type: integer
+        total_cost:
+          type: number
+        requests_by_model:
+          type: object
+          additionalProperties:
+            type: integer
+        tokens_by_model:
+          type: object
+          additionalProperties:
+            type: integer
+        cost_by_model:
+          type: object
+          additionalProperties:
+            type: number
+        usage_by_timeframe:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              requests:
+                type: integer
+              tokens:
+                type: integer
+              cost:
+                type: number
+        top_use_cases:
+          type: array
+          items:
+            type: object
+            properties:
+              use_case:
+                type: string
+              count:
+                type: integer
+              percentage:
+                type: number
+
+    AIPerformanceMetrics:
+      type: object
+      properties:
+        average_response_time:
+          type: number
+        success_rate:
+          type: number
+        error_rate:
+          type: number
+        cache_hit_rate:
+          type: number
+        throughput:
+          type: object
+          properties:
+            requests_per_second:
+              type: number
+            tokens_per_second:
+              type: number
+        response_times:
+          type: object
+          properties:
+            p50:
+              type: number
+            p90:
+              type: number
+            p95:
+              type: number
+            p99:
+              type: number
+        error_breakdown:
+          type: object
+          properties:
+            rate_limit:
+              type: integer
+            timeout:
+              type: integer
+            invalid_request:
+              type: integer
+            server_error:
+              type: integer
+
+    KnowledgeIndexRequest:
+      type: object
+      required: [content, metadata]
+      properties:
+        content:
+          type: string
+        metadata:
+          type: object
+          properties:
+            title:
+              type: string
+            category:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+            source:
+              type: string
+            author:
+              type: string
+            created_date:
+              type: string
+              format: date-time
+            language:
+              type: string
+              default: "en"
+        collection:
+          type: string
+          default: "banking_knowledge"
+        chunk_size:
+          type: integer
+          default: 1000
+        overlap:
+          type: integer
+          default: 100
+
+    KnowledgeIndexResponse:
+      type: object
+      properties:
+        document_id:
+          type: string
+        chunks_created:
+          type: integer
+        embeddings_generated:
+          type: integer
+        indexing_time:
+          type: number
+        status:
+          type: string
+          enum: [indexed, failed, partial]
+
+    KnowledgeSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        collection:
+          type: string
+          default: "banking_knowledge"
+        limit:
+          type: integer
+          default: 10
+        include_metadata:
+          type: boolean
+          default: true
+        filters:
+          type: object
+          properties:
+            category:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+            date_range:
+              type: object
+              properties:
+                start:
+                  type: string
+                  format: date
+                end:
+                  type: string
+                  format: date
+
+    KnowledgeSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              document_id:
+                type: string
+              content:
+                type: string
+              metadata:
+                type: object
+                additionalProperties: true
+              similarity_score:
+                type: number
+              chunk_index:
+                type: integer
+        total_results:
+          type: integer
+        search_time:
+          type: number
+
+tags:
+  - name: Health
+    description: Health checks and service status
+  - name: Chat Completion
+    description: AI-powered chat completion and response generation
+  - name: Embeddings
+    description: Text embeddings and semantic search
+  - name: Banking AI
+    description: Banking-specific AI features and enhancements
+  - name: Context Management
+    description: AI context session management
+  - name: Model Management
+    description: AI model selection and optimization
+  - name: Content Moderation
+    description: AI-powered content safety and moderation
+  - name: Analytics
+    description: AI usage and performance analytics
+  - name: Knowledge Base
+    description: Knowledge indexing and retrieval

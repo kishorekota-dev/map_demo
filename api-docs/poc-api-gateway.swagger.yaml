@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: POC API Gateway
+  description: |
+    API Gateway for POC Banking Chat System providing centralized routing, authentication, 
+    rate limiting, and load balancing for all microservices.
+    
+    ## Features
+    - Centralized routing to all poc-XXX microservices
+    - JWT-based authentication and authorization
+    - Rate limiting and request throttling
+    - Load balancing and health checks
+    - Request/response logging and monitoring
+    - CORS and security headers management
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Team
+    email: poc-banking@company.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3001
+    description: Development server
+  - url: https://api-gateway.poc-banking.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Health and Status
+  /health:
+    get:
+      tags: [Health]
+      summary: Gateway health check
+      description: Returns the health status of the API Gateway and connected services
+      security: []
+      responses:
+        '200':
+          description: Gateway is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Gateway or services are unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /status:
+    get:
+      tags: [Health]
+      summary: Gateway status and metrics
+      description: Returns detailed status information including connected services
+      responses:
+        '200':
+          description: Gateway status information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+
+  # Authentication Routes
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: User authentication
+      description: Authenticate user and return JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: User logout
+      description: Invalidate JWT token and logout user
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh JWT token
+      description: Refresh expired JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  # Chat Backend Proxy Routes
+  /api/chat/{path+}:
+    x-proxy-to: http://poc-chat-backend:3006
+    get:
+      tags: [Chat Proxy]
+      summary: Proxy GET requests to chat backend
+      description: Forwards GET requests to poc-chat-backend service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Path to forward to chat backend
+      responses:
+        '200':
+          description: Request forwarded successfully
+        '502':
+          description: Chat backend unavailable
+
+    post:
+      tags: [Chat Proxy]
+      summary: Proxy POST requests to chat backend
+      description: Forwards POST requests to poc-chat-backend service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+        '502':
+          description: Chat backend unavailable
+
+  # Banking Service Proxy Routes
+  /api/banking/{path+}:
+    x-proxy-to: http://poc-banking-service:3005
+    get:
+      tags: [Banking Proxy]
+      summary: Proxy GET requests to banking service
+      description: Forwards GET requests to poc-banking-service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+        '502':
+          description: Banking service unavailable
+
+    post:
+      tags: [Banking Proxy]
+      summary: Proxy POST requests to banking service
+      description: Forwards POST requests to poc-banking-service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+  # NLP Service Proxy Routes
+  /api/nlp/{path+}:
+    x-proxy-to: http://poc-nlp-service:3002
+    get:
+      tags: [NLP Proxy]
+      summary: Proxy GET requests to NLP service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+    post:
+      tags: [NLP Proxy]
+      summary: Proxy POST requests to NLP service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+  # NLU Service Proxy Routes
+  /api/nlu/{path+}:
+    x-proxy-to: http://poc-nlu-service:3003
+    post:
+      tags: [NLU Proxy]
+      summary: Proxy requests to NLU service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+  # MCP Service Proxy Routes
+  /api/mcp/{path+}:
+    x-proxy-to: http://poc-mcp-service:3004
+    post:
+      tags: [MCP Proxy]
+      summary: Proxy requests to MCP service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+  # AI Service Proxy Routes
+  /api/ai/{path+}:
+    x-proxy-to: http://poc-ai-service:3008
+    post:
+      tags: [AI Proxy]
+      summary: Proxy requests to AI service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+  # Agent UI Proxy Routes
+  /api/agents/{path+}:
+    x-proxy-to: http://poc-agent-ui:3007
+    get:
+      tags: [Agent Proxy]
+      summary: Proxy GET requests to agent UI service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+    post:
+      tags: [Agent Proxy]
+      summary: Proxy POST requests to agent UI service
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request forwarded successfully
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authenticated requests
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for service-to-service authentication
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: number
+        version:
+          type: string
+        services:
+          type: object
+          properties:
+            chat-backend:
+              $ref: '#/components/schemas/ServiceHealth'
+            banking-service:
+              $ref: '#/components/schemas/ServiceHealth'
+            nlp-service:
+              $ref: '#/components/schemas/ServiceHealth'
+            nlu-service:
+              $ref: '#/components/schemas/ServiceHealth'
+            mcp-service:
+              $ref: '#/components/schemas/ServiceHealth'
+            ai-service:
+              $ref: '#/components/schemas/ServiceHealth'
+            agent-ui:
+              $ref: '#/components/schemas/ServiceHealth'
+
+    ServiceHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, unknown]
+        responseTime:
+          type: number
+        lastCheck:
+          type: string
+          format: date-time
+
+    StatusResponse:
+      type: object
+      properties:
+        gateway:
+          type: object
+          properties:
+            version:
+              type: string
+            environment:
+              type: string
+            uptime:
+              type: number
+            requestsPerSecond:
+              type: number
+            totalRequests:
+              type: number
+        loadBalancer:
+          type: object
+          properties:
+            strategy:
+              type: string
+            activeNodes:
+              type: number
+            healthCheckInterval:
+              type: number
+        rateLimit:
+          type: object
+          properties:
+            windowMs:
+              type: number
+            maxRequests:
+              type: number
+            currentUsage:
+              type: number
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: customer@example.com
+        password:
+          type: string
+          format: password
+          example: password123
+        userType:
+          type: string
+          enum: [customer, agent, admin]
+          default: customer
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        token:
+          type: string
+          description: JWT access token
+        refreshToken:
+          type: string
+          description: Refresh token for token renewal
+        expiresIn:
+          type: number
+          description: Token expiration time in seconds
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            userType:
+              type: string
+            permissions:
+              type: array
+              items:
+                type: string
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code
+        timestamp:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+          description: Request ID for tracking
+
+tags:
+  - name: Health
+    description: Health checks and status monitoring
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Chat Proxy
+    description: Proxy routes to chat backend service
+  - name: Banking Proxy
+    description: Proxy routes to banking service
+  - name: NLP Proxy
+    description: Proxy routes to NLP service
+  - name: NLU Proxy
+    description: Proxy routes to NLU service
+  - name: MCP Proxy
+    description: Proxy routes to MCP service
+  - name: AI Proxy
+    description: Proxy routes to AI service
+  - name: Agent Proxy
+    description: Proxy routes to agent UI service
