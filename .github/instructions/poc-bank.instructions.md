@@ -6,7 +6,8 @@ This project goal was to build simple Chat Based Banking System that interacts w
 Code Location:
 
 POC ChatBot UI: 'poc-frotnend
-POC ChatBot Backend: 'poc-backend'
+POC ChatBot Backend: 'poc-chat-backend'
+
 
 
 Any new modules should be created using convention 'poc-<module-name>'.
