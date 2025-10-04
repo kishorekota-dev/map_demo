@@ -69,20 +69,27 @@ export function useChat(initialSessionId?: string) {
 
       const resp = await apiService.sendMessage(text)
 
+      // Update session ID if backend returned a different one (auto-created)
+      if (resp.sessionId && resp.sessionId !== sessionIdRef.current) {
+        sessionIdRef.current = resp.sessionId
+        apiService.setSessionId(resp.sessionId)
+      }
+
       const botMsg: ChatMessageType = {
-        id: resp.conversation?.messageId || `b_${Date.now()}`,
-        content: resp.message || 'No response',
+        id: resp.response?.id || `b_${Date.now()}`,
+        content: resp.response?.content || 'No response',
         type: 'bot',
         timestamp: resp.response?.timestamp ? new Date(resp.response.timestamp) : new Date(),
-        intent: resp.intent ? {
-          detected: resp.intent.detected || 'unknown',
-          confidence: resp.intent.confidence ?? 0.8,
-          entities: resp.intent.entities || []
+        intent: resp.agent ? {
+          detected: resp.agent.type || 'unknown',
+          confidence: resp.agent.confidence ?? 0.5,
+          entities: []
         } : undefined,
         metadata: {
-          sessionId: resp.conversation?.sessionId || sessionIdRef.current,
-          messageId: resp.conversation?.messageId || `b_${Date.now()}`,
-          responseType: resp.response?.type
+          sessionId: resp.sessionId || sessionIdRef.current,
+          messageId: resp.response?.id || `b_${Date.now()}`,
+          responseType: resp.response?.type,
+          agentsInvolved: resp.agent?.agentsInvolved
         }
       }
 
@@ -90,9 +97,23 @@ export function useChat(initialSessionId?: string) {
       if (botMsg.intent) setIntent(botMsg.intent)
 
       return botMsg
-    } catch (err) {
-      // revert optimistic update or keep message with error metadata
-      // for now just throw
+    } catch (err: any) {
+      console.error('Error sending message:', err)
+      
+      // Add error message to chat
+      const errorMsg: ChatMessageType = {
+        id: `e_${Date.now()}`,
+        content: err?.message || 'Failed to send message. Please try again.',
+        type: 'bot',
+        timestamp: new Date(),
+        metadata: {
+          sessionId: sessionIdRef.current,
+          messageId: `e_${Date.now()}`,
+          isError: true
+        }
+      }
+      
+      setMessages(prev => [...prev, errorMsg])
       throw err
     } finally {
       setLoading(false)

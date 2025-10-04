@@ -9,39 +9,212 @@ const logger = require('../services/logger');
  */
 
 // Convenience POST /api/chat/message
-router.post('/chat/message', async (req, res, next) => {
+router.post('/chat/message', async (req, res) => {
     try {
         // frontend sends { message, context } with X-Session-ID header
         const sessionId = req.headers['x-session-id'] || req.body?.sessionId;
 
         if (!sessionId) {
-            return res.status(400).json({ error: 'Session ID required in X-Session-ID header or body', timestamp: new Date().toISOString() });
+            return res.status(400).json({ 
+                error: 'Session ID required in X-Session-ID header or body', 
+                timestamp: new Date().toISOString() 
+            });
         }
 
-        // Reuse the session messages handler by forwarding to the internal route
-        req.params.sessionId = sessionId;
-        req.body.content = req.body.message;
+        const content = req.body.message || req.body.content;
+        const type = req.body.type || 'text';
+        const metadata = req.body.metadata || req.body.context || {};
 
-        return router.handle(req, res, next);
-    } catch (err) {
-        next(err);
+        if (!content) {
+            return res.status(400).json({
+                error: 'Message content required',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const { chatService, agentOrchestrator, sessionManager } = req.app.locals.services;
+        
+        if (!chatService || !agentOrchestrator || !sessionManager) {
+            return res.status(503).json({
+                error: 'Services not available',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Get or create session
+        let session = await sessionManager.getSession(sessionId);
+        let actualSessionId = sessionId; // Track the actual session ID to use
+        
+        if (!session) {
+            // Auto-create session if it doesn't exist
+            const userId = req.body.userId || req.headers['x-user-id'] || 'anonymous';
+            try {
+                // Create session manager session first (it will generate its own sessionId)
+                session = await sessionManager.createSession(userId, {
+                    autoCreated: true,
+                    createdAt: new Date().toISOString(),
+                    requestedSessionId: sessionId // Store the originally requested ID for reference
+                });
+                
+                // Use the session ID that was actually created
+                actualSessionId = session.sessionId;
+                
+                // Create chat session with the same sessionId
+                await chatService.createChatSession(userId, actualSessionId, {
+                    autoCreated: true
+                });
+                
+                logger.info('Auto-created session', { 
+                    requestedSessionId: sessionId,
+                    actualSessionId: actualSessionId,
+                    userId 
+                });
+            } catch (createError) {
+                logger.error('Failed to auto-create session', {
+                    error: createError.message,
+                    sessionId,
+                    userId
+                });
+                return res.status(500).json({
+                    error: 'Failed to create session',
+                    details: createError.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+
+        // Process message  
+        logger.debug('About to process message', { 
+            sessionId: actualSessionId, 
+            hasSession: !!session,
+            content: content ? content.substring(0, 50) : 'NO_CONTENT',
+            contentType: typeof content,
+            chatServiceExists: !!chatService
+        });
+        
+        try {
+            const message = await chatService.processMessage(
+                actualSessionId,
+                {
+                    content,
+                    type,
+                    attachments: req.body.attachments || []
+                },
+                metadata
+            );
+
+            logger.debug('Message processed successfully', { 
+                messageId: message?.id,
+                hasMessage: !!message,
+                messageContent: message?.content?.substring(0, 30)
+            });
+
+            // Process through orchestrator
+            const agentResult = await agentOrchestrator.processMessage(
+                actualSessionId,
+                message,
+                session.state || {}
+            );
+            
+            logger.debug('Agent processing completed', {
+                hasResult: !!agentResult,
+                hasFinalResponse: !!agentResult?.finalResponse,
+                agentsInvolved: agentResult?.agentsInvolved
+            });
+
+            // Send response using finalResponse from aggregated result
+            const response = await chatService.sendResponse(
+                actualSessionId,
+                agentResult.finalResponse, // Use finalResponse instead of response
+                {
+                    agentType: agentResult.finalResponse?.source || 'system',
+                    confidence: agentResult.finalResponse?.confidence,
+                    context: agentResult.conversationContextUpdates || {}
+                }
+            );
+
+            res.status(200).json({
+                sessionId: actualSessionId, // Return the actual session ID so frontend knows which to use
+                message,
+                response,
+                agent: {
+                    type: agentResult.finalResponse?.source || 'system',
+                    confidence: agentResult.finalResponse?.confidence,
+                    agentsInvolved: agentResult.agentsInvolved
+                },
+                timestamp: new Date().toISOString()
+            });
+        } catch (processingError) {
+            logger.error('Error during message processing steps', {
+                error: processingError.message,
+                stack: processingError.stack,
+                sessionId: actualSessionId
+            });
+            throw processingError; // Re-throw to be caught by outer catch
+        }
+
+    } catch (error) {
+        logger.error('Message processing error', {
+            error: error.message,
+            stack: error.stack,
+            sessionId: req.headers['x-session-id'] || req.body?.sessionId,
+            hasContent: !!(req.body.message || req.body.content)
+        });
+
+        res.status(500).json({
+            error: 'Failed to process message',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 });
 
 // Convenience GET /api/chat/history
-router.get('/chat/history', async (req, res, next) => {
+router.get('/chat/history', async (req, res) => {
     try {
         // frontend may provide sessionId as query param
         const sessionId = req.query.sessionId;
         if (!sessionId) {
-            return res.status(400).json({ error: 'sessionId query parameter required', timestamp: new Date().toISOString() });
+            return res.status(400).json({ 
+                error: 'sessionId query parameter required', 
+                timestamp: new Date().toISOString() 
+            });
         }
 
-        // Forward to the existing sessions/:sessionId/history handler
-        req.params.sessionId = sessionId;
-        return router.handle(req, res, next);
-    } catch (err) {
-        next(err);
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = parseInt(req.query.offset) || 0;
+
+        const { chatService } = req.app.locals.services;
+        
+        if (!chatService) {
+            return res.status(503).json({
+                error: 'Chat service not available',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const history = chatService.getConversationHistory(sessionId, limit, offset);
+
+        res.status(200).json({
+            sessionId,
+            history,
+            count: history.length,
+            offset,
+            limit,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('History retrieval error', {
+            error: error.message,
+            sessionId: req.query.sessionId
+        });
+
+        res.status(500).json({
+            error: 'Failed to retrieve history',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 });
 

@@ -26,19 +26,45 @@ export interface MessageMetadata {
   messageId: string;
   processingTime?: number;
   responseType?: string;
+  agentsInvolved?: string[];
+  isError?: boolean;
 }
 
 export interface ChatResponse {
-  message: string;
-  intent: IntentAnalysis;
-  response: {
+  sessionId: string;
+  message: {
+    id: string;
+    sessionId: string;
+    userId: string;
+    content: string;
     type: string;
     timestamp: string;
+    direction: string;
+    metadata: any;
+    processing: any;
   };
-  conversation: {
+  response: {
+    id: string;
     sessionId: string;
-    messageId: string;
+    userId: string;
+    content: string;
+    type: string;
+    timestamp: string;
+    direction: string;
+    agentInfo: {
+      agentId: string;
+      agentType: string;
+      confidence: number | null;
+      processingTime: number | null;
+    };
+    metadata: any;
   };
+  agent: {
+    type: string;
+    confidence: number;
+    agentsInvolved?: string[];
+  };
+  timestamp: string;
 }
 
 export interface AvailableIntent {

@@ -88,7 +88,8 @@ class ApiService {
       context: context || {},
     });
 
-    return response.data.data;
+    // Backend returns data directly, not wrapped in data.data
+    return response.data;
   }
 
   public async analyzeMessage(message: string): Promise<IntentAnalysis> {
