@@ -15,6 +15,7 @@ require('dotenv').config();
 const logger = require('./utils/logger');
 const mcpRoutes = require('./routes/mcp.routes');
 const MCPServer = require('./services/mcp-server.service');
+const MCPProtocolServer = require('./mcp/mcpServer'); // New true MCP server
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
 
@@ -26,6 +27,7 @@ class MCPService {
     this.port = config.port;
     
     this.mcpServer = new MCPServer();
+    this.mcpProtocolServer = new MCPProtocolServer(); // New true MCP protocol server
     
     this.setupMiddleware();
     this.setupRoutes();
@@ -78,27 +80,43 @@ class MCPService {
   }
 
   setupRoutes() {
+    // HTTP-based MCP routes (legacy/fallback)
     this.app.use('/api/mcp', mcpRoutes);
+    
+    // True MCP Protocol SSE endpoint
+    this.app.get('/mcp/sse', this.mcpProtocolServer.createSSEHandler());
+    
+    // MCP Protocol status endpoint
+    this.app.get('/mcp/status', (req, res) => {
+      res.json(this.mcpProtocolServer.getStatus());
+    });
     
     // Service info endpoint
     this.app.get('/api', (req, res) => {
       res.json({
         service: 'POC MCP Service',
         version: require('../package.json').version,
-        description: 'Model Context Protocol Host Microservice',
-        protocol: {
-          version: '2024-11-05',
-          features: [
-            'Tool Discovery',
-            'Tool Execution',
-            'Resource Management',
-            'Prompt Templates',
-            'Logging',
-            'Progress Tracking'
-          ]
-        },
+        description: 'Model Context Protocol Host Microservice with Hybrid Protocol Support',
+        protocols: [
+          {
+            name: 'MCP Protocol (SSE)',
+            version: '1.0',
+            endpoint: '/mcp/sse',
+            transport: 'Server-Sent Events',
+            features: ['Tool Discovery', 'Tool Execution', 'Resources', 'Prompts']
+          },
+          {
+            name: 'HTTP API (Legacy)',
+            version: '2024-11-05',
+            endpoint: '/api/mcp',
+            transport: 'REST',
+            features: ['Tool Discovery', 'Tool Execution', 'Resource Management']
+          }
+        ],
         endpoints: {
           health: '/health',
+          mcpSSE: '/mcp/sse',
+          mcpStatus: '/mcp/status',
           mcp: '/api/mcp',
           tools: '/api/mcp/tools',
           execute: '/api/mcp/tools/execute',
@@ -107,9 +125,12 @@ class MCPService {
           websocket: 'ws://localhost:3004/mcp'
         },
         capabilities: [
+          'True MCP Protocol (SSE)',
+          'HTTP API Fallback',
           'Banking Tool Integration',
-          'NLP Tool Calls',
-          'NLU Tool Calls',
+          'Automatic Tool Discovery',
+          'Resource Access',
+          'Prompt Management',
           'Real-time Communication',
           'Tool Result Caching',
           'Error Handling',

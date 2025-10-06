@@ -1,0 +1,274 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: poc-banking-postgres
+    environment:
+      POSTGRES_USER: banking_user
+      POSTGRES_PASSWORD: banking_pass_2024
+      POSTGRES_DB: poc_banking
+      POSTGRES_MULTIPLE_DATABASES: poc_banking,customer_db,account_db,card_db,payment_db,fraud_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking_user -d poc_banking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: poc-banking-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@banking.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - banking-network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # API Gateway - Entry point for all services
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: poc-banking-gateway
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - ACCOUNT_SERVICE_URL=http://account-service:3011
+      - CARD_SERVICE_URL=http://card-service:3012
+      - PAYMENT_SERVICE_URL=http://payment-service:3013
+      - FRAUD_SERVICE_URL=http://fraud-service:3014
+      - PARTY_AUTH_SERVICE_URL=http://party-auth-service:3015
+    ports:
+      - "3001:3001"
+    networks:
+      - banking-network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Party Reference Data Management / Customer Management
+  customer-service:
+    build:
+      context: ./services/customer-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-customer-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3010
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/customer_db
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=customer_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - JWT_SECRET=customer-service-secret-key-2024
+      - SERVICE_NAME=customer-service
+    ports:
+      - "3010:3010"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Current Account / Savings Account
+  account-service:
+    build:
+      context: ./services/account-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-account-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3011
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/account_db
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=account_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - FRAUD_SERVICE_URL=http://fraud-service:3014
+      - SERVICE_NAME=account-service
+    ports:
+      - "3011:3011"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Card Management / Card Collections
+  card-service:
+    build:
+      context: ./services/card-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-card-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3012
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/card_db
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=card_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - ACCOUNT_SERVICE_URL=http://account-service:3011
+      - FRAUD_SERVICE_URL=http://fraud-service:3014
+      - SERVICE_NAME=card-service
+    ports:
+      - "3012:3012"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Payment Execution / Payment Order
+  payment-service:
+    build:
+      context: ./services/payment-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-payment-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3013
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/payment_db
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=payment_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - ACCOUNT_SERVICE_URL=http://account-service:3011
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - FRAUD_SERVICE_URL=http://fraud-service:3014
+      - SERVICE_NAME=payment-service
+    ports:
+      - "3013:3013"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3013/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Fraud Detection / Fraud Resolution
+  fraud-service:
+    build:
+      context: ./services/fraud-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-fraud-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3014
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/fraud_db
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=fraud_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - SERVICE_NAME=fraud-service
+    ports:
+      - "3014:3014"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3014/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # BIAN Service Domain: Party Authentication / Customer Behavioral Insights
+  party-auth-service:
+    build:
+      context: ./services/party-auth-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-party-auth-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3015
+      - DATABASE_URL=postgresql://banking_user:banking_pass_2024@postgres:5432/poc_banking
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=poc_banking
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - JWT_SECRET=party-auth-secret-key-2024
+      - JWT_EXPIRY=24h
+      - SERVICE_NAME=party-auth-service
+    ports:
+      - "3015:3015"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3015/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  banking-network:
+    driver: bridge
+    name: poc-banking-network
+
+volumes:
+  postgres_data:
+    name: poc-banking-postgres-data
+  pgadmin_data:
+    name: poc-banking-pgadmin-data

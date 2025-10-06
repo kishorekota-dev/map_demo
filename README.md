@@ -1,57 +1,480 @@
-# Credit Card Enterprise Backend API
+# Chat Banking Microservices Application
 
-A comprehensive mock API system for simulating a credit card enterprise backend with full CRUD operations, JWT authentication, realistic financial data handling, and **Model Context Protocol (MCP) server integration**.
+A comprehensive enterprise-grade chat banking application built with microservices architecture, featuring real-time communication, AI-powered intent detection, LangGraph workflow orchestration, and complete banking operations.
 
-## 🚀 Features
+## 🏗️ Architecture Overview
 
-### Core Services
-- **Authentication & User Management** - JWT-based secure authentication
-- **Account Management** - Credit/Debit account operations
-- **Transaction Processing** - Purchase, refund, transfer operations
-- **Balance Transfers** - Inter-account and promotional transfers
-- **Dispute Management** - Transaction dispute handling
-- **Fraud Protection** - Fraud case creation and monitoring
-- **Card Management** - Card issuance, blocking, and maintenance
+This application consists of **9 microservices** organized in a layered architecture:
 
-### MCP Server Integration 🤖
-- **Model Context Protocol Server** - AI assistant integration
-- **12 Comprehensive Tools** - Full API access for AI assistants
-- **Secure Authentication** - JWT token management for AI interactions
-- **Interactive Client** - Test and development interface
-- **Claude Desktop Ready** - Direct integration with Claude and other MCP clients
+```
+Frontend Layer → Gateway Layer → Processing Layer → Orchestration Layer → Domain Layer
+```
 
-### Security Features
-- JWT token authentication
-- Password hashing with bcrypt
-- Request validation with Joi
-- Fraud detection and alerts
-- Transaction blocking capabilities
-- Comprehensive audit trails
+### Microservices Stack
 
-### API Features
-- RESTful API design
-- Comprehensive error handling
-- Pagination support
-- Search and filtering
-- Rate limiting ready
-- CORS enabled
-- Detailed logging
+| Service | Port | Role | Status |
+|---------|------|------|--------|
+| **poc-frontend** | 3000 | Customer web interface (React + Vite) | ✅ Complete |
+| **poc-agent-ui** | 8081 | Agent dashboard for support staff | ✅ Complete |
+| **poc-api-gateway** | 3001 | API Gateway with service discovery | ✅ Complete |
+| **poc-nlp-service** | 3002 | Natural Language Processing | ✅ Complete |
+| **poc-nlu-service** | 3003 | Natural Language Understanding | ✅ Complete |
+| **poc-mcp-service** | 3004 | Model Context Protocol & Tools | ✅ Complete |
+| **poc-banking-service** | 3005 | Banking operations & accounts | ✅ Complete |
+| **poc-chat-backend** | 3006 | Real-time chat with WebSocket | ✅ Complete |
+| **poc-ai-orchestrator** | 3007 | **NEW** LangGraph AI workflow orchestration | ✅ Complete |
+
+## 🚀 Key Features
+
+### AI Orchestration (NEW!)
+- **LangGraph Workflow** - State machine-based conversation flow management
+- **Intent-Based Processing** - Dynamic prompt selection based on customer intent (7 intents)
+- **Human-in-the-Loop** - Interactive data collection and confirmation workflows
+- **Session Persistence** - PostgreSQL-based conversation state management
+- **Tool Orchestration** - Seamless integration with banking tools via MCP
+- **GPT-4 Integration** - Advanced AI responses with OpenAI
+
+### Real-time Communication
+- **WebSocket Support** - Bidirectional real-time messaging via Socket.IO
+- **Agent Orchestration** - Multi-agent coordination for complex queries
+- **Typing Indicators** - Live feedback during conversations
+- **Session Management** - Persistent conversation context
+
+### AI-Powered Intelligence
+- **Natural Language Processing** - Text analysis and entity extraction
+- **Intent Detection** - Understand user intentions with high accuracy
+- **DialogFlow Integration** - Advanced conversational AI
+- **Context Management** - Maintain conversation context across interactions
+
+### Banking Operations
+- **Account Management** - Balance inquiry, account details
+- **Transaction History** - View and search transactions
+- **Fund Transfers** - Secure money transfers
+- **Card Management** - Card services and controls
+- **Dispute Resolution** - Handle transaction disputes
+- **Fraud Detection** - Real-time fraud monitoring
+
+### Enterprise Features
+- **API Gateway** - Centralized routing and service discovery
+- **Load Balancing** - Distribute traffic across service instances
+- **Service Discovery** - Automatic service registration and health monitoring
+- **JWT Authentication** - Secure token-based authentication
+- **Rate Limiting** - Protect services from abuse
+- **Comprehensive Logging** - Winston-based structured logging
+- **Health Monitoring** - Health checks for all services
+
+### Model Context Protocol (MCP)
+- **Tool Execution** - Execute external tools and APIs
+- **Banking Tools** - Specialized banking function tools
+- **Plugin System** - Extensible tool registry
+- **Claude Integration** - Ready for AI assistant integration
 
 ## 📋 Prerequisites
 
-- Node.js (v14 or higher)
-- npm or yarn
+- **Node.js** v18.0.0 or higher
+- **npm** v8.0.0 or higher
+- **PostgreSQL** v15+ (for AI Orchestrator)
+- **OpenAI API Key** (for AI Orchestrator GPT-4 integration)
+- **Docker** v20.0.0+ (optional, for containerized deployment)
+- **Docker Compose** v2.0.0+ (optional)
+- **PM2** (optional, for process management)
 
-## 🛠️ Installation
+## 🛠️ Quick Start
 
-1. Clone the repository:
+### Option 1: Using Setup Scripts (Recommended)
+
 ```bash
-git clone <repository-url>
+# Clone the repository
+git clone https://github.com/kishorekota-dev/map_demo.git
 cd map_demo
+
+# Install dependencies for all services
+npm install
+
+# Start all services with one command
+./start-all-services.sh
+
+# Check service status
+./check-services-status.sh
+
+# Test all services
+./test-all-services.sh
 ```
 
-2. Install dependencies:
+### Option 2: Using Docker Compose
+
 ```bash
+# Build and start all services
+docker-compose -f docker-compose-full-stack.yml up -d
+
+# View logs
+docker-compose -f docker-compose-full-stack.yml logs -f
+
+# Stop all services
+docker-compose -f docker-compose-full-stack.yml down
+```
+
+### Option 3: Using PM2
+
+```bash
+# Install PM2 globally
+npm install -g pm2
+
+# Start all services
+pm2 start ecosystem.config.js
+
+# View status
+pm2 status
+
+# View logs
+pm2 logs
+
+# Stop all services
+pm2 stop all
+```
+
+### Option 4: Manual Start (Development)
+
+```bash
+# Terminal 1 - API Gateway
+cd poc-api-gateway && npm start
+
+# Terminal 2 - NLP Service
+cd poc-nlp-service/src && node server.js
+
+# Terminal 3 - NLU Service
+cd poc-nlu-service/src && node server.js
+
+# Terminal 4 - MCP Service
+cd poc-mcp-service/src && node server.js
+
+# Terminal 5 - Banking Service
+cd poc-banking-service && npm start
+
+# Terminal 6 - Chat Backend
+cd poc-chat-backend && npm start
+
+# Terminal 7 - Agent UI
+cd poc-agent-ui && npm start
+
+# Terminal 8 - Frontend (optional)
+cd poc-frontend && npm run dev
+```
+
+## 🧪 Testing & Verification
+
+### Health Checks
+
+```bash
+# Run comprehensive health check for all services
+./test-all-services.sh
+
+# Individual service health checks
+curl http://localhost:3001/health  # API Gateway
+curl http://localhost:3002/health  # NLP Service
+curl http://localhost:3003/health  # NLU Service
+curl http://localhost:3004/health  # MCP Service
+curl http://localhost:3005/health  # Banking Service
+curl http://localhost:3006/health  # Chat Backend
+curl http://localhost:8081         # Agent UI
+```
+
+### Test Chat Flow
+
+```bash
+# Send a chat message through the API
+curl -X POST http://localhost:3001/api/chat/message \
+  -H "Content-Type: application/json" \
+  -H "X-Session-ID: test-session-123" \
+  -d '{
+    "message": "What is my account balance?",
+    "userId": "test-user"
+  }'
+```
+
+### Test Banking Operations
+
+```bash
+# Get account information
+curl http://localhost:3005/api/accounts/test-user
+
+# Get transaction history
+curl http://localhost:3005/api/transactions/test-user
+```
+
+## 📚 Documentation
+
+- **[MICROSERVICES-ARCHITECTURE.md](./MICROSERVICES-ARCHITECTURE.md)** - Detailed architecture documentation
+- **[IMPLEMENTATION-SUMMARY.md](./IMPLEMENTATION-SUMMARY.md)** - Complete implementation summary
+- **[DEPLOYMENT-GUIDE.md](./DEPLOYMENT-GUIDE.md)** - Comprehensive deployment guide
+- **[DEVELOPMENT_SETUP.md](./DEVELOPMENT_SETUP.md)** - Development environment setup
+- **Individual Service READMEs** - Service-specific documentation in each service folder
+
+## 🔌 API Endpoints
+
+### API Gateway (Port: 3001)
+
+```
+GET  /health                          - Gateway health status
+GET  /api/services                    - List all registered services
+GET  /metrics                         - System metrics
+POST /api/auth/login                  - User authentication
+POST /api/chat/message                - Send chat message (proxied)
+GET  /api/banking/accounts/:userId    - Get account info (proxied)
+```
+
+### Chat Backend (Port: 3006)
+
+```
+GET  /health                          - Service health
+POST /auth/login                      - Authenticate user
+POST /api/chat/message                - Process chat message
+WS   /socket.io                       - WebSocket connection
+
+WebSocket Events:
+  - connect / disconnect
+  - authenticate
+  - sendMessage
+  - typing / stopTyping
+  - joinSession / leaveSession
+```
+
+### Banking Service (Port: 3005)
+
+```
+GET  /health                          - Service health
+GET  /api/accounts/:userId            - Get account information
+GET  /api/transactions/:userId        - Get transaction history
+POST /api/transfers                   - Create fund transfer
+GET  /api/cards/:userId               - Get card information
+POST /api/disputes                    - File a dispute
+```
+
+### NLP Service (Port: 3002)
+
+```
+GET  /health                          - Service health
+POST /api/nlp/analyze                 - Analyze text
+POST /api/nlp/sentiment               - Sentiment analysis
+POST /api/nlp/entities                - Extract entities
+```
+
+### NLU Service (Port: 3003)
+
+```
+GET  /health                          - Service health
+POST /api/nlu/detect-intent           - Detect user intent
+POST /api/nlu/analyze-banking         - Analyze banking intent
+GET  /api/nlu/intents                 - List available intents
+```
+
+### MCP Service (Port: 3004)
+
+```
+GET  /health                          - Service health
+POST /api/mcp/execute                 - Execute a tool
+GET  /api/mcp/tools                   - List available tools
+POST /api/mcp/register-tool           - Register new tool
+```
+
+## 🏗️ Project Structure
+
+```
+map_demo/
+├── poc-frontend/                    # React customer interface
+├── poc-agent-ui/                    # Agent dashboard
+├── poc-api-gateway/                 # API Gateway with service discovery
+├── poc-backend/                     # Legacy backend (REST API)
+├── poc-chat-backend/                # Real-time chat backend
+├── poc-banking-service/             # Banking operations service
+├── poc-nlp-service/                 # NLP processing service
+├── poc-nlu-service/                 # NLU intent detection service
+├── poc-mcp-service/                 # MCP tools service
+├── docker-compose-full-stack.yml    # Docker orchestration
+├── ecosystem.config.js              # PM2 configuration
+├── start-all-services.sh            # Start all services script
+├── stop-all-services.sh             # Stop all services script
+├── check-services-status.sh         # Status check script
+├── test-all-services.sh             # Integration test script
+└── docs/                            # Documentation
+```
+
+## 🔐 Security
+
+### Authentication
+- JWT-based authentication across all services
+- Token-based WebSocket authentication
+- Secure password hashing (bcrypt)
+
+### API Security
+- Rate limiting (100 requests per 15 minutes per IP)
+- CORS whitelisting
+- Helmet.js security headers
+- Input validation and sanitization
+- XSS protection
+
+### Network Security
+- Service-to-service authentication
+- TLS/HTTPS ready
+- Environment-based secrets management
+
+## 📊 Monitoring & Observability
+
+### Health Monitoring
+- Health check endpoints on all services
+- Service registry with health status
+- Automated health check script
+
+### Logging
+- Structured logging with Winston
+- Centralized log aggregation ready
+- Different log levels per environment
+- Request/response logging
+
+### Metrics
+- System metrics endpoint
+- Service performance metrics
+- Custom business metrics
+
+## 🔧 Configuration
+
+Each service requires a `.env` file. Copy the example files:
+
+```bash
+# Copy environment files for all services
+for dir in poc-*/; do
+  if [ -f "${dir}.env.example" ]; then
+    cp "${dir}.env.example" "${dir}.env"
+  elif [ -f "${dir}.env.development" ]; then
+    cp "${dir}.env.development" "${dir}.env"
+  fi
+done
+```
+
+### Key Environment Variables
+
+```bash
+# Common across services
+NODE_ENV=development|production
+PORT=<service-port>
+LOG_LEVEL=debug|info|warn|error
+
+# API Gateway
+JWT_SECRET=your-secret-key
+BANKING_SERVICE_URL=http://localhost:3005
+NLP_SERVICE_URL=http://localhost:3002
+NLU_SERVICE_URL=http://localhost:3003
+MCP_SERVICE_URL=http://localhost:3004
+
+# Chat Backend
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8081
+JWT_SECRET=your-secret-key
+REDIS_URL=redis://localhost:6379
+```
+
+## 🚢 Deployment
+
+### Development
+```bash
+./start-all-services.sh
+```
+
+### Production with PM2
+```bash
+pm2 start ecosystem.config.js --env production
+pm2 save
+pm2 startup
+```
+
+### Production with Docker
+```bash
+docker-compose -f docker-compose-full-stack.yml up -d
+```
+
+### Kubernetes
+See `k8s/` directory for Kubernetes manifests (coming soon)
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 Development Guidelines
+
+- Follow microservices best practices
+- Maintain consistent logging across services
+- Add comprehensive error handling
+- Write tests for new features
+- Update documentation
+- Follow the existing code style
+
+## 🐛 Troubleshooting
+
+### Services Not Starting
+```bash
+# Check if ports are already in use
+lsof -i :3001  # Check specific port
+
+# Kill process using port
+kill -9 <PID>
+
+# Check logs
+tail -f poc-*/logs/*.log
+```
+
+### WebSocket Connection Issues
+```bash
+# Verify ALLOWED_ORIGINS in chat-backend/.env
+# Test WebSocket connection
+wscat -c ws://localhost:3006
+```
+
+### Service Discovery Issues
+```bash
+# Check API Gateway logs
+tail -f poc-api-gateway/logs/*.log
+
+# Verify all services are registered
+curl http://localhost:3001/api/services
+```
+
+## 📞 Support
+
+- **Issues**: https://github.com/kishorekota-dev/map_demo/issues
+- **Documentation**: See `docs/` folder
+- **Email**: [your-email]
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Express.js for the web framework
+- Socket.IO for real-time communication
+- React for the frontend
+- Winston for logging
+- JWT for authentication
+- DialogFlow for NLU capabilities
+
+---
+
+## 📈 Status
+
+**Project Status**: ✅ Production Ready
+
+All 8 microservices are fully implemented, tested, and documented. The application is ready for deployment in development, staging, and production environments.
+
+**Last Updated**: October 4, 2025  
+**Version**: 1.0.0
+
+---
+
+Made with ❤️ by the Development Team
+
 npm install
 ```
 

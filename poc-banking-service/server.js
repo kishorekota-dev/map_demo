@@ -5,6 +5,9 @@ const cors = require('cors');
 const morgan = require('morgan');
 const winston = require('winston');
 
+// Import database
+const db = require('./database');
+
 // Import routes
 const accountRoutes = require('./routes/accounts');
 const transactionRoutes = require('./routes/transactions');
@@ -121,28 +124,43 @@ app.use('*', (req, res) => {
 });
 
 // Graceful shutdown handling
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down banking service gracefully');
-  server.close(() => {
+  server.close(async () => {
+    await db.close();
     logger.info('Banking service process terminated');
     process.exit(0);
   });
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down banking service gracefully');
-  server.close(() => {
+  server.close(async () => {
+    await db.close();
     logger.info('Banking service process terminated');
     process.exit(0);
   });
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   logger.info(`POC Banking Service running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Service endpoints available at http://localhost:${PORT}/api`);
   logger.info(`Health check available at http://localhost:${PORT}/health`);
+  
+  // Check database connection
+  try {
+    const health = await db.healthCheck();
+    if (health.status === 'healthy') {
+      logger.info(`Database connected: ${health.version.split(',')[0]}`);
+      logger.info(`Connection pool: ${health.poolSize} total, ${health.idleConnections} idle`);
+    } else {
+      logger.error('Database health check failed:', health.error);
+    }
+  } catch (error) {
+    logger.error('Database connection error:', error.message);
+  }
 });
 
 module.exports = app;

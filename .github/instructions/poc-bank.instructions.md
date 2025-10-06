@@ -7,7 +7,8 @@ Code Location:
 
 POC ChatBot UI: 'poc-frotnend
 POC ChatBot Backend: 'poc-chat-backend'
-
+POC Bank Backend: 'poc-banking-service
+'
 
 
 Any new modules should be created using convention 'poc-<module-name>'.

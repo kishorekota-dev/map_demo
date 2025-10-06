@@ -1,0 +1,109 @@
+# Simplified Docker Compose for POC Banking Service
+# This version uses the existing API Gateway and Customer Service from /services
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: poc-banking-postgres
+    environment:
+      POSTGRES_USER: banking_user
+      POSTGRES_PASSWORD: banking_pass_2024
+      POSTGRES_DB: customer_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - banking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking_user -d customer_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: poc-banking-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@banking.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - banking-network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ../
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: poc-banking-gateway
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - CUSTOMER_SERVICE_URL=http://customer-service:3010
+      - SERVICE_NAME=api-gateway
+    ports:
+      - "3001:3001"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Customer Service
+  customer-service:
+    build:
+      context: ../
+      dockerfile: services/customer-service/Dockerfile
+    container_name: poc-banking-customer-service
+    environment:
+      - NODE_ENV=development
+      - PORT=3010
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=customer_db
+      - DB_USER=banking_user
+      - DB_PASSWORD=banking_pass_2024
+      - JWT_SECRET=customer-service-secret-key-2024
+      - SERVICE_NAME=customer-service
+    ports:
+      - "3010:3010"
+    networks:
+      - banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  banking-network:
+    driver: bridge
+    name: poc-banking-network
+
+volumes:
+  postgres_data:
+    name: poc-banking-postgres-data
+  pgadmin_data:
+    name: poc-banking-pgadmin-data
