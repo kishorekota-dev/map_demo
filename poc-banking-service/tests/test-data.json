@@ -1,0 +1,168 @@
+{
+  "testSuite": "POC Banking E2E API Tests",
+  "version": "1.0.0",
+  "baseUrl": "http://localhost:3001",
+  "customers": [
+    {
+      "name": "John Doe - Primary Test User",
+      "data": {
+        "title": "Mr",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john.doe@example.com",
+        "phone": "+15551234567",
+        "dateOfBirth": "1985-06-15",
+        "gender": "MALE",
+        "nationality": "USA",
+        "addressLine1": "123 Main Street",
+        "addressLine2": "Apt 4B",
+        "city": "New York",
+        "state": "NY",
+        "postalCode": "10001",
+        "country": "USA",
+        "idType": "PASSPORT",
+        "idNumber": "P12345678",
+        "idExpiryDate": "2030-12-31",
+        "idIssuingCountry": "USA"
+      }
+    },
+    {
+      "name": "Jane Smith - Secondary Test User",
+      "data": {
+        "title": "Ms",
+        "firstName": "Jane",
+        "lastName": "Smith",
+        "email": "jane.smith@example.com",
+        "phone": "+15559876543",
+        "dateOfBirth": "1990-03-22",
+        "gender": "FEMALE",
+        "nationality": "USA",
+        "addressLine1": "456 Oak Avenue",
+        "city": "Los Angeles",
+        "state": "CA",
+        "postalCode": "90001",
+        "country": "USA",
+        "idType": "DRIVERS_LICENSE",
+        "idNumber": "DL987654321",
+        "idExpiryDate": "2028-06-30",
+        "idIssuingCountry": "USA"
+      }
+    },
+    {
+      "name": "Robert Johnson - High Value Customer",
+      "data": {
+        "title": "Dr",
+        "firstName": "Robert",
+        "lastName": "Johnson",
+        "email": "robert.johnson@example.com",
+        "phone": "+15555555555",
+        "dateOfBirth": "1975-11-10",
+        "gender": "MALE",
+        "nationality": "USA",
+        "addressLine1": "789 Elm Street",
+        "city": "Chicago",
+        "state": "IL",
+        "postalCode": "60601",
+        "country": "USA",
+        "idType": "PASSPORT",
+        "idNumber": "P87654321",
+        "idExpiryDate": "2029-05-15",
+        "idIssuingCountry": "USA"
+      }
+    },
+    {
+      "name": "Emily Williams - BIAN Test User",
+      "data": {
+        "partyName": {
+          "firstName": "Emily",
+          "lastName": "Williams"
+        },
+        "contactDetails": {
+          "email": "emily.williams@example.com",
+          "phone": "+15556789012"
+        },
+        "identificationDocuments": {
+          "type": "PASSPORT",
+          "number": "P11223344"
+        },
+        "riskAssessment": {
+          "rating": "LOW"
+        }
+      }
+    },
+    {
+      "name": "Michael Brown - International Customer",
+      "data": {
+        "title": "Mr",
+        "firstName": "Michael",
+        "lastName": "Brown",
+        "email": "michael.brown@example.com",
+        "phone": "+442071234567",
+        "dateOfBirth": "1982-07-19",
+        "gender": "MALE",
+        "nationality": "GBR",
+        "addressLine1": "10 Downing Street",
+        "city": "London",
+        "postalCode": "SW1A 2AA",
+        "country": "GBR",
+        "idType": "PASSPORT",
+        "idNumber": "GB123456789",
+        "idExpiryDate": "2027-09-20",
+        "idIssuingCountry": "GBR"
+      }
+    },
+    {
+      "name": "Maria Garcia - VIP Customer",
+      "data": {
+        "title": "Mrs",
+        "firstName": "Maria",
+        "lastName": "Garcia",
+        "email": "maria.garcia@example.com",
+        "phone": "+15557778888",
+        "dateOfBirth": "1978-12-03",
+        "gender": "FEMALE",
+        "nationality": "USA",
+        "addressLine1": "555 Park Avenue",
+        "addressLine2": "Penthouse Suite",
+        "city": "New York",
+        "state": "NY",
+        "postalCode": "10022",
+        "country": "USA",
+        "idType": "PASSPORT",
+        "idNumber": "P99887766",
+        "idExpiryDate": "2031-06-15",
+        "idIssuingCountry": "USA"
+      }
+    }
+  ],
+  "testScenarios": {
+    "happyPath": {
+      "description": "Standard customer onboarding flow",
+      "steps": [
+        "Create customer",
+        "Retrieve customer",
+        "Verify KYC",
+        "Update customer information"
+      ]
+    },
+    "kycWorkflow": {
+      "description": "Complete KYC verification process",
+      "statuses": ["PENDING", "IN_PROGRESS", "VERIFIED", "REJECTED"]
+    },
+    "statusControl": {
+      "description": "Customer status lifecycle",
+      "actions": ["activate", "suspend", "block", "close"]
+    },
+    "errorHandling": {
+      "description": "Validation and error scenarios",
+      "tests": [
+        "Missing required fields",
+        "Invalid email format",
+        "Duplicate email",
+        "Invalid date format",
+        "Non-existent customer",
+        "Invalid UUID format"
+      ]
+    }
+  }
+}

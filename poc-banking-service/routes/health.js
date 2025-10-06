@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../database');
 
 /**
  * @route   GET /health
@@ -19,24 +20,30 @@ router.get('/', async (req, res) => {
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
     },
     dependencies: {
-      // TODO: Add actual health checks for external dependencies
-      database: 'healthy', // Would check database connection
-      nlpService: 'unknown', // Would ping NLP service
-      nluService: 'unknown', // Would ping NLU service
-      mcpService: 'unknown'  // Would ping MCP service
+      database: 'checking',
+      nlpService: 'unknown',
+      nluService: 'unknown',
+      mcpService: 'unknown'
     }
   };
 
   // Check critical dependencies
   try {
-    // TODO: Implement actual dependency health checks
-    // Example: await checkDatabaseConnection();
-    // Example: await pingService('http://localhost:3002/health');
+    // Check database connection
+    const dbHealth = await db.healthCheck();
+    healthCheck.dependencies.database = dbHealth.status;
+    healthCheck.database = {
+      status: dbHealth.status,
+      poolSize: dbHealth.poolSize,
+      idleConnections: dbHealth.idleConnections,
+      waitingClients: dbHealth.waitingClients
+    };
     
     res.status(200).json(healthCheck);
   } catch (error) {
     healthCheck.status = 'unhealthy';
     healthCheck.error = error.message;
+    healthCheck.dependencies.database = 'unhealthy';
     res.status(503).json(healthCheck);
   }
 });
