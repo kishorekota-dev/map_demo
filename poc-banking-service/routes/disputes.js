@@ -59,47 +59,48 @@ router.post('/:disputeId/evidence',
   disputeController.addEvidence
 );
 
-/**
- * @route   DELETE /api/disputes/:disputeId/evidence/:evidenceId
- * @desc    Remove evidence from dispute
- * @access  Private (Owner or Admin)
- */
-router.delete('/:disputeId/evidence/:evidenceId',
-  validators.validateId,
-  disputeController.removeEvidence
-);
+// TODO: Implement these controller methods
+// /**
+//  * @route   DELETE /api/disputes/:disputeId/evidence/:evidenceId
+//  * @desc    Remove evidence from dispute
+//  * @access  Private (Owner or Admin)
+//  */
+// router.delete('/:disputeId/evidence/:evidenceId',
+//   validators.validateId,
+//   disputeController.removeEvidence
+// );
 
-/**
- * @route   POST /api/disputes/:disputeId/close
- * @desc    Close dispute
- * @access  Private (Owner or Admin)
- */
-router.post('/:disputeId/close',
-  validators.validateId,
-  disputeController.closeDispute
-);
+// /**
+//  * @route   POST /api/disputes/:disputeId/close
+//  * @desc    Close dispute
+//  * @access  Private (Owner or Admin)
+//  */
+// router.post('/:disputeId/close',
+//   validators.validateId,
+//   disputeController.closeDispute
+// );
 
-/**
- * @route   POST /api/disputes/:disputeId/reopen
- * @desc    Reopen closed dispute
- * @access  Private (Admin only)
- */
-router.post('/:disputeId/reopen',
-  validators.validateId,
-  authorize(['admin']),
-  disputeController.reopenDispute
-);
+// /**
+//  * @route   POST /api/disputes/:disputeId/reopen
+//  * @desc    Reopen closed dispute
+//  * @access  Private (Admin only)
+//  */
+// router.post('/:disputeId/reopen',
+//   validators.validateId,
+//   authorize(['admin']),
+//   disputeController.reopenDispute
+// );
 
-/**
- * @route   GET /api/disputes/pending
- * @desc    Get pending disputes (Admin only)
- * @access  Private (Admin)
- */
-router.get('/pending',
-  authorize(['admin']),
-  validators.validatePagination,
-  disputeController.getPendingDisputes
-);
+// /**
+//  * @route   GET /api/disputes/pending
+//  * @desc    Get pending disputes (Admin only)
+//  * @access  Private (Admin)
+//  */
+// router.get('/pending',
+//   authorize(['admin']),
+//   validators.validatePagination,
+//   disputeController.getPendingDisputes
+// );
 
 /**
  * @route   POST /api/disputes/:disputeId/resolve
@@ -113,25 +114,35 @@ router.post('/:disputeId/resolve',
 );
 
 /**
- * @route   POST /api/disputes/:disputeId/reject
- * @desc    Reject dispute (Admin only)
- * @access  Private (Admin)
+ * @route   POST /api/disputes/:disputeId/withdraw
+ * @desc    Withdraw dispute
+ * @access  Private (Owner)
  */
-router.post('/:disputeId/reject',
+router.post('/:disputeId/withdraw',
   validators.validateId,
-  authorize(['admin']),
-  disputeController.rejectDispute
+  disputeController.withdrawDispute
 );
 
-/**
- * @route   GET /api/disputes/statistics
- * @desc    Get dispute statistics (Admin only)
- * @access  Private (Admin)
- */
-router.get('/statistics',
-  authorize(['admin']),
-  validators.validateDateRange,
-  disputeController.getDisputeStatistics
-);
+// /**
+//  * @route   POST /api/disputes/:disputeId/reject
+//  * @desc    Reject dispute (Admin only)
+//  * @access  Private (Admin)
+//  */
+// router.post('/:disputeId/reject',
+//   validators.validateId,
+//   authorize(['admin']),
+//   disputeController.rejectDispute
+// );
+
+// /**
+//  * @route   GET /api/disputes/statistics
+//  * @desc    Get dispute statistics (Admin only)
+//  * @access  Private (Admin)
+//  */
+// router.get('/statistics',
+//   authorize(['admin']),
+//   validators.validateDateRange,
+//   disputeController.getDisputeStatistics
+// );
 
 module.exports = router;

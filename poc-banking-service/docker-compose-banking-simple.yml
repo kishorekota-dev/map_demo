@@ -1,5 +1,5 @@
-# Simplified Docker Compose for POC Banking Service
-# This version uses the existing API Gateway and Customer Service from /services
+# Docker Compose for POC Banking Service
+# Standalone banking service with authentication
 
 services:
   # PostgreSQL Database
@@ -29,7 +29,7 @@ services:
     image: dpage/pgadmin4:latest
     container_name: poc-banking-pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@banking.local
+      PGADMIN_DEFAULT_EMAIL: admin@banking.com
       PGADMIN_DEFAULT_PASSWORD: admin123
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
@@ -42,60 +42,35 @@ services:
       - postgres
     restart: unless-stopped
 
-  # API Gateway
-  api-gateway:
+  # POC Banking Service
+  banking-service:
     build:
-      context: ../
-      dockerfile: services/api-gateway/Dockerfile
-    container_name: poc-banking-gateway
+      context: .
+      dockerfile: Dockerfile
+    container_name: poc-banking-service
     environment:
       - NODE_ENV=development
-      - PORT=3001
-      - CUSTOMER_SERVICE_URL=http://customer-service:3010
-      - SERVICE_NAME=api-gateway
-    ports:
-      - "3001:3001"
-    networks:
-      - banking-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Customer Service
-  customer-service:
-    build:
-      context: ../
-      dockerfile: services/customer-service/Dockerfile
-    container_name: poc-banking-customer-service
-    environment:
-      - NODE_ENV=development
-      - PORT=3010
+      - PORT=3005
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=customer_db
       - DB_USER=banking_user
       - DB_PASSWORD=banking_pass_2024
-      - JWT_SECRET=customer-service-secret-key-2024
-      - SERVICE_NAME=customer-service
+      - JWT_SECRET=poc-banking-secret-key-2024
+      - JWT_EXPIRES_IN=15m
+      - REFRESH_TOKEN_EXPIRES_IN=7d
+      - SERVICE_NAME=poc-banking-service
+      - LOG_LEVEL=info
     ports:
-      - "3010:3010"
+      - "3005:3005"
+    volumes:
+      - ./logs:/app/logs
     networks:
       - banking-network
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 networks:
   banking-network:

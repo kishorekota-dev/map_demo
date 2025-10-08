@@ -1,7 +1,7 @@
 {
   "name": "poc-banking-database",
   "version": "1.0.0",
-  "description": "Database module for POC Banking Service with PostgreSQL and Flyway migrations",
+  "description": "Database module for POC Banking Service with PostgreSQL migrations and seeds",
   "main": "index.js",
   "scripts": {
     "migrate": "node scripts/migrate.js",
@@ -12,14 +12,13 @@
   },
   "dependencies": {
     "pg": "^8.11.3",
-    "node-flywaydb": "^3.0.7",
     "dotenv": "^16.3.1"
   },
   "keywords": [
     "database",
     "postgresql",
-    "flyway",
-    "migrations"
+    "migrations",
+    "seeds"
   ],
   "author": "POC Development Team",
   "license": "ISC"
