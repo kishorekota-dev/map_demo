@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>POC Banking Service - API Documentation Test</h1>
+    
+    <h2>Links:</h2>
+    <ul>
+        <li><a href="/openapi.yaml" target="_blank">OpenAPI Spec (YAML)</a></li>
+        <li><a href="/api-docs.html">Swagger UI</a></li>
+        <li><a href="/api/docs" target="_blank">API Info (JSON)</a></li>
+    </ul>
+    
+    <h2>Testing OpenAPI Spec Load:</h2>
+    <pre id="result">Loading...</pre>
+    
+    <script>
+        fetch('/openapi.yaml')
+            .then(response => {
+                document.getElementById('result').textContent = 
+                    'Status: ' + response.status + '\n' +
+                    'Content-Type: ' + response.headers.get('content-type') + '\n' +
+                    'OK: ' + response.ok;
+                return response.text();
+            })
+            .then(text => {
+                document.getElementById('result').textContent += '\n\nFirst 500 chars:\n' + text.substring(0, 500);
+            })
+            .catch(error => {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            });
+    </script>
+</body>
+</html>

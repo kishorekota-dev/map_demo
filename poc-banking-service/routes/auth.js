@@ -1,0 +1,600 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
+const db = require('../database');
+const { authenticateToken } = require('../middleware/auth');
+
+const router = express.Router();
+
+// JWT Configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+
+// Helper function to generate access token
+const generateAccessToken = (user, permissions) => {
+  return jwt.sign(
+    {
+      userId: user.user_id,
+      username: user.username,
+      email: user.email,
+      customerId: user.customer_id,
+      permissions: permissions || [],
+      type: 'access'
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+};
+
+// Helper function to generate refresh token
+const generateRefreshToken = (user) => {
+  return jwt.sign(
+    {
+      userId: user.user_id,
+      username: user.username,
+      type: 'refresh'
+    },
+    JWT_SECRET,
+    { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
+  );
+};
+
+// Helper function to get user permissions
+const getUserPermissions = async (userId) => {
+  const query = `
+    SELECT DISTINCT p.name, p.resource, p.action
+    FROM users u
+    JOIN user_roles ur ON u.user_id = ur.user_id
+    JOIN role_permissions rp ON ur.role_id = rp.role_id
+    JOIN permissions p ON rp.permission_id = p.id
+    WHERE u.user_id = $1
+      AND u.is_active = TRUE
+      AND NOT u.is_locked
+  `;
+  
+  const result = await db.query(query, [userId]);
+  return result.rows;
+};
+
+// Helper function to get user roles
+const getUserRoles = async (userId) => {
+  const query = `
+    SELECT r.name, r.description
+    FROM user_roles ur
+    JOIN roles r ON ur.role_id = r.id
+    WHERE ur.user_id = $1
+  `;
+  
+  const result = await db.query(query, [userId]);
+  return result.rows;
+};
+
+// Helper function to create audit log
+const createAuditLog = async (userId, action, resource, details, ipAddress, status, errorMessage = null) => {
+  const query = `
+    INSERT INTO audit_logs (user_id, action, resource, details, ip_address, status, error_message)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+  `;
+  
+  await db.query(query, [
+    userId,
+    action,
+    resource,
+    JSON.stringify(details),
+    ipAddress,
+    status,
+    errorMessage
+  ]);
+};
+
+/**
+ * POST /api/v1/auth/login
+ * User login - returns JWT tokens
+ */
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const ipAddress = req.ip || req.connection.remoteAddress;
+  
+  try {
+    // Validation
+    if (!username || !password) {
+      return res.status(400).json({
+        status: 'error',
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Username and password are required'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Get user from database
+    const userQuery = `
+      SELECT u.*, c.customer_number, 
+             CONCAT(c.first_name, ' ', c.last_name) as full_name
+      FROM users u
+      LEFT JOIN customers c ON u.customer_id = c.id
+      WHERE u.username = $1
+    `;
+    
+    const userResult = await db.query(userQuery, [username]);
+
+    if (userResult.rows.length === 0) {
+      await createAuditLog(
+        null,
+        'login_failed',
+        'authentication',
+        { username, reason: 'user_not_found' },
+        ipAddress,
+        'failure',
+        'Invalid credentials'
+      );
+
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid username or password'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if user is active
+    if (!user.is_active) {
+      await createAuditLog(
+        user.user_id,
+        'login_failed',
+        'authentication',
+        { username, reason: 'account_inactive' },
+        ipAddress,
+        'failure',
+        'Account inactive'
+      );
+
+      return res.status(403).json({
+        status: 'error',
+        error: {
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Account is inactive. Please contact support.'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Check if account is locked
+    if (user.is_locked) {
+      await createAuditLog(
+        user.user_id,
+        'login_failed',
+        'authentication',
+        { username, reason: 'account_locked' },
+        ipAddress,
+        'failure',
+        'Account locked'
+      );
+
+      return res.status(403).json({
+        status: 'error',
+        error: {
+          code: 'ACCOUNT_LOCKED',
+          message: 'Account is locked due to multiple failed login attempts. Please contact support.'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Verify password
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!passwordMatch) {
+      // Increment failed login attempts
+      await db.query(
+        'UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE user_id = $1',
+        [user.user_id]
+      );
+
+      await createAuditLog(
+        user.user_id,
+        'login_failed',
+        'authentication',
+        { username, reason: 'invalid_password' },
+        ipAddress,
+        'failure',
+        'Invalid password'
+      );
+
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid username or password'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Get user permissions and roles
+    const permissions = await getUserPermissions(user.user_id);
+    const roles = await getUserRoles(user.user_id);
+
+    // Generate tokens
+    const accessToken = generateAccessToken(user, permissions);
+    const refreshToken = generateRefreshToken(user);
+
+    // Store refresh token in database
+    await db.query(
+      `INSERT INTO refresh_tokens (user_id, token, expires_at, created_by_ip)
+       VALUES ($1, $2, NOW() + INTERVAL '7 days', $3)`,
+      [user.user_id, refreshToken, ipAddress]
+    );
+
+    // Update user last login
+    await db.query(
+      `UPDATE users 
+       SET last_login_at = NOW(), 
+           failed_login_attempts = 0
+       WHERE user_id = $1`,
+      [user.user_id]
+    );
+
+    // Log successful login
+    await createAuditLog(
+      user.user_id,
+      'login_success',
+      'authentication',
+      { username },
+      ipAddress,
+      'success'
+    );
+
+    // Return response
+    res.json({
+      status: 'success',
+      data: {
+        user: {
+          id: user.user_id,
+          username: user.username,
+          email: user.email,
+          customerId: user.customer_id,
+          customerNumber: user.customer_number,
+          name: user.full_name,
+          isVerified: user.is_verified,
+          mustChangePassword: user.must_change_password,
+          twoFactorEnabled: user.two_factor_enabled
+        },
+        tokens: {
+          accessToken,
+          refreshToken,
+          tokenType: 'Bearer',
+          expiresIn: JWT_EXPIRES_IN
+        },
+        roles: roles.map(r => r.name),
+        permissions: permissions.map(p => p.name)
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      status: 'error',
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred during login'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+  }
+});
+
+/**
+ * POST /api/v1/auth/refresh
+ * Refresh access token using refresh token
+ */
+router.post('/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+
+  try {
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: 'error',
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Refresh token is required'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, JWT_SECRET);
+
+    if (decoded.type !== 'refresh') {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Invalid token type'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Check if refresh token exists and is not revoked
+    const tokenQuery = `
+      SELECT * FROM refresh_tokens 
+      WHERE token = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+    `;
+    
+    const tokenResult = await db.query(tokenQuery, [refreshToken, decoded.userId]);
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Refresh token is invalid or has been revoked'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Get user
+    const userQuery = 'SELECT * FROM users WHERE user_id = $1 AND is_active = TRUE AND NOT is_locked';
+    const userResult = await db.query(userQuery, [decoded.userId]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found or account is inactive'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Get user permissions
+    const permissions = await getUserPermissions(user.user_id);
+
+    // Generate new access token
+    const accessToken = generateAccessToken(user, permissions);
+
+    res.json({
+      status: 'success',
+      data: {
+        accessToken,
+        tokenType: 'Bearer',
+        expiresIn: JWT_EXPIRES_IN
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'TOKEN_EXPIRED',
+          message: 'Refresh token has expired'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Invalid token'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    console.error('Token refresh error:', error);
+    res.status(500).json({
+      status: 'error',
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while refreshing token'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+  }
+});
+
+/**
+ * POST /api/v1/auth/logout
+ * Logout user and revoke refresh token
+ */
+router.post('/logout', authenticateToken, async (req, res) => {
+  const { refreshToken } = req.body;
+
+  try {
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: 'error',
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Refresh token is required'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Revoke the refresh token
+    await db.query(
+      'UPDATE refresh_tokens SET revoked_at = NOW() WHERE token = $1 AND user_id = $2',
+      [refreshToken, req.user.userId]
+    );
+
+    // Log logout
+    await createAuditLog(
+      req.user.userId,
+      'logout',
+      'authentication',
+      { username: req.user.username },
+      req.ip || req.connection.remoteAddress,
+      'success'
+    );
+
+    res.json({
+      status: 'success',
+      data: {
+        message: 'Logged out successfully'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      status: 'error',
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred during logout'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+  }
+});
+
+/**
+ * GET /api/v1/auth/me
+ * Get current authenticated user profile
+ */
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    // Get user details
+    const userQuery = `
+      SELECT u.*, c.customer_number, 
+             CONCAT(c.first_name, ' ', c.last_name) as full_name
+      FROM users u
+      LEFT JOIN customers c ON u.customer_id = c.id
+      WHERE u.id = $1
+    `;
+    
+    const userResult = await db.query(userQuery, [req.user.userId]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Get roles and permissions
+    const roles = await getUserRoles(user.user_id);
+    const permissions = await getUserPermissions(user.user_id);
+
+    res.json({
+      status: 'success',
+      data: {
+        id: user.user_id,
+        username: user.username,
+        email: user.email,
+        customerId: user.customer_id,
+        customerNumber: user.customer_number,
+        name: user.full_name,
+        isVerified: user.is_verified,
+        twoFactorEnabled: user.two_factor_enabled,
+        lastLoginAt: user.last_login_at,
+        createdAt: user.created_at,
+        roles,
+        permissions
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user profile error:', error);
+    res.status(500).json({
+      status: 'error',
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An error occurred while fetching user profile'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        correlationId: uuidv4()
+      }
+    });
+  }
+});
+
+module.exports = router;

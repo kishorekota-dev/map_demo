@@ -155,6 +155,23 @@ const bankingLogger = {
       ...meta,
       category: 'external'
     });
+  },
+  
+  // Standard winston methods for compatibility
+  error: (message, meta = {}) => {
+    logger.error(message, meta);
+  },
+  
+  warn: (message, meta = {}) => {
+    logger.warn(message, meta);
+  },
+  
+  info: (message, meta = {}) => {
+    logger.info(message, meta);
+  },
+  
+  debug: (message, meta = {}) => {
+    logger.debug(message, meta);
   }
 };
 

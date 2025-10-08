@@ -61,12 +61,12 @@ router.post('/:cardId/block',
 
 /**
  * @route   POST /api/cards/:cardId/unblock
- * @desc    Unblock card
+ * @desc    Unblock/activate card
  * @access  Private (Owner or Admin)
  */
 router.post('/:cardId/unblock',
   validators.validateId,
-  cardController.unblockCard
+  cardController.activateCard
 );
 
 /**
@@ -79,17 +79,18 @@ router.post('/:cardId/replace',
   cardController.replaceCard
 );
 
-/**
- * @route   GET /api/cards/:cardId/transactions
- * @desc    Get card transaction history
- * @access  Private (Owner or Admin)
- */
-router.get('/:cardId/transactions',
-  validators.validateId,
-  validators.validatePagination,
-  validators.validateDateRange,
-  cardController.getCardTransactions
-);
+// TODO: Implement these controller methods
+// /**
+//  * @route   GET /api/cards/:cardId/transactions
+//  * @desc    Get card transaction history
+//  * @access  Private (Owner or Admin)
+//  */
+// router.get('/:cardId/transactions',
+//   validators.validateId,
+//   validators.validatePagination,
+//   validators.validateDateRange,
+//   cardController.getCardTransactions
+// );
 
 /**
  * @route   POST /api/cards/:cardId/activate
@@ -101,55 +102,57 @@ router.post('/:cardId/activate',
   cardController.activateCard
 );
 
-/**
- * @route   POST /api/cards/:cardId/cancel
- * @desc    Cancel card
- * @access  Private (Owner or Admin)
- */
-router.post('/:cardId/cancel',
-  validators.validateId,
-  cardController.cancelCard
-);
+// TODO: Implement cancelCard controller method
+// /**
+//  * @route   POST /api/cards/:cardId/cancel
+//  * @desc    Cancel card
+//  * @access  Private (Owner or Admin)
+//  */
+// router.post('/:cardId/cancel',
+//   validators.validateId,
+//   cardController.cancelCard
+// );
 
-/**
- * @route   GET /api/cards/:cardId/limits
- * @desc    Get card spending limits
- * @access  Private (Owner or Admin)
- */
-router.get('/:cardId/limits',
-  validators.validateId,
-  cardController.getCardLimits
-);
+// TODO: Implement limit management methods
+// /**
+//  * @route   GET /api/cards/:cardId/limits
+//  * @desc    Get card spending limits
+//  * @access  Private (Owner or Admin)
+//  */
+// router.get('/:cardId/limits',
+//   validators.validateId,
+//   cardController.getCardLimits
+// );
 
-/**
- * @route   PUT /api/cards/:cardId/limits
- * @desc    Update card spending limits
- * @access  Private (Owner or Admin)
- */
-router.put('/:cardId/limits',
-  validators.validateId,
-  cardController.updateCardLimits
-);
+// /**
+//  * @route   PUT /api/cards/:cardId/limits
+//  * @desc    Update card spending limits
+//  * @access  Private (Owner or Admin)
+//  */
+// router.put('/:cardId/limits',
+//   validators.validateId,
+//   cardController.updateCardLimits
+// );
 
-/**
- * @route   POST /api/cards/:cardId/pin
- * @desc    Change card PIN
- * @access  Private (Owner only)
- */
-router.post('/:cardId/pin',
-  validators.validateId,
-  cardController.changeCardPin
-);
+// /**
+//  * @route   POST /api/cards/:cardId/pin
+//  * @desc    Change card PIN
+//  * @access  Private (Owner only)
+//  */
+// router.post('/:cardId/pin',
+//   validators.validateId,
+//   cardController.changeCardPin
+// );
 
-/**
- * @route   GET /api/cards/:cardId/statements
- * @desc    Get card statements
- * @access  Private (Owner or Admin)
- */
-router.get('/:cardId/statements',
-  validators.validateId,
-  validators.validateDateRange,
-  cardController.getCardStatements
-);
+// /**
+//  * @route   GET /api/cards/:cardId/statements
+//  * @desc    Get card statements
+//  * @access  Private (Owner or Admin)
+//  */
+// router.get('/:cardId/statements',
+//   validators.validateId,
+//   validators.validateDateRange,
+//   cardController.getCardStatements
+// );
 
 module.exports = router;

@@ -12,12 +12,15 @@
 -- Admin User (not linked to a customer)
 INSERT INTO users (
     username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     created_by
 ) VALUES (
     'admin',
     'admin@pocbanking.com',
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    'Admin',
+    'User',
     true,
     true,
     false,
@@ -27,12 +30,15 @@ INSERT INTO users (
 -- Manager User (not linked to a customer)
 INSERT INTO users (
     username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     created_by
 ) VALUES (
     'manager',
     'manager@pocbanking.com',
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    'Manager',
+    'User',
     true,
     true,
     false,
@@ -43,6 +49,7 @@ INSERT INTO users (
 -- User for James Patterson (Premium Customer)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     last_login_at,
     created_by
@@ -52,6 +59,8 @@ SELECT
     'james.patterson',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     true,
     true,
     false,
@@ -64,6 +73,7 @@ ON CONFLICT (username) DO NOTHING;
 -- User for Sarah Martinez (Business Customer)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     last_login_at,
     created_by
@@ -73,6 +83,8 @@ SELECT
     'sarah.martinez',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     true,
     true,
     false,
@@ -85,6 +97,7 @@ ON CONFLICT (username) DO NOTHING;
 -- User for Michael Chen (Young Professional)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     last_login_at,
     created_by
@@ -94,6 +107,8 @@ SELECT
     'michael.chen',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     true,
     true,
     false,
@@ -106,6 +121,7 @@ ON CONFLICT (username) DO NOTHING;
 -- User for Robert Thompson (Retired Customer)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     created_by
 )
@@ -114,6 +130,8 @@ SELECT
     'robert.thompson',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     true,
     true,
     false,
@@ -125,6 +143,7 @@ ON CONFLICT (username) DO NOTHING;
 -- User for Yuki Tanaka (International Customer)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     last_login_at,
     created_by
@@ -134,6 +153,8 @@ SELECT
     'yuki.tanaka',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     true,
     true,
     false,
@@ -146,6 +167,7 @@ ON CONFLICT (username) DO NOTHING;
 -- Locked User for David Wilson (Suspended Customer)
 INSERT INTO users (
     customer_id, username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     failed_login_attempts,
     created_by
@@ -155,6 +177,8 @@ SELECT
     'david.wilson',
     c.email,
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    c.first_name,
+    c.last_name,
     false,
     true,
     true,
@@ -167,12 +191,15 @@ ON CONFLICT (username) DO NOTHING;
 -- Support User
 INSERT INTO users (
     username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     created_by
 ) VALUES (
     'support',
     'support@pocbanking.com',
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    'Support',
+    'Agent',
     true,
     true,
     false,
@@ -182,12 +209,15 @@ INSERT INTO users (
 -- Auditor User
 INSERT INTO users (
     username, email, password_hash,
+    first_name, last_name,
     is_active, is_verified, is_locked,
     created_by
 ) VALUES (
     'auditor',
     'auditor@pocbanking.com',
     '$2b$10$nf2.6c73o3jOTCU2xbZP2eePqfE1n3.Wom.WolJUmgRQi/YdK7w8a',  -- Password123!
+    'Auditor',
+    'Compliance',
     true,
     true,
     false,
@@ -200,7 +230,7 @@ INSERT INTO users (
 
 -- Admin role to admin user
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 'seed-script'
+SELECT u.user_id, r.id, 'seed-script'
 FROM users u
 CROSS JOIN roles r
 WHERE u.username = 'admin' AND r.name = 'ADMIN'
@@ -208,7 +238,7 @@ ON CONFLICT DO NOTHING;
 
 -- Manager role to manager user
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 'seed-script'
+SELECT u.user_id, r.id, 'seed-script'
 FROM users u
 CROSS JOIN roles r
 WHERE u.username = 'manager' AND r.name = 'MANAGER'
@@ -216,7 +246,7 @@ ON CONFLICT DO NOTHING;
 
 -- Customer roles to customer users
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 'seed-script'
+SELECT u.user_id, r.id, 'seed-script'
 FROM users u
 CROSS JOIN roles r
 WHERE u.username IN ('james.patterson', 'sarah.martinez', 'michael.chen', 'robert.thompson', 'yuki.tanaka', 'david.wilson')
@@ -225,7 +255,7 @@ ON CONFLICT DO NOTHING;
 
 -- Support role to support user
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 'seed-script'
+SELECT u.user_id, r.id, 'seed-script'
 FROM users u
 CROSS JOIN roles r
 WHERE u.username = 'support' AND r.name = 'SUPPORT'
@@ -233,7 +263,7 @@ ON CONFLICT DO NOTHING;
 
 -- Auditor role to auditor user
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 'seed-script'
+SELECT u.user_id, r.id, 'seed-script'
 FROM users u
 CROSS JOIN roles r
 WHERE u.username = 'auditor' AND r.name = 'AUDITOR'
@@ -246,7 +276,7 @@ ON CONFLICT DO NOTHING;
 -- Recent successful logins
 INSERT INTO audit_logs (user_id, action, resource, details, ip_address, status)
 SELECT 
-    u.id,
+    u.user_id,
     'LOGIN',
     'auth',
     jsonb_build_object('username', u.username, 'method', 'password'),
@@ -260,7 +290,7 @@ LIMIT 10;
 -- Failed login attempt for locked user
 INSERT INTO audit_logs (user_id, action, resource, details, ip_address, status, error_message)
 SELECT 
-    u.id,
+    u.user_id,
     'LOGIN',
     'auth',
     jsonb_build_object('username', u.username, 'method', 'password'),

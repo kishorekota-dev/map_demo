@@ -98,7 +98,7 @@ router.post('/:transactionId/receipt',
  * @access  Private
  */
 router.get('/categories',
-  transactionController.getTransactionCategories
+  transactionController.getCategories
 );
 
 /**
@@ -106,29 +106,32 @@ router.get('/categories',
  * @desc    Update transaction category
  * @access  Private (Owner or Admin)
  */
-router.put('/:transactionId/category',
-  validators.validateTransactionId,
-  transactionController.updateTransactionCategory
-);
+// TODO: Implement updateTransactionCategory controller method
+// router.put('/:transactionId/category',
+//   validators.validateTransactionId,
+//   transactionController.updateTransactionCategory
+// );
 
 /**
  * @route   POST /api/transactions/bulk
  * @desc    Process bulk transactions (Admin only)
  * @access  Private (Admin)
  */
-router.post('/bulk',
-  authorize(['admin']),
-  transactionController.processBulkTransactions
-);
+// TODO: Implement processBulkTransactions controller method
+// router.post('/bulk',
+//   authorize(['admin']),
+//   transactionController.processBulkTransactions
+// );
 
 /**
  * @route   GET /api/transactions/export
  * @desc    Export transactions to CSV/PDF
  * @access  Private
  */
-router.get('/export',
-  validators.validateDateRange,
-  transactionController.exportTransactions
-);
+// TODO: Implement exportTransactions controller method
+// router.get('/export',
+//   validators.validateDateRange,
+//   transactionController.exportTransactions
+// );
 
 module.exports = router;

@@ -41,15 +41,16 @@ router.post('/',
   transferController.createTransfer
 );
 
-/**
- * @route   GET /api/transfers/scheduled
- * @desc    Get scheduled transfers
- * @access  Private
- */
-router.get('/scheduled',
-  validators.validatePagination,
-  transferController.getScheduledTransfers
-);
+// TODO: Implement getScheduledTransfers controller method
+// /**
+//  * @route   GET /api/transfers/scheduled
+//  * @desc    Get scheduled transfers
+//  * @access  Private
+//  */
+// router.get('/scheduled',
+//   validators.validatePagination,
+//   transferController.getScheduledTransfers
+// );
 
 /**
  * @route   POST /api/transfers/:transferId/cancel
@@ -61,76 +62,77 @@ router.post('/:transferId/cancel',
   transferController.cancelTransfer
 );
 
-/**
- * @route   GET /api/transfers/recurring
- * @desc    Get recurring transfers
- * @access  Private
- */
-router.get('/recurring',
-  validators.validatePagination,
-  transferController.getRecurringTransfers
-);
+// TODO: Implement recurring transfer methods
+// /**
+//  * @route   GET /api/transfers/recurring
+//  * @desc    Get recurring transfers
+//  * @access  Private
+//  */
+// router.get('/recurring',
+//   validators.validatePagination,
+//   transferController.getRecurringTransfers
+// );
 
-/**
- * @route   POST /api/transfers/recurring
- * @desc    Set up recurring transfer
- * @access  Private
- */
-router.post('/recurring',
-  validators.validateCreateTransfer,
-  businessValidators.validateSufficientFunds,
-  transferController.createRecurringTransfer
-);
+// /**
+//  * @route   POST /api/transfers/recurring
+//  * @desc    Set up recurring transfer
+//  * @access  Private
+//  */
+// router.post('/recurring',
+//   validators.validateCreateTransfer,
+//   businessValidators.validateSufficientFunds,
+//   transferController.createRecurringTransfer
+// );
 
-/**
- * @route   PUT /api/transfers/recurring/:transferId
- * @desc    Update recurring transfer
- * @access  Private (Owner or Admin)
- */
-router.put('/recurring/:transferId',
-  validators.validateId,
-  transferController.updateRecurringTransfer
-);
+// /**
+//  * @route   PUT /api/transfers/recurring/:transferId
+//  * @desc    Update recurring transfer
+//  * @access  Private (Owner or Admin)
+//  */
+// router.put('/recurring/:transferId',
+//   validators.validateId,
+//   transferController.updateRecurringTransfer
+// );
 
-/**
- * @route   DELETE /api/transfers/recurring/:transferId
- * @desc    Delete recurring transfer
- * @access  Private (Owner or Admin)
- */
-router.delete('/recurring/:transferId',
-  validators.validateId,
-  transferController.deleteRecurringTransfer
-);
+// /**
+//  * @route   DELETE /api/transfers/recurring/:transferId
+//  * @desc    Delete recurring transfer
+//  * @access  Private (Owner or Admin)
+//  */
+// router.delete('/recurring/:transferId',
+//   validators.validateId,
+//   transferController.deleteRecurringTransfer
+// );
 
-/**
- * @route   GET /api/transfers/limits
- * @desc    Get transfer limits for user
- * @access  Private
- */
-router.get('/limits',
-  transferController.getTransferLimits
-);
+// /**
+//  * @route   GET /api/transfers/limits
+//  * @desc    Get transfer limits for user
+//  * @access  Private
+//  */
+// router.get('/limits',
+//   transferController.getTransferLimits
+// );
 
-/**
- * @route   POST /api/transfers/:transferId/approve
- * @desc    Approve high-value transfer (Admin only)
- * @access  Private (Admin)
- */
-router.post('/:transferId/approve',
-  validators.validateId,
-  authorize(['admin']),
-  transferController.approveTransfer
-);
+// /**
+//  * @route   POST /api/transfers/:transferId/approve
+//  * @desc    Approve high-value transfer (Admin only)
+//  * @access  Private (Admin)
+//  */
+// router.post('/:transferId/approve',
+//   validators.validateId,
+//   authorize(['admin']),
+//   transferController.approveTransfer
+// );
 
-/**
- * @route   POST /api/transfers/:transferId/reject
- * @desc    Reject transfer (Admin only)
- * @access  Private (Admin)
- */
-router.post('/:transferId/reject',
-  validators.validateId,
-  authorize(['admin']),
-  transferController.rejectTransfer
-);
+// /**
+//  * @route   POST /api/transfers/:transferId/reject
+//  * @desc    Reject transfer (Admin only)
+//  * @access  Private (Admin)
+//  */
+// router.post('/:transferId/reject',
+//   validators.validateId,
+//   authorize(['admin']),
+//   transferController.rejectTransfer
+// );
 
 module.exports = router;

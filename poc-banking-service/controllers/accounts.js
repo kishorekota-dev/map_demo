@@ -258,6 +258,142 @@ class AccountController {
       next(error);
     }
   }
+
+  // Freeze account (Admin only)
+  async freezeAccount(req, res, next) {
+    try {
+      const { accountId } = req.params;
+      const { reason } = req.body;
+
+      const account = await AccountRepository.findById(accountId);
+      
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: 'Account not found'
+        });
+      }
+
+      if (account.status === 'frozen') {
+        return res.status(400).json({
+          success: false,
+          error: 'Account is already frozen'
+        });
+      }
+
+      const updatedAccount = await AccountRepository.update(accountId, {
+        status: 'frozen'
+      });
+
+      logger.info(`Account frozen: ${accountId} by admin: ${req.user.userId} - Reason: ${reason || 'Not specified'}`);
+
+      res.json({
+        success: true,
+        message: 'Account frozen successfully',
+        data: updatedAccount
+      });
+    } catch (error) {
+      logger.error('Error freezing account:', error);
+      next(error);
+    }
+  }
+
+  // Unfreeze account (Admin only)
+  async unfreezeAccount(req, res, next) {
+    try {
+      const { accountId } = req.params;
+
+      const account = await AccountRepository.findById(accountId);
+      
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: 'Account not found'
+        });
+      }
+
+      if (account.status !== 'frozen') {
+        return res.status(400).json({
+          success: false,
+          error: 'Account is not frozen',
+          currentStatus: account.status
+        });
+      }
+
+      const updatedAccount = await AccountRepository.update(accountId, {
+        status: 'active'
+      });
+
+      logger.info(`Account unfrozen: ${accountId} by admin: ${req.user.userId}`);
+
+      res.json({
+        success: true,
+        message: 'Account unfrozen successfully',
+        data: updatedAccount
+      });
+    } catch (error) {
+      logger.error('Error unfreezing account:', error);
+      next(error);
+    }
+  }
+
+  // Get recent account activity
+  async getAccountActivity(req, res, next) {
+    try {
+      const { accountId } = req.params;
+      const { limit = 20, days = 30 } = req.query;
+
+      const account = await AccountRepository.findById(accountId);
+      
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: 'Account not found'
+        });
+      }
+
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(days));
+      const endDate = new Date();
+
+      const transactions = await TransactionRepository.findByAccountId(accountId, {
+        limit: parseInt(limit),
+        offset: 0,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
+      });
+
+      const statistics = await AccountRepository.getStatistics(
+        accountId, 
+        startDate.toISOString(), 
+        endDate.toISOString()
+      );
+
+      res.json({
+        success: true,
+        data: {
+          accountId: account.account_id,
+          accountName: account.account_name,
+          currentBalance: account.balance,
+          period: {
+            days: parseInt(days),
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString()
+          },
+          recentTransactions: transactions,
+          statistics: {
+            transactionCount: parseInt(statistics.transaction_count) || 0,
+            totalDeposits: parseFloat(statistics.total_deposits) || 0,
+            totalWithdrawals: parseFloat(statistics.total_withdrawals) || 0,
+            averageTransaction: parseFloat(statistics.average_transaction) || 0
+          }
+        }
+      });
+    } catch (error) {
+      logger.error('Error getting account activity:', error);
+      next(error);
+    }
+  }
 }
 
 module.exports = new AccountController();
