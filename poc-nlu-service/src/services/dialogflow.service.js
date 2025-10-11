@@ -9,6 +9,7 @@ const config = require('../config/config');
 class DialogFlowService {
   constructor() {
     this.enabled = config.dialogflow.enabled;
+    this.sessionsClient = null;
     
     if (this.enabled) {
       try {
@@ -20,7 +21,7 @@ class DialogFlowService {
         this.enabled = false;
       }
     } else {
-      logger.info('DialogFlow service disabled');
+      logger.info('DialogFlow service disabled - using mock responses');
     }
   }
 
@@ -29,37 +30,54 @@ class DialogFlowService {
       throw new Error('DialogFlow project ID not configured');
     }
 
-    // Note: Actual DialogFlow SDK initialization would go here
-    // const { SessionsClient } = require('@google-cloud/dialogflow');
-    // this.sessionsClient = new SessionsClient({
-    //   keyFilename: config.dialogflow.keyFilename
-    // });
-    
-    logger.debug('DialogFlow client initialized', {
-      projectId: config.dialogflow.projectId,
-      languageCode: config.dialogflow.languageCode
-    });
+    try {
+      // Initialize DialogFlow Sessions Client
+      const { SessionsClient } = require('@google-cloud/dialogflow');
+      
+      const clientConfig = {
+        projectId: config.dialogflow.projectId
+      };
+      
+      // Add credentials if key file is provided
+      if (config.dialogflow.keyFilename) {
+        clientConfig.keyFilename = config.dialogflow.keyFilename;
+      }
+      
+      this.sessionsClient = new SessionsClient(clientConfig);
+      
+      logger.debug('DialogFlow client initialized', {
+        projectId: config.dialogflow.projectId,
+        languageCode: config.dialogflow.languageCode,
+        hasKeyFile: !!config.dialogflow.keyFilename
+      });
+    } catch (error) {
+      logger.warn('DialogFlow SDK not available, using mock mode', {
+        error: error.message
+      });
+      // Don't throw - fall back to mock mode
+    }
   }
 
   /**
-   * Detect intent using DialogFlow
+   * Detect intent using DialogFlow (Real or Mock)
    */
-  async detectIntent(message, sessionId = 'default') {
-    if (!this.enabled) {
-      throw new Error('DialogFlow service is not enabled');
-    }
-
+  async detectIntent(message, sessionId = 'default', languageCode = null) {
+    const lang = languageCode || config.dialogflow.languageCode;
+    
     try {
       logger.debug('Detecting intent with DialogFlow', {
         message: message.substring(0, 100),
-        sessionId
+        sessionId,
+        languageCode: lang
       });
 
-      // Mock DialogFlow response for demonstration
-      // In real implementation, this would call DialogFlow API
-      const mockResponse = await this.mockDialogFlowRequest(message, sessionId);
-      
-      return this.parseDialogFlowResponse(mockResponse);
+      // Use real DialogFlow API if available
+      if (this.sessionsClient && this.enabled) {
+        return await this.detectIntentReal(message, sessionId, lang);
+      } else {
+        // Fall back to mock mode
+        return await this.detectIntentMock(message, sessionId, lang);
+      }
 
     } catch (error) {
       logger.error('DialogFlow intent detection failed', {
@@ -68,6 +86,66 @@ class DialogFlowService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Real DialogFlow API integration
+   */
+  async detectIntentReal(message, sessionId, languageCode) {
+    try {
+      const sessionPath = this.sessionsClient.projectAgentSessionPath(
+        config.dialogflow.projectId,
+        sessionId
+      );
+
+      const request = {
+        session: sessionPath,
+        queryInput: {
+          text: {
+            text: message,
+            languageCode: languageCode,
+          },
+        },
+      };
+
+      const [response] = await this.sessionsClient.detectIntent(request);
+      
+      logger.info('DialogFlow real API response received', {
+        intent: response.queryResult.intent?.displayName,
+        confidence: response.queryResult.intentDetectionConfidence,
+        sessionId
+      });
+
+      return this.parseDialogFlowResponse(response.queryResult);
+
+    } catch (error) {
+      logger.error('Real DialogFlow API call failed', {
+        error: error.message,
+        sessionId
+      });
+      
+      // Fall back to mock if real API fails
+      logger.warn('Falling back to mock DialogFlow response');
+      return await this.detectIntentMock(message, sessionId, languageCode);
+    }
+  }
+
+  /**
+   * Mock DialogFlow detection (for testing/demo without API credentials)
+   */
+  async detectIntentMock(message, sessionId, languageCode) {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const mockResponse = await this.mockDialogFlowRequest(message, sessionId);
+    
+    return this.parseDialogFlowResponse({
+      intent: mockResponse.intent,
+      parameters: mockResponse.parameters,
+      fulfillmentText: mockResponse.fulfillmentText,
+      languageCode: languageCode,
+      intentDetectionConfidence: mockResponse.intent.confidence
+    });
   }
 
   /**
@@ -139,29 +217,32 @@ class DialogFlowService {
   /**
    * Parse DialogFlow response into standard format
    */
-  parseDialogFlowResponse(response) {
+  parseDialogFlowResponse(queryResult) {
     const entities = [];
     
     // Convert DialogFlow parameters to entities
-    if (response.parameters) {
-      for (const [key, value] of Object.entries(response.parameters)) {
-        if (value) {
-          entities.push({
-            entity: key,
-            value: value,
-            source: 'dialogflow'
-          });
-        }
+    const parameters = queryResult.parameters || {};
+    
+    for (const [key, value] of Object.entries(parameters)) {
+      if (value) {
+        entities.push({
+          entity: key,
+          value: value,
+          source: 'dialogflow'
+        });
       }
     }
 
     return {
-      intent: response.intent.displayName,
-      confidence: response.intent.confidence || 0,
+      intent: queryResult.intent?.displayName || 'unknown',
+      confidence: queryResult.intentDetectionConfidence || queryResult.intent?.confidence || 0,
       entities: entities,
-      fulfillmentText: response.fulfillmentText,
+      fulfillmentText: queryResult.fulfillmentText || '',
       source: 'dialogflow',
-      languageCode: response.languageCode
+      languageCode: queryResult.languageCode || config.dialogflow.languageCode,
+      queryText: queryResult.queryText || '',
+      allRequiredParamsPresent: queryResult.allRequiredParamsPresent !== false,
+      parameters: parameters
     };
   }
 
@@ -251,14 +332,18 @@ class DialogFlowService {
       return null;
     }
 
-    // In real implementation:
-    // return this.sessionsClient.projectAgentSessionPath(
-    //   config.dialogflow.projectId,
-    //   sessionId
-    // );
+    // Use real sessions client if available
+    if (this.sessionsClient) {
+      return this.sessionsClient.projectAgentSessionPath(
+        config.dialogflow.projectId,
+        sessionId
+      );
+    }
     
+    // Fall back to mock session path
     return `projects/${config.dialogflow.projectId}/agent/sessions/${sessionId}`;
   }
 }
 
-module.exports = DialogFlowService;
+// Export singleton instance
+module.exports = new DialogFlowService();

@@ -42,7 +42,8 @@ module.exports = {
   dialogflow: {
     enabled: process.env.DIALOGFLOW_ENABLED === 'true',
     projectId: process.env.DIALOGFLOW_PROJECT_ID,
-    keyFilename: process.env.DIALOGFLOW_KEY_FILENAME,
+    // Support both explicit key file and Google Application Default Credentials
+    keyFilename: process.env.DIALOGFLOW_KEY_FILENAME || process.env.GOOGLE_APPLICATION_CREDENTIALS,
     sessionPath: process.env.DIALOGFLOW_SESSION_PATH,
     languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'en-US'
   },

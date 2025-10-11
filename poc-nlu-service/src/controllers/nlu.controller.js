@@ -10,6 +10,95 @@ const logger = require('../utils/logger');
 
 class NLUController {
   /**
+   * Analyze user input from chat
+   * Unified endpoint for chat integration with DialogFlow
+   */
+  async analyzeUserInput(req, res) {
+    try {
+      const { 
+        user_input, 
+        sessionId = 'default-session', 
+        userId = 'default-user',
+        languageCode = 'en-US'
+      } = req.body;
+      
+      logger.info('Analyzing user input', {
+        messageLength: user_input.length,
+        userId,
+        sessionId
+      });
+
+      // Use DialogFlow for intent detection
+      const dialogflowResult = await dialogflowService.detectIntent(
+        user_input, 
+        sessionId, 
+        languageCode
+      );
+      
+      // Also run banking-specific analysis
+      const bankingIntent = await bankingNLU.detectBankingIntent(user_input);
+      
+      // Extract entities
+      const bankingEntities = bankingNLU.extractBankingEntities(user_input);
+      
+      // Combine results
+      const response = {
+        success: true,
+        data: {
+          // Primary intent from DialogFlow
+          intent: dialogflowResult.intent,
+          confidence: dialogflowResult.confidence,
+          
+          // DialogFlow specific data
+          dialogflow: {
+            fulfillmentText: dialogflowResult.fulfillmentText,
+            parameters: dialogflowResult.parameters,
+            languageCode: dialogflowResult.languageCode,
+            allRequiredParamsPresent: dialogflowResult.allRequiredParamsPresent
+          },
+          
+          // Banking specific analysis
+          banking: {
+            intent: bankingIntent?.intent || null,
+            confidence: bankingIntent?.confidence || 0,
+            entities: bankingEntities
+          },
+          
+          // Combined entities
+          entities: [
+            ...dialogflowResult.entities,
+            ...bankingEntities.map(e => ({ ...e, source: 'banking' }))
+          ],
+          
+          // Metadata
+          metadata: {
+            source: 'dialogflow',
+            sessionId,
+            userId,
+            timestamp: new Date().toISOString()
+          }
+        }
+      };
+      
+      logger.info('User input analysis complete', {
+        intent: dialogflowResult.intent,
+        confidence: dialogflowResult.confidence,
+        entitiesCount: response.data.entities.length
+      });
+      
+      res.json(response);
+      
+    } catch (error) {
+      logger.error('Error in analyzeUserInput', { error: error.message, stack: error.stack });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to analyze user input',
+        message: error.message
+      });
+    }
+  }
+
+  /**
    * Detect intent from user message
    */
   async detectIntent(req, res) {

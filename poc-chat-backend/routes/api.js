@@ -611,4 +611,178 @@ router.get('/agents', async (req, res) => {
     }
 });
 
+/**
+ * @route GET /api/users/:userId/sessions
+ * @desc Get all sessions for a user (active, unresolved, or recent)
+ * @access Private
+ */
+router.get('/users/:userId/sessions', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { type = 'active', limit = 10 } = req.query;
+
+        const { chatService } = req.app.locals.services;
+        
+        if (!chatService) {
+            return res.status(503).json({
+                error: 'Chat service not available',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        let sessions = [];
+        
+        if (type === 'unresolved') {
+            sessions = await chatService.getUserUnresolvedSessions(userId);
+        } else if (type === 'active') {
+            sessions = await chatService.getUserActiveSessions(userId);
+        } else if (type === 'recent') {
+            sessions = await chatService.dbService.getUserRecentSessions(userId, parseInt(limit));
+        } else {
+            return res.status(400).json({
+                error: 'Invalid session type. Use: active, unresolved, or recent',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        logger.info('User sessions retrieved', {
+            userId,
+            type,
+            count: sessions.length
+        });
+
+        res.status(200).json({
+            userId,
+            type,
+            count: sessions.length,
+            sessions: sessions.map(session => ({
+                sessionId: session.session_id,
+                status: session.status,
+                isActive: session.is_active,
+                isResolved: session.is_resolved,
+                lastActivity: session.last_activity,
+                messageCount: session.message_count,
+                createdAt: session.created_at,
+                recentMessages: session.messages ? session.messages.slice(0, 3) : []
+            })),
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('User sessions retrieval error', {
+            error: error.message,
+            userId: req.params.userId
+        });
+
+        res.status(500).json({
+            error: 'Failed to retrieve user sessions',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+/**
+ * @route POST /api/sessions/:sessionId/resume
+ * @desc Resume an existing chat session
+ * @access Private
+ */
+router.post('/sessions/:sessionId/resume', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+
+        const { chatService } = req.app.locals.services;
+        
+        if (!chatService) {
+            return res.status(503).json({
+                error: 'Chat service not available',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Resume the session
+        const result = await chatService.resumeSession(sessionId);
+
+        logger.info('Session resumed via API', {
+            sessionId,
+            userId: result.session.userId,
+            messageCount: result.history.length
+        });
+
+        res.status(200).json({
+            success: true,
+            sessionId,
+            session: {
+                userId: result.session.userId,
+                isActive: result.session.isActive,
+                lastActivity: result.session.lastActivity,
+                messageCount: result.session.messageCount,
+                conversationContext: result.session.conversationContext
+            },
+            history: result.history,
+            message: 'Session resumed successfully. You can continue the conversation.',
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('Session resume error', {
+            error: error.message,
+            sessionId: req.params.sessionId
+        });
+
+        res.status(error.message === 'Session not found' ? 404 : 500).json({
+            error: 'Failed to resume session',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+/**
+ * @route POST /api/sessions/:sessionId/resolve
+ * @desc Mark a session as resolved
+ * @access Private
+ */
+router.post('/sessions/:sessionId/resolve', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const { notes } = req.body;
+
+        const { chatService } = req.app.locals.services;
+        
+        if (!chatService) {
+            return res.status(503).json({
+                error: 'Chat service not available',
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        await chatService.markSessionResolved(sessionId, notes);
+
+        logger.info('Session marked as resolved via API', {
+            sessionId,
+            notes
+        });
+
+        res.status(200).json({
+            success: true,
+            sessionId,
+            message: 'Session marked as resolved',
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('Session resolve error', {
+            error: error.message,
+            sessionId: req.params.sessionId
+        });
+
+        res.status(500).json({
+            error: 'Failed to mark session as resolved',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
 module.exports = router;

@@ -32,7 +32,10 @@
     "moment": "^2.29.4",
     "joi": "^17.9.2",
     "multer": "^1.4.4",
-    "mime-types": "^2.1.35"
+    "mime-types": "^2.1.35",
+    "sequelize": "^6.35.0",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
