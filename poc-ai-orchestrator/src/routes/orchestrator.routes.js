@@ -6,13 +6,16 @@ const logger = require('../utils/logger');
 /**
  * POST /api/orchestrator/process
  * Process a message through the AI orchestrator workflow
+ * 
+ * The user must be authenticated and userId is required.
+ * This endpoint receives userId from the authenticated session via the client.
  */
 router.post('/process',
   [
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('intent').notEmpty().withMessage('Intent is required'),
     body('question').notEmpty().withMessage('Question is required'),
-    body('userId').optional().isString()
+    body('userId').notEmpty().withMessage('User ID is required (from authenticated session)')
   ],
   async (req, res) => {
     try {
@@ -25,7 +28,7 @@ router.post('/process',
         userId
       });
 
-      // Process through workflow
+      // Process through workflow with authenticated user context
       const result = await workflowService.processMessage({
         sessionId,
         intent,

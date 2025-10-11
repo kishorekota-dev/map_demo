@@ -6,6 +6,12 @@ const config = require('../../config');
 /**
  * Session Manager Service
  * Manages conversation sessions and workflow state persistence
+ * 
+ * Note: This service handles database-level session tracking for business logic
+ * and audit purposes. LangGraph's checkpointer handles workflow state persistence
+ * for conversation continuity. Both work together:
+ * - SessionManager: User sessions, conversation history, metadata, audit trail
+ * - LangGraph Checkpointer: Workflow state, step transitions, resumption points
  */
 class SessionManager {
   constructor() {
@@ -20,17 +26,22 @@ class SessionManager {
 
   /**
    * Create a new session
+   * User is already authenticated - userId is required
    */
   async createSession(userId, sessionId, intent = null, metadata = {}) {
     try {
+      if (!userId) {
+        throw new Error('userId is required - user must be authenticated');
+      }
+
       // Check if session already exists
       const existing = await Session.findOne({ where: { sessionId } });
       if (existing) {
-        logger.warn('Session already exists', { sessionId });
+        logger.warn('Session already exists', { sessionId, userId });
         return existing;
       }
 
-      // Create new session
+      // Create new session with authenticated user
       const expiresAt = new Date(Date.now() + this.sessionTTL);
       
       const session = await Session.create({
@@ -42,12 +53,16 @@ class SessionManager {
         conversationHistory: [],
         collectedData: {},
         requiredData: [],
-        metadata,
+        metadata: {
+          ...metadata,
+          createdBy: 'authenticated_user',
+          authenticatedUserId: userId
+        },
         expiresAt,
         lastActivityAt: new Date()
       });
 
-      logger.info('Session created', {
+      logger.info('Session created for authenticated user', {
         sessionId,
         userId,
         intent,

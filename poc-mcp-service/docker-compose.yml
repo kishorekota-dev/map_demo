@@ -1,0 +1,57 @@
+version: '3.8'
+
+# MCP Service - Standalone Docker Compose
+# This runs only the MCP Service, connecting to external Banking Service
+
+services:
+  # MCP Service - Model Context Protocol Host
+  mcp-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-service
+    ports:
+      - "${MCP_PORT:-3004}:3004"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3004
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HOST=0.0.0.0
+      
+      # Banking Service Configuration
+      - BANKING_SERVICE_URL=${BANKING_SERVICE_URL:-http://host.docker.internal:3005/api/v1}
+      
+      # WebSocket Configuration
+      - WS_PORT=3004
+      - WS_PATH=/ws
+      - WS_HEARTBEAT_INTERVAL=30000
+      - WS_MAX_CONNECTIONS=100
+      
+      # Security
+      - JWT_SECRET=${MCP_JWT_SECRET:-mcp-dev-secret-change-in-production}
+      - JWT_EXPIRY=24h
+      - WS_AUTH_REQUIRED=${WS_AUTH_REQUIRED:-false}
+      
+      # CORS
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8080}
+      
+    volumes:
+      - ./logs:/app/logs
+      # Uncomment for development with live reload
+      # - ./src:/app/src:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+    name: mcp-network
