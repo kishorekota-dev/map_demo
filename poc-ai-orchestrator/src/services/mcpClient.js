@@ -109,8 +109,8 @@ class MCPClient {
     });
 
     try {
-      const response = await this.client.post('/api/mcp/batch', {
-        executions: toolExecutions,
+      const response = await this.client.post('/api/mcp/execute-batch', {
+        tools: toolExecutions,
         sessionId
       });
 
@@ -138,16 +138,78 @@ class MCPClient {
   }
 
   /**
+   * Get tool categories
+   */
+  async getToolCategories() {
+    try {
+      const response = await this.client.get('/api/mcp/categories');
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to get tool categories', { error: error.message });
+      throw new Error(`Failed to get tool categories: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get specific tool definition
+   */
+  async getToolDefinition(toolName) {
+    try {
+      const response = await this.client.get(`/api/mcp/tools/${toolName}`);
+      return response.data.tool;
+    } catch (error) {
+      logger.error('Failed to get tool definition', { toolName, error: error.message });
+      throw new Error(`Failed to get tool definition: ${error.message}`);
+    }
+  }
+
+  /**
+   * Validate tool parameters without executing
+   */
+  async validateParameters(toolName, parameters) {
+    try {
+      const response = await this.client.post('/api/mcp/validate', {
+        tool: toolName,
+        parameters
+      });
+      return response.data;
+    } catch (error) {
+      logger.error('Parameter validation failed', { toolName, error: error.message });
+      throw new Error(`Parameter validation failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Execute banking-specific operations
    */
   async executeBankingOperation(operation, parameters, sessionId) {
     const toolMap = {
+      // Basic banking operations
       'get_balance': 'banking_get_balance',
       'get_transactions': 'banking_get_transactions',
       'transfer_funds': 'banking_transfer',
       'get_account_info': 'banking_account_info',
       'block_card': 'banking_block_card',
-      'dispute_transaction': 'banking_dispute'
+      'get_cards': 'banking_get_cards',
+      
+      // Fraud operations
+      'create_fraud_alert': 'banking_create_fraud_alert',
+      'get_fraud_alerts': 'banking_get_fraud_alerts',
+      'get_fraud_alert_details': 'banking_get_fraud_alert_details',
+      'confirm_fraud': 'banking_confirm_fraud',
+      'mark_false_positive': 'banking_mark_false_positive',
+      'verify_transaction': 'banking_verify_transaction',
+      
+      // Dispute operations
+      'create_dispute': 'banking_create_dispute',
+      'get_disputes': 'banking_get_disputes',
+      'get_dispute_details': 'banking_get_dispute_details',
+      'add_dispute_evidence': 'banking_add_dispute_evidence',
+      'update_dispute': 'banking_update_dispute',
+      'withdraw_dispute': 'banking_withdraw_dispute',
+      
+      // Legacy
+      'dispute_transaction': 'banking_create_dispute'
     };
 
     const toolName = toolMap[operation];

@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # MCP Service - Model Context Protocol Host
+  poc-mcp-service:
+    build:
+      context: ./poc-mcp-service
+      dockerfile: Dockerfile
+    container_name: poc-mcp-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - LOG_LEVEL=info
+      - HOST=0.0.0.0
+      
+      # Banking Service Configuration
+      - BANKING_SERVICE_URL=http://poc-banking-service:3005/api/v1
+      
+      # WebSocket Configuration
+      - WS_PORT=3004
+      - WS_PATH=/ws
+      - WS_HEARTBEAT_INTERVAL=30000
+      - WS_MAX_CONNECTIONS=100
+      
+      # Security
+      - JWT_SECRET=${MCP_JWT_SECRET:-mcp-dev-secret-change-in-production}
+      - JWT_EXPIRY=24h
+      - WS_AUTH_REQUIRED=false
+      
+      # CORS
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:8080,http://poc-chat-frontend:3000
+      
+    volumes:
+      - mcp-logs:/app/logs
+    networks:
+      - poc-network
+    depends_on:
+      poc-banking-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Banking Service - Core Banking APIs
+  poc-banking-service:
+    build:
+      context: ./poc-banking-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-service
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+      - LOG_LEVEL=info
+      
+      # Database
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-banking_db}
+      - DB_USER=${POSTGRES_USER:-banking_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-banking_password}
+      
+      # JWT Configuration
+      - JWT_SECRET=${BANKING_JWT_SECRET:-banking-dev-secret-change-in-production}
+      - JWT_EXPIRY=24h
+      - REFRESH_TOKEN_EXPIRY=7d
+      
+      # CORS
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3004
+      
+    volumes:
+      - banking-logs:/app/logs
+    networks:
+      - poc-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: poc-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-banking_db}
+      - POSTGRES_USER=${POSTGRES_USER:-banking_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-banking_password}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./poc-banking-service/db/init:/docker-entrypoint-initdb.d
+    networks:
+      - poc-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-banking_user} -d ${POSTGRES_DB:-banking_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  poc-network:
+    driver: bridge
+    name: poc-network
+
+volumes:
+  mcp-logs:
+    driver: local
+  banking-logs:
+    driver: local
+  postgres-data:
+    driver: local

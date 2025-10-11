@@ -55,9 +55,10 @@ class WorkflowService {
         startedAt: new Date()
       });
 
-      // Build workflow input
+      // Build workflow input with authenticated user context
       const workflowInput = {
         sessionId,
+        userId,
         intent,
         question,
         conversationHistory: session.conversationHistory,

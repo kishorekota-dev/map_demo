@@ -3,17 +3,13 @@ const { ChatOpenAI } = require('@langchain/openai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const logger = require('../utils/logger');
 const config = require('../../config');
-const {
-  buildSystemMessage,
-  buildUserMessage,
-  getRequiredDataForIntent,
-  needsConfirmation,
-  getToolsForIntent
-} = require('../prompts/intentPrompts');
+const { getCheckpointer } = require('../utils/checkpointer');
+const intentMapper = require('../services/intentMapper');
 
 /**
  * Banking Chat Workflow using LangGraph
  * Handles intent-based conversation flow with human-in-the-loop
+ * Uses LangGraph checkpointer for state persistence across invocations
  */
 class BankingChatWorkflow {
   constructor(mcpClient, sessionManager) {
@@ -28,10 +24,15 @@ class BankingChatWorkflow {
       maxTokens: config.openai.maxTokens
     });
     
+    // Get checkpointer instance
+    this.checkpointerManager = getCheckpointer();
+    
     // Build the workflow graph
     this.graph = this.buildGraph();
     
-    logger.info('Banking Chat Workflow initialized');
+    logger.info('Banking Chat Workflow initialized', {
+      checkpointerEnabled: this.checkpointerManager.isEnabled()
+    });
   }
 
   /**
@@ -41,6 +42,7 @@ class BankingChatWorkflow {
     // Define the state schema
     const graphState = {
       sessionId: null,
+      userId: null,
       intent: null,
       question: null,
       conversationHistory: [],
@@ -106,7 +108,15 @@ class BankingChatWorkflow {
     workflow.addEdge('generate_response', END);
     workflow.addEdge('handle_error', END);
 
-    return workflow.compile();
+    // Compile with checkpointer if enabled
+    const checkpointer = this.checkpointerManager.getCheckpointer();
+    if (checkpointer) {
+      logger.info('Compiling workflow with checkpointer enabled');
+      return workflow.compile({ checkpointer });
+    } else {
+      logger.info('Compiling workflow without checkpointer');
+      return workflow.compile();
+    }
   }
 
   /**
@@ -127,7 +137,7 @@ class BankingChatWorkflow {
       });
 
       // Get required data for this intent
-      const requiredData = getRequiredDataForIntent(state.intent);
+      const requiredData = intentMapper.getRequiredData(state.intent);
       
       return {
         ...state,
@@ -240,7 +250,7 @@ class BankingChatWorkflow {
     });
 
     try {
-      const tools = getToolsForIntent(state.intent);
+      const tools = intentMapper.getToolsForIntent(state.intent);
       const toolResults = {};
 
       // Execute each tool using Enhanced MCP Client
@@ -298,20 +308,23 @@ class BankingChatWorkflow {
   async generateResponse(state) {
     logger.info('Workflow: Generating response', {
       sessionId: state.sessionId,
+      userId: state.userId,
       intent: state.intent
     });
 
     try {
       // Build context from collected data and tool results
+      // Include userId for authenticated context
       const context = {
         question: state.question,
+        userId: state.userId,
         ...state.collectedData,
         ...state.toolResults
       };
 
       // Build messages
-      const systemMessage = new SystemMessage(buildSystemMessage(state.intent));
-      const userMessage = new HumanMessage(buildUserMessage(state.intent, context));
+      const systemMessage = new SystemMessage(intentMapper.buildSystemMessage(state.intent));
+      const userMessage = new HumanMessage(intentMapper.buildUserMessage(state.intent, context));
 
       // Add conversation history
       const messages = [systemMessage];
@@ -340,6 +353,7 @@ class BankingChatWorkflow {
 
       logger.info('Response generated', {
         sessionId: state.sessionId,
+        userId: state.userId,
         responseLength: finalResponse.length
       });
 
@@ -438,7 +452,7 @@ class BankingChatWorkflow {
       return 'need_input';
     }
     
-    const tools = getToolsForIntent(state.intent);
+    const tools = intentMapper.getToolsForIntent(state.intent);
     if (tools.length > 0) {
       return 'execute';
     }
@@ -452,7 +466,7 @@ class BankingChatWorkflow {
   routeAfterTools(state) {
     if (state.error) return 'error';
     
-    if (needsConfirmation(state.intent)) {
+    if (intentMapper.needsConfirmation(state.intent)) {
       return 'confirmation';
     }
     
@@ -486,16 +500,28 @@ class BankingChatWorkflow {
   }
 
   /**
-   * Execute the workflow
+   * Execute the workflow with checkpointer support
+   * Uses sessionId as thread_id for conversation continuity
    */
   async execute(input) {
     logger.info('Executing workflow', {
       sessionId: input.sessionId,
-      intent: input.intent
+      userId: input.userId,
+      intent: input.intent,
+      checkpointerEnabled: this.checkpointerManager.isEnabled()
     });
 
     try {
-      const result = await this.graph.invoke(input);
+      // Build config with thread_id (sessionId) for checkpointer
+      const config = {
+        configurable: {
+          thread_id: input.sessionId
+        }
+      };
+
+      // Execute workflow with checkpointer config
+      // This enables state persistence across invocations for the same session
+      const result = await this.graph.invoke(input, config);
       
       logger.info('Workflow completed', {
         sessionId: input.sessionId,
@@ -507,7 +533,8 @@ class BankingChatWorkflow {
     } catch (error) {
       logger.error('Workflow execution failed', {
         sessionId: input.sessionId,
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
       
       return {
