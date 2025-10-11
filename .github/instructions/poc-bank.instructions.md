@@ -5,10 +5,13 @@ This project goal was to build simple Chat Based Banking System that interacts w
 
 Code Location:
 
-POC ChatBot UI: 'poc-frotnend
+POC ChatBot UI: 'poc-frontend'
 POC ChatBot Backend: 'poc-chat-backend'
-POC Bank Backend: 'poc-banking-service
-'
+POC Bank Backend: 'poc-banking-service'
+POC AI Orchestration: 'poc-ai-orchestrator'
+POC MCP Service/Host: 'poc-mcp-service'
+POC NLU Service: 'poc-nlu-service'
+
 
 
 Any new modules should be created using convention 'poc-<module-name>'.
