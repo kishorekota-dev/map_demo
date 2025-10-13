@@ -1,63 +1,128 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import apiService from '@/services/api'
-import type { ChatMessage as ChatMessageType, IntentAnalysis, MessageMetadata } from '@/types'
+import { useAuthStore } from '@/stores/authStore'
+import type { 
+  ChatMessage as ChatMessageType, 
+  IntentAnalysis, 
+  MessageMetadata, 
+  SessionDetail,
+  MessageRecord 
+} from '@/types'
 
-export function useChat(initialSessionId?: string) {
+export interface UseChatOptions {
+  initialSessionId?: string;
+  autoCreateSession?: boolean;
+}
+
+export function useChat(options: UseChatOptions = {}) {
+  const { initialSessionId, autoCreateSession = true } = options;
+  const { user } = useAuthStore();
+  
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [loading, setLoading] = useState(false)
   const [intent, setIntent] = useState<IntentAnalysis | undefined>(undefined)
-  const sessionIdRef = useRef(initialSessionId || apiService.getSessionId())
+  const [session, setSession] = useState<SessionDetail | null>(null)
+  const [unresolvedSessions, setUnresolvedSessions] = useState<SessionDetail[]>([])
+  const sessionIdRef = useRef<string | null>(initialSessionId || null)
 
+  // Load session and history on mount
   useEffect(() => {
-    // load existing history
     let mounted = true
-    async function loadHistory() {
+
+    async function initialize() {
+      if (!user) return;
+
       setLoading(true)
       try {
-        const history = await apiService.getChatHistory(sessionIdRef.current, 0, 50)
-        if (mounted && history?.messages) {
-          // normalize to ChatMessageType shape and satisfy MessageMetadata
-          const normalized = history.messages.map((m: any) => {
-            const messageId = m.messageId || m.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`
-            const sessionId = history.session?.sessionId || sessionIdRef.current
-            const metadata: MessageMetadata = {
-              sessionId,
-              messageId,
-              processingTime: m.processingTime || m.metadata?.processingTime,
-              responseType: m.responseType || m.metadata?.responseType
-            }
+        // Load unresolved sessions
+        const userSessions = await apiService.getUserSessions(user.userId, 'unresolved', 10)
+        if (mounted) {
+          setUnresolvedSessions(userSessions.sessions)
+        }
 
-            return {
-              id: messageId,
-              content: m.message || m.content || m.text || '',
-              type: (m.type as 'user' | 'bot') || 'bot',
-              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-              intent: m.intent ? {
-                detected: m.intent.detected || m.intent.name || (m.intent as any) || 'unknown',
-                confidence: m.intent.confidence ?? 0.75,
-                entities: m.intent.entities || []
-              } : undefined,
-              metadata
-            } as ChatMessageType
-          })
-
-          setMessages(normalized)
+        // If we have an initial session ID, resume it
+        if (sessionIdRef.current) {
+          await resumeSession(sessionIdRef.current)
+        } else if (autoCreateSession) {
+          // Create a new session
+          const newSession = await apiService.createSession(user.userId)
+          if (mounted) {
+            sessionIdRef.current = newSession.sessionId
+            setSession(newSession as SessionDetail)
+          }
         }
       } catch (err) {
-        // ignore for now
+        console.error('Failed to initialize chat:', err)
       } finally {
         if (mounted) setLoading(false)
       }
     }
 
-    loadHistory()
+    initialize()
     return () => { mounted = false }
+  }, [user, autoCreateSession, initialSessionId])
+
+  // Convert MessageRecord to ChatMessage
+  const convertToChatMessage = useCallback((record: MessageRecord): ChatMessageType => {
+    const sessionId = sessionIdRef.current || 'unknown'
+    const metadata: MessageMetadata = {
+      sessionId,
+      messageId: record.message_id,
+      processingTime: undefined,
+      responseType: record.message_type
+    }
+
+    return {
+      id: record.message_id,
+      content: record.content,
+      type: record.direction === 'incoming' ? 'user' : 'bot',
+      timestamp: new Date(record.created_at),
+      intent: record.intent ? {
+        detected: record.intent,
+        confidence: record.confidence_score || 0.75,
+        entities: []
+      } : undefined,
+      metadata
+    } as ChatMessageType
   }, [])
 
-  async function sendMessage(text: string) {
+  // Resume an existing session
+  const resumeSession = useCallback(async (sessionId: string) => {
     setLoading(true)
     try {
-      // add optimistic user message
+      const resumeData = await apiService.resumeSession(sessionId)
+      
+      sessionIdRef.current = sessionId
+      setSession(resumeData.session as SessionDetail)
+      
+      // Convert history to chat messages
+      const chatMessages = resumeData.history.map(convertToChatMessage)
+      setMessages(chatMessages)
+      
+      // Update unresolved sessions list
+      if (user) {
+        const userSessions = await apiService.getUserSessions(user.userId, 'unresolved', 10)
+        setUnresolvedSessions(userSessions.sessions)
+      }
+      
+      return resumeData
+    } catch (err) {
+      console.error('Failed to resume session:', err)
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [user, convertToChatMessage])
+
+  // Send a message
+  const sendMessage = useCallback(async (text: string) => {
+    if (!user) {
+      throw new Error('User not authenticated')
+    }
+
+    setLoading(true)
+    try {
+      // Add optimistic user message
       const userMsg: ChatMessageType = {
         id: `u_${Date.now()}`,
         content: text,
@@ -67,14 +132,20 @@ export function useChat(initialSessionId?: string) {
 
       setMessages(prev => [...prev, userMsg])
 
-      const resp = await apiService.sendMessage(text)
+      // Send message to backend
+      const resp = await apiService.sendMessage(text, sessionIdRef.current || undefined)
 
       // Update session ID if backend returned a different one (auto-created)
       if (resp.sessionId && resp.sessionId !== sessionIdRef.current) {
         sessionIdRef.current = resp.sessionId
         apiService.setSessionId(resp.sessionId)
+        
+        // Reload session details
+        const sessionDetail = await apiService.getSession(resp.sessionId)
+        setSession(sessionDetail)
       }
 
+      // Add bot response
       const botMsg: ChatMessageType = {
         id: resp.response?.id || `b_${Date.now()}`,
         content: resp.response?.content || 'No response',
@@ -86,7 +157,7 @@ export function useChat(initialSessionId?: string) {
           entities: []
         } : undefined,
         metadata: {
-          sessionId: resp.sessionId || sessionIdRef.current,
+          sessionId: resp.sessionId || sessionIdRef.current || 'unknown',
           messageId: resp.response?.id || `b_${Date.now()}`,
           responseType: resp.response?.type,
           agentsInvolved: resp.agent?.agentsInvolved
@@ -98,18 +169,18 @@ export function useChat(initialSessionId?: string) {
 
       return botMsg
     } catch (err: any) {
-      console.error('Error sending message:', err)
+      console.error('Failed to send message:', err)
       
-      // Add error message to chat
+      // Add error message
       const errorMsg: ChatMessageType = {
         id: `e_${Date.now()}`,
-        content: err?.message || 'Failed to send message. Please try again.',
+        content: 'Failed to send message. Please try again.',
         type: 'bot',
         timestamp: new Date(),
         metadata: {
-          sessionId: sessionIdRef.current,
+          sessionId: sessionIdRef.current || 'unknown',
           messageId: `e_${Date.now()}`,
-          isError: true
+          isError: true,
         }
       }
       
@@ -118,23 +189,83 @@ export function useChat(initialSessionId?: string) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
 
-  async function analyze(text: string) {
+  // End the current session
+  const endSession = useCallback(async (reason?: string) => {
+    if (!sessionIdRef.current) return
+
     try {
-      const result = await apiService.analyzeMessage(text)
-      return result
+      await apiService.endSession(sessionIdRef.current, reason)
+      sessionIdRef.current = null
+      setSession(null)
+      setMessages([])
+      
+      // Reload unresolved sessions
+      if (user) {
+        const userSessions = await apiService.getUserSessions(user.userId, 'unresolved', 10)
+        setUnresolvedSessions(userSessions.sessions)
+      }
     } catch (err) {
-      return null
+      console.error('Failed to end session:', err)
+      throw err
     }
-  }
+  }, [user])
+
+  // Resolve the current session
+  const resolveSession = useCallback(async (notes?: string) => {
+    if (!sessionIdRef.current) return
+
+    try {
+      await apiService.resolveSession(sessionIdRef.current, notes)
+      
+      // Update session status
+      if (session) {
+        setSession({ ...session, isResolved: true, status: 'resolved' })
+      }
+      
+      // Reload unresolved sessions
+      if (user) {
+        const userSessions = await apiService.getUserSessions(user.userId, 'unresolved', 10)
+        setUnresolvedSessions(userSessions.sessions)
+      }
+    } catch (err) {
+      console.error('Failed to resolve session:', err)
+      throw err
+    }
+  }, [session, user])
+
+  // Create a new session
+  const createNewSession = useCallback(async () => {
+    if (!user) return
+
+    setLoading(true)
+    try {
+      const newSession = await apiService.createSession(user.userId)
+      sessionIdRef.current = newSession.sessionId
+      setSession(newSession as SessionDetail)
+      setMessages([])
+      setIntent(undefined)
+      
+      return newSession
+    } catch (err) {
+      console.error('Failed to create session:', err)
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [user])
 
   return {
-    sessionId: sessionIdRef.current,
     messages,
     loading,
     intent,
+    session,
+    unresolvedSessions,
     sendMessage,
-    analyze
+    resumeSession,
+    endSession,
+    resolveSession,
+    createNewSession,
   }
 }

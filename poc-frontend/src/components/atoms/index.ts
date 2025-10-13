@@ -3,8 +3,10 @@ export { Button } from './Button';
 export { TextArea } from './TextArea';
 export { Icon } from './Icon';
 export { LoadingSpinner } from './LoadingSpinner';
+export { Input } from './Input';
 
 export type { ButtonProps } from './Button';
 export type { TextAreaProps } from './TextArea';
 export type { IconProps } from './Icon';
 export type { LoadingSpinnerProps } from './LoadingSpinner';
+export type { InputProps } from './Input';

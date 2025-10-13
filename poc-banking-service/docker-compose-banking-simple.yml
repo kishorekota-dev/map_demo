@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: banking_pass_2024
       POSTGRES_DB: customer_db
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init-scripts:/docker-entrypoint-initdb.d
