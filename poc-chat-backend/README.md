@@ -4,6 +4,20 @@
 
 The POC Chat Backend is a real-time chat processing service with agent orchestration, database persistence, and session management. It provides comprehensive chat history storage and the ability to resume unresolved conversations.
 
+## 🐳 Quick Start with Docker (Recommended)
+
+The easiest way to run the chat backend with all dependencies:
+
+```bash
+# Development mode (with hot reload)
+./docker-start.sh dev
+
+# Production mode
+./docker-start.sh prod
+```
+
+**See [DOCKER-README.md](./DOCKER-README.md) for complete Docker documentation.**
+
 ## Features
 
 ✅ **Fully Implemented:**
@@ -15,6 +29,7 @@ The POC Chat Backend is a real-time chat processing service with agent orchestra
 - ✅ **Session management with database storage**
 - ✅ **Resume unresolved chat sessions**
 - ✅ **Comprehensive OpenAPI 3.0 documentation**
+- ✅ **Docker support with PostgreSQL and Redis**
 - ✅ RESTful API endpoints
 - ✅ WebSocket event handlers
 - ✅ Graceful shutdown and error handling

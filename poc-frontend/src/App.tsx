@@ -1,24 +1,23 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import ChatPage from '@pages/ChatPage'
+import AuthPage from '@pages/AuthPage'
 
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="app-root">
-        <header className="app-header">
-          <h1>Chatbot POC</h1>
-          <nav>
-            <Link to="/">Home</Link> | <Link to="/chat">Chat</Link>
-          </nav>
-        </header>
-
-        <main className="app-main">
-          <Routes>
-            <Route path="/" element={<div>Open the console to see API calls.</div>} />
-            <Route path="/chat" element={<ChatPage />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/auth" element={<AuthPage />} />
+        <Route 
+          path="/chat" 
+          element={
+            <ProtectedRoute>
+              <ChatPage />
+            </ProtectedRoute>
+          } 
+        />
+      </Routes>
     </BrowserRouter>
   )
 }

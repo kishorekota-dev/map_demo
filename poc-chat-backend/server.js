@@ -15,6 +15,9 @@ const AgentOrchestrator = require('./services/agentOrchestrator');
 const SessionManager = require('./services/sessionManager');
 const SocketHandler = require('./services/socketHandler');
 
+// Import middleware
+const { apiLimiter, authLimiter } = require('./middleware/rateLimiter');
+
 // Import routes
 const healthRoutes = require('./routes/health');
 const apiRoutes = require('./routes/api');
@@ -90,6 +93,10 @@ app.use(express.urlencoded({
 
 // Request logging
 app.use(logger.requestMiddleware);
+
+// Apply rate limiting
+app.use('/api', apiLimiter);
+app.use('/auth', authLimiter);
 
 // Health endpoints (no auth required)
 app.use('/health', healthRoutes);

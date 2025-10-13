@@ -18,8 +18,9 @@ class DatabaseService {
             await sequelize.authenticate();
             logger.info('Database connection established');
             
-            // Sync models (creates tables if they don't exist)
-            await sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
+            // Sync models without alter since migrations handle schema
+            // Using alter: false prevents conflicts with database views
+            await sequelize.sync({ alter: false });
             logger.info('Database models synchronized');
             
             this.initialized = true;
