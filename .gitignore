@@ -177,3 +177,11 @@ uploads/
 storage/
 *.sqlite
 *.db
+
+# Credentials and secrets
+**/credentials/
+**/*-key.json
+**/dialogflow-key.json
+**/service-account*.json
+**/.env.local
+**/.env.*.local
