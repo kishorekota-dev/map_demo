@@ -1,0 +1,28 @@
+{
+  "displayName": "request.new.card",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Request new card"}]},
+    {"parts": [{"text": "I need a replacement card"}]},
+    {"parts": [{"text": "Order new "}, {"text": "debit", "entityType": "@card_type"}, {"text": " card"}]},
+    {"parts": [{"text": "Get a new card"}]},
+    {"parts": [{"text": "Replace my card"}]},
+    {"parts": [{"text": "My card is damaged"}]},
+    {"parts": [{"text": "Card replacement"}]},
+    {"parts": [{"text": "New card"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "card_type",
+      "entityType": "@card_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll order a replacement card for you."]
+      }
+    }
+  ]
+}

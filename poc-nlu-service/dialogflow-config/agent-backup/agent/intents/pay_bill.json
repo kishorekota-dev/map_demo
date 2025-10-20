@@ -1,0 +1,42 @@
+{
+  "displayName": "pay.bill",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Pay bill"}]},
+    {"parts": [{"text": "Pay my credit card"}]},
+    {"parts": [{"text": "Make a payment"}]},
+    {"parts": [{"text": "Pay "}, {"text": "$100", "entityType": "@sys.currency"}, {"text": " to credit card"}]},
+    {"parts": [{"text": "Bill payment"}]},
+    {"parts": [{"text": "I need to pay a bill"}]},
+    {"parts": [{"text": "Pay utilities"}]},
+    {"parts": [{"text": "Pay mortgage"}]},
+    {"parts": [{"text": "Schedule payment"}]},
+    {"parts": [{"text": "Set up autopay"}]},
+    {"parts": [{"text": "Recurring payment"}]},
+    {"parts": [{"text": "One time payment"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "amount",
+      "entityType": "@sys.currency",
+      "isList": false
+    },
+    {
+      "displayName": "payee",
+      "entityType": "@sys.any",
+      "isList": false
+    },
+    {
+      "displayName": "date",
+      "entityType": "@sys.date",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you make a payment. What would you like to pay?"]
+      }
+    }
+  ]
+}

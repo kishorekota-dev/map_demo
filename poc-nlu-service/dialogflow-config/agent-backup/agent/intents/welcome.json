@@ -1,0 +1,24 @@
+{
+  "displayName": "Default Welcome Intent",
+  "priority": 500000,
+  "isFallback": false,
+  "trainingPhrases": [
+    {"parts": [{"text": "hi"}]},
+    {"parts": [{"text": "hello"}]},
+    {"parts": [{"text": "hey"}]},
+    {"parts": [{"text": "good morning"}]},
+    {"parts": [{"text": "good afternoon"}]},
+    {"parts": [{"text": "good evening"}]},
+    {"parts": [{"text": "greetings"}]},
+    {"parts": [{"text": "help"}]},
+    {"parts": [{"text": "start"}]},
+    {"parts": [{"text": "I need help"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["Hello! I'm your banking assistant. I can help you with account balances, transactions, transfers, loans, and more. How can I assist you today?"]
+      }
+    }
+  ]
+}

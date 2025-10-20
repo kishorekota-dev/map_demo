@@ -393,19 +393,19 @@ router.post('/sessions', async (req, res) => {
             });
         }
 
-        // Create chat session
-        const chatSession = await chatService.createChatSession(userId, null, userData || {});
-
-        // Create session manager session
+        // Create session manager session first to get a valid sessionId
         const session = await sessionManager.createSession(userId, metadata || {});
 
+        // Create chat session with the same sessionId
+        const chatSession = await chatService.createChatSession(userId, session.sessionId, userData || {});
+
         logger.info('Session created via REST API', {
-            sessionId: chatSession.sessionId,
+            sessionId: session.sessionId,
             userId
         });
 
         res.status(201).json({
-            sessionId: chatSession.sessionId,
+            sessionId: session.sessionId,
             chatSession,
             session,
             timestamp: new Date().toISOString()

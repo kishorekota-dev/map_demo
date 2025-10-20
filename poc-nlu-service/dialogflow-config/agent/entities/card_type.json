@@ -1,0 +1,9 @@
+{
+  "displayName": "card_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "debit", "synonyms": ["debit", "debit card", "atm card"]},
+    {"value": "credit", "synonyms": ["credit", "credit card", "cc"]},
+    {"value": "prepaid", "synonyms": ["prepaid", "prepaid card", "gift card"]}
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "displayName": "view.transactions",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Show my transactions"}]},
+    {"parts": [{"text": "View transaction history"}]},
+    {"parts": [{"text": "Recent transactions"}]},
+    {"parts": [{"text": "Show me my "}, {"text": "recent", "entityType": "@time_period"}, {"text": " transactions"}]},
+    {"parts": [{"text": "Transaction history from "}, {"text": "last month", "entityType": "@time_period"}]},
+    {"parts": [{"text": "What transactions happened "}, {"text": "today", "entityType": "@time_period"}]},
+    {"parts": [{"text": "List all transactions"}]},
+    {"parts": [{"text": "Show "}, {"text": "checking", "entityType": "@account_type"}, {"text": " transactions"}]},
+    {"parts": [{"text": "Transaction list"}]},
+    {"parts": [{"text": "Show me what I spent"}]},
+    {"parts": [{"text": "Where did my money go"}]},
+    {"parts": [{"text": "Account activity"}]},
+    {"parts": [{"text": "Statement"}]},
+    {"parts": [{"text": "Show all "}, {"text": "purchases", "entityType": "@transaction_type"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "time_period",
+      "entityType": "@time_period",
+      "isList": false
+    },
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    },
+    {
+      "displayName": "transaction_type",
+      "entityType": "@transaction_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll retrieve your transaction history for you."]
+      }
+    }
+  ]
+}

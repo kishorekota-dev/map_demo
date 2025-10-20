@@ -1,0 +1,30 @@
+{
+  "displayName": "block.card",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Block my card"}]},
+    {"parts": [{"text": "Freeze my card"}]},
+    {"parts": [{"text": "Lock my "}, {"text": "credit", "entityType": "@card_type"}, {"text": " card"}]},
+    {"parts": [{"text": "Deactivate card"}]},
+    {"parts": [{"text": "Stop my card"}]},
+    {"parts": [{"text": "My card was stolen"}]},
+    {"parts": [{"text": "Lost my card"}]},
+    {"parts": [{"text": "Card is missing"}]},
+    {"parts": [{"text": "Suspend card"}]},
+    {"parts": [{"text": "Report stolen card"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "card_type",
+      "entityType": "@card_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll block your card immediately for security."]
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "displayName": "service_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "online_banking", "synonyms": ["online banking", "internet banking", "web banking"]},
+    {"value": "mobile_banking", "synonyms": ["mobile banking", "mobile app", "app"]},
+    {"value": "atm", "synonyms": ["atm", "cash machine", "automated teller"]},
+    {"value": "branch", "synonyms": ["branch", "bank branch", "office"]},
+    {"value": "phone_banking", "synonyms": ["phone banking", "telephone banking", "call center"]},
+    {"value": "wire_transfer", "synonyms": ["wire transfer", "wire", "bank transfer", "ach"]},
+    {"value": "direct_deposit", "synonyms": ["direct deposit", "payroll", "auto deposit"]}
+  ]
+}

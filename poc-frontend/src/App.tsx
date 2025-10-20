@@ -5,7 +5,12 @@ import AuthPage from '@pages/AuthPage'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/auth" element={<AuthPage />} />

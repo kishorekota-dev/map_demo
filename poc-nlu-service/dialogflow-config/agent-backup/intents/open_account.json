@@ -1,0 +1,30 @@
+{
+  "displayName": "open.account",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Open an account"}]},
+    {"parts": [{"text": "I want to open a "}, {"text": "savings", "entityType": "@account_type"}, {"text": " account"}]},
+    {"parts": [{"text": "Create new account"}]},
+    {"parts": [{"text": "Open "}, {"text": "checking", "entityType": "@account_type"}]},
+    {"parts": [{"text": "New account"}]},
+    {"parts": [{"text": "Sign up for an account"}]},
+    {"parts": [{"text": "Apply for account"}]},
+    {"parts": [{"text": "Start a new account"}]},
+    {"parts": [{"text": "How do I open an account"}]},
+    {"parts": [{"text": "Account application"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'd be happy to help you open a new account. What type of account would you like?"]
+      }
+    }
+  ]
+}

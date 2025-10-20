@@ -1,0 +1,35 @@
+{
+  "displayName": "dispute.transaction",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Dispute a transaction"}]},
+    {"parts": [{"text": "I didn't make this transaction"}]},
+    {"parts": [{"text": "Report fraud"}]},
+    {"parts": [{"text": "Fraudulent charge"}]},
+    {"parts": [{"text": "Unauthorized transaction"}]},
+    {"parts": [{"text": "Wrong charge"}]},
+    {"parts": [{"text": "Challenge transaction"}]},
+    {"parts": [{"text": "I was charged twice"}]},
+    {"parts": [{"text": "Incorrect amount charged"}]},
+    {"parts": [{"text": "Report suspicious activity"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "amount",
+      "entityType": "@sys.currency",
+      "isList": false
+    },
+    {
+      "displayName": "date",
+      "entityType": "@sys.date",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you dispute this transaction. Let me gather the details."]
+      }
+    }
+  ]
+}

@@ -122,13 +122,26 @@ class ApiService {
   }
 
   public async createSession(userId: string, metadata?: any): Promise<SessionResponse> {
-    const response = await this.client.post<SessionResponse>('/api/sessions', {
+    const response = await this.client.post<any>('/api/sessions', {
       userId,
       metadata,
     });
     
-    this.sessionId = response.data.sessionId;
-    return response.data;
+    // Backend returns sessionId in different places depending on implementation
+    // Try root level first, then fall back to session.sessionId
+    const sessionId = response.data.sessionId || response.data.session?.sessionId;
+    
+    if (sessionId) {
+      this.sessionId = sessionId;
+    }
+    
+    return {
+      sessionId,
+      userId,
+      createdAt: response.data.timestamp || new Date().toISOString(),
+      isActive: true,
+      status: 'active'
+    } as SessionResponse;
   }
 
   public async getSession(sessionId: string): Promise<SessionDetail> {

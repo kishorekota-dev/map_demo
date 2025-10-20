@@ -1,0 +1,11 @@
+{
+  "displayName": "document_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "statement", "synonyms": ["statement", "bank statement", "account statement"]},
+    {"value": "receipt", "synonyms": ["receipt", "transaction receipt", "proof"]},
+    {"value": "tax_form", "synonyms": ["tax form", "1099", "tax document", "w2"]},
+    {"value": "loan_agreement", "synonyms": ["loan agreement", "loan contract", "loan papers"]},
+    {"value": "application", "synonyms": ["application", "application form", "apply"]}
+  ]
+}

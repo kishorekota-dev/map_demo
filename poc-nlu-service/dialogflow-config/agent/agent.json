@@ -1,0 +1,14 @@
+{
+  "displayName": "POC Banking Assistant",
+  "description": "AI-powered banking assistant for account management, transactions, and customer service",
+  "defaultLanguageCode": "en",
+  "supportedLanguageCodes": [],
+  "timeZone": "America/New_York",
+  "tier": "TIER_STANDARD",
+  "enableLogging": true,
+  "matchMode": "MATCH_MODE_HYBRID",
+  "classificationThreshold": 0.3,
+  "apiVersion": "API_VERSION_V2",
+  "enableSpellCorrection": true,
+  "mlEnabled": true
+}

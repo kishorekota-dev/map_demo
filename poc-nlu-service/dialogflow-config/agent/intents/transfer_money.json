@@ -1,0 +1,49 @@
+{
+  "displayName": "transfer.money",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Transfer money"}]},
+    {"parts": [{"text": "Send money"}]},
+    {"parts": [{"text": "Move "}, {"text": "$500", "entityType": "@sys.currency"}, {"text": " to savings"}]},
+    {"parts": [{"text": "Transfer "}, {"text": "$1000", "entityType": "@sys.currency"}, {"text": " from checking to savings"}]},
+    {"parts": [{"text": "I want to transfer funds"}]},
+    {"parts": [{"text": "Can I move money between accounts"}]},
+    {"parts": [{"text": "Send "}, {"text": "$200", "entityType": "@sys.currency"}, {"text": " to John"}]},
+    {"parts": [{"text": "Wire transfer"}]},
+    {"parts": [{"text": "Make a transfer"}]},
+    {"parts": [{"text": "Transfer from "}, {"text": "checking", "entityType": "@account_type"}, {"text": " to "}, {"text": "savings", "entityType": "@account_type"}]},
+    {"parts": [{"text": "Move funds"}]},
+    {"parts": [{"text": "Internal transfer"}]},
+    {"parts": [{"text": "External transfer"}]},
+    {"parts": [{"text": "Pay someone"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "amount",
+      "entityType": "@sys.currency",
+      "isList": false
+    },
+    {
+      "displayName": "from_account",
+      "entityType": "@account_type",
+      "isList": false
+    },
+    {
+      "displayName": "to_account",
+      "entityType": "@account_type",
+      "isList": false
+    },
+    {
+      "displayName": "recipient",
+      "entityType": "@sys.person",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you transfer money. Let me get the details."]
+      }
+    }
+  ]
+}

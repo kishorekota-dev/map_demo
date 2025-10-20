@@ -404,4 +404,5 @@ class BankingNLUService {
   }
 }
 
-module.exports = BankingNLUService;
+// Export singleton instance for consistency with other services
+module.exports = new BankingNLUService();

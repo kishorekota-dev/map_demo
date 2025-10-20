@@ -30,7 +30,10 @@ export function useChat(options: UseChatOptions = {}) {
     let mounted = true
 
     async function initialize() {
-      if (!user) return;
+      if (!user?.userId) {
+        console.warn('Cannot initialize chat: user or userId is undefined');
+        return;
+      }
 
       setLoading(true)
       try {
@@ -48,6 +51,7 @@ export function useChat(options: UseChatOptions = {}) {
           const newSession = await apiService.createSession(user.userId)
           if (mounted) {
             sessionIdRef.current = newSession.sessionId
+            apiService.setSessionId(newSession.sessionId)  // Set session ID in API service
             setSession(newSession as SessionDetail)
           }
         }
@@ -60,7 +64,7 @@ export function useChat(options: UseChatOptions = {}) {
 
     initialize()
     return () => { mounted = false }
-  }, [user, autoCreateSession, initialSessionId])
+  }, [user?.userId, autoCreateSession, initialSessionId])
 
   // Convert MessageRecord to ChatMessage
   const convertToChatMessage = useCallback((record: MessageRecord): ChatMessageType => {
@@ -93,6 +97,7 @@ export function useChat(options: UseChatOptions = {}) {
       const resumeData = await apiService.resumeSession(sessionId)
       
       sessionIdRef.current = sessionId
+      apiService.setSessionId(sessionId)  // Set session ID in API service
       setSession(resumeData.session as SessionDetail)
       
       // Convert history to chat messages
@@ -100,7 +105,7 @@ export function useChat(options: UseChatOptions = {}) {
       setMessages(chatMessages)
       
       // Update unresolved sessions list
-      if (user) {
+      if (user?.userId) {
         const userSessions = await apiService.getUserSessions(user.userId, 'unresolved', 10)
         setUnresolvedSessions(userSessions.sessions)
       }
@@ -112,12 +117,28 @@ export function useChat(options: UseChatOptions = {}) {
     } finally {
       setLoading(false)
     }
-  }, [user, convertToChatMessage])
+  }, [user?.userId, convertToChatMessage])
 
   // Send a message
   const sendMessage = useCallback(async (text: string) => {
-    if (!user) {
-      throw new Error('User not authenticated')
+    if (!user?.userId) {
+      const error = new Error('User not authenticated or userId is missing')
+      console.error(error);
+      throw error;
+    }
+
+    // If no session exists, create one first
+    if (!sessionIdRef.current) {
+      console.log('No session exists, creating new session...');
+      try {
+        const newSession = await apiService.createSession(user.userId);
+        sessionIdRef.current = newSession.sessionId;
+        apiService.setSessionId(newSession.sessionId);
+        setSession(newSession as SessionDetail);
+      } catch (err) {
+        console.error('Failed to create session:', err);
+        throw new Error('Failed to create chat session. Please try again.');
+      }
     }
 
     setLoading(true)

@@ -1,0 +1,37 @@
+{
+  "displayName": "apply.loan",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Apply for a loan"}]},
+    {"parts": [{"text": "I need a "}, {"text": "personal", "entityType": "@loan_type"}, {"text": " loan"}]},
+    {"parts": [{"text": "Get a loan"}]},
+    {"parts": [{"text": "Loan application"}]},
+    {"parts": [{"text": "Apply for "}, {"text": "mortgage", "entityType": "@loan_type"}]},
+    {"parts": [{"text": "I want to borrow money"}]},
+    {"parts": [{"text": "Car loan"}]},
+    {"parts": [{"text": "Student loan"}]},
+    {"parts": [{"text": "Business loan"}]},
+    {"parts": [{"text": "How do I apply for a loan"}]},
+    {"parts": [{"text": "Loan rates"}]},
+    {"parts": [{"text": "Check loan eligibility"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "loan_type",
+      "entityType": "@loan_type",
+      "isList": false
+    },
+    {
+      "displayName": "amount",
+      "entityType": "@sys.currency",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you apply for a loan. What type of loan are you interested in?"]
+      }
+    }
+  ]
+}

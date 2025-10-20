@@ -69,6 +69,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     const isAuthenticated = authService.isAuthenticated() && authService.isTokenValid();
     const user = authService.getUserProfile();
     
+    console.log('Auth check:', { isAuthenticated, user });
+    
     set({
       isAuthenticated,
       user: isAuthenticated ? user : null,

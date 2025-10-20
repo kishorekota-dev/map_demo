@@ -1,4 +1,5 @@
 import { Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { LoadingSpinner } from '@atoms/LoadingSpinner/LoadingSpinner';
 
@@ -7,12 +8,12 @@ export interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading, user, checkAuth } = useAuthStore();
 
   // Check authentication on mount
-  if (!isAuthenticated) {
+  useEffect(() => {
     checkAuth();
-  }
+  }, [checkAuth]);
 
   if (isLoading) {
     return (
@@ -27,7 +28,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     return <Navigate to="/auth" replace />;
   }
 

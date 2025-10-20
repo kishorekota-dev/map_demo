@@ -7,8 +7,8 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 const logger = require('../utils/logger');
 const config = require('../config/config');
-const DialogFlowService = require('./dialogflow.service');
-const BankingNLUService = require('./banking-nlu.service');
+const dialogflowService = require('./dialogflow.service'); // Singleton instance
+const bankingNLU = require('./banking-nlu.service'); // Singleton instance
 
 class NLUService {
   constructor() {
@@ -17,8 +17,9 @@ class NLUService {
       checkperiod: config.cache.checkPeriod
     });
     
-    this.dialogflowService = new DialogFlowService();
-    this.bankingNLU = new BankingNLUService();
+    // Both services are already singleton instances
+    this.dialogflowService = dialogflowService;
+    this.bankingNLU = bankingNLU;
     this.contexts = new Map();
     
     this.initializeIntents();

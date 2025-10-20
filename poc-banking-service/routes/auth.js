@@ -272,12 +272,15 @@ router.post('/login', async (req, res) => {
       status: 'success',
       data: {
         user: {
-          id: user.user_id,
+          userId: user.user_id,  // Changed from 'id' to 'userId' for frontend compatibility
+          id: user.user_id,      // Keep 'id' for backward compatibility
           username: user.username,
           email: user.email,
           customerId: user.customer_id,
           customerNumber: user.customer_number,
           name: user.full_name,
+          firstName: user.full_name?.split(' ')[0],
+          lastName: user.full_name?.split(' ').slice(1).join(' '),
           isVerified: user.is_verified,
           mustChangePassword: user.must_change_password,
           twoFactorEnabled: user.two_factor_enabled

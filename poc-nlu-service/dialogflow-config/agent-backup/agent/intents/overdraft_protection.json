@@ -1,0 +1,19 @@
+{
+  "displayName": "overdraft.protection",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Set up overdraft protection"}]},
+    {"parts": [{"text": "Overdraft coverage"}]},
+    {"parts": [{"text": "Link accounts for overdraft"}]},
+    {"parts": [{"text": "Insufficient funds protection"}]},
+    {"parts": [{"text": "Overdraft fees"}]},
+    {"parts": [{"text": "Avoid overdraft"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you set up overdraft protection to avoid fees."]
+      }
+    }
+  ]
+}

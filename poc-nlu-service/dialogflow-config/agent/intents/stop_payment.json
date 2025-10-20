@@ -1,0 +1,20 @@
+{
+  "displayName": "stop.payment",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Stop payment"}]},
+    {"parts": [{"text": "Cancel check"}]},
+    {"parts": [{"text": "Stop a check"}]},
+    {"parts": [{"text": "Hold payment"}]},
+    {"parts": [{"text": "Prevent payment"}]},
+    {"parts": [{"text": "Stop check number"}]},
+    {"parts": [{"text": "Cancel automatic payment"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you place a stop payment. Let me get the check details."]
+      }
+    }
+  ]
+}

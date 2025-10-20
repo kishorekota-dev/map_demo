@@ -1,0 +1,22 @@
+{
+  "displayName": "setup.alerts",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Set up alerts"}]},
+    {"parts": [{"text": "Turn on notifications"}]},
+    {"parts": [{"text": "Enable transaction alerts"}]},
+    {"parts": [{"text": "Low balance alert"}]},
+    {"parts": [{"text": "Get notified"}]},
+    {"parts": [{"text": "Alert me"}]},
+    {"parts": [{"text": "SMS alerts"}]},
+    {"parts": [{"text": "Email notifications"}]},
+    {"parts": [{"text": "Push notifications"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you set up account alerts. What type of alerts would you like?"]
+      }
+    }
+  ]
+}

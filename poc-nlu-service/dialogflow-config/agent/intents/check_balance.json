@@ -1,0 +1,35 @@
+{
+  "displayName": "check.balance",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "What is my balance"}]},
+    {"parts": [{"text": "Check my balance"}]},
+    {"parts": [{"text": "Show my account balance"}]},
+    {"parts": [{"text": "How much money do I have"}]},
+    {"parts": [{"text": "What's my "}, {"text": "checking", "entityType": "@account_type"}, {"text": " balance"}]},
+    {"parts": [{"text": "Balance of my "}, {"text": "savings", "entityType": "@account_type"}, {"text": " account"}]},
+    {"parts": [{"text": "Tell me my account balance"}]},
+    {"parts": [{"text": "What's in my account"}]},
+    {"parts": [{"text": "Check "}, {"text": "savings", "entityType": "@account_type"}, {"text": " account balance"}]},
+    {"parts": [{"text": "Show me how much I have in "}, {"text": "checking", "entityType": "@account_type"}]},
+    {"parts": [{"text": "Balance inquiry"}]},
+    {"parts": [{"text": "Account balance"}]},
+    {"parts": [{"text": "Current balance"}]},
+    {"parts": [{"text": "Available balance"}]},
+    {"parts": [{"text": "How much is in my account"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll check your account balance for you right away."]
+      }
+    }
+  ]
+}

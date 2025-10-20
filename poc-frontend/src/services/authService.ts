@@ -33,7 +33,20 @@ class AuthService {
       // Store tokens and user profile
       if (data.data?.tokens) {
         this.setTokens(data.data.tokens);
-        this.setUserProfile(data.data.user);
+        
+        // Ensure user profile has all required fields
+        const userProfile: UserProfile = {
+          userId: data.data.user.userId || (data.data.user as any).id,
+          username: data.data.user.username,
+          email: data.data.user.email,
+          firstName: data.data.user.firstName,
+          lastName: data.data.user.lastName,
+          roles: data.data.roles || [],
+          customerId: data.data.user.customerId,
+        };
+        
+        console.log('Login successful, storing user profile:', userProfile);
+        this.setUserProfile(userProfile);
       }
 
       return data;

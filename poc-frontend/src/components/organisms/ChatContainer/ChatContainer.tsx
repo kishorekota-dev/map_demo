@@ -68,7 +68,7 @@ export function ChatContainer({
     <div className="chat-container">
       <div className="chat-container__main">
         {/* Session Controls Bar */}
-        {session && (
+        {session?.sessionId && (
           <div className="chat-container__session-bar">
             <div className="session-bar__info">
               <span className="session-bar__label">Active Session</span>

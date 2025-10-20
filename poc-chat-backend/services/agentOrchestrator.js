@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const axios = require('axios');
 const logger = require('./logger');
+const nluClient = require('./nluClient');
 
 class AgentOrchestrator extends EventEmitter {
     constructor() {
@@ -404,6 +405,11 @@ class AgentOrchestrator extends EventEmitter {
      */
     async callAgentService(step, message, conversationContext, aggregatedResult) {
         try {
+            // Special handling for NLU service - use dedicated client
+            if (step.agentType === 'nlu' || step.agentId === 'nlu-intent') {
+                return await this.callNLUService(message, conversationContext);
+            }
+
             if (!step.serviceEndpoint) {
                 throw new Error('No service endpoint configured');
             }
@@ -438,6 +444,70 @@ class AgentOrchestrator extends EventEmitter {
                 throw new Error(`Agent service unavailable: ${step.agentId}`);
             }
             throw error;
+        }
+    }
+
+    /**
+     * Call NLU service using dedicated client
+     */
+    async callNLUService(message, conversationContext) {
+        try {
+            logger.debug('Calling NLU service for intent detection', {
+                messageId: message.id,
+                sessionId: message.sessionId,
+                contentLength: message.content?.length
+            });
+
+            const result = await nluClient.analyzeUserInput(
+                message.content,
+                message.sessionId || conversationContext.sessionId,
+                message.userId || conversationContext.userId,
+                conversationContext.languageCode || 'en-US'
+            );
+
+            if (!result.success) {
+                throw new Error('NLU analysis failed');
+            }
+
+            // Format response for agent orchestrator
+            return {
+                intent: result.intent,
+                confidence: result.confidence,
+                entities: result.entities,
+                fulfillmentText: result.dialogflow?.fulfillmentText,
+                parameters: result.dialogflow?.parameters || {},
+                conversationContextUpdates: {
+                    currentIntent: result.intent,
+                    lastIntent: conversationContext.currentIntent,
+                    intentConfidence: result.confidence,
+                    detectedEntities: result.entities,
+                    languageCode: result.metadata?.languageCode || 'en-US'
+                },
+                metadata: {
+                    source: result.source,
+                    nluServiceData: result.metadata,
+                    bankingAnalysis: result.banking
+                }
+            };
+
+        } catch (error) {
+            logger.error('Error calling NLU service', {
+                error: error.message,
+                messageId: message.id,
+                sessionId: message.sessionId
+            });
+
+            // Return minimal response so orchestrator can continue
+            return {
+                intent: 'general_inquiry',
+                confidence: 0.3,
+                entities: [],
+                conversationContextUpdates: {},
+                metadata: {
+                    source: 'fallback',
+                    error: error.message
+                }
+            };
         }
     }
 
