@@ -1,2396 +1,733 @@
-<!--
-================================================================================
-ORIGINAL DRAFT VERSION - PRESERVED FOR REFERENCE
-================================================================================
+# Systems and Methods for Chatbots Using Agentic AI and Model Context Protocol
 
-# Leveraging Agentic AI for Chat Bot
-### Problem Statement
-
-Modern chat interfaces demand seamless integration between the experience layer and core product APIs to deliver specific business functions. Traditionally, these integrations are rigid and require significant upfront effort, even though business functions often evolve iteratively based on real-world usage and feedback. This approach can lead to high initial implementation costs and slow adaptation to changing requirements. This white paper explores how Agentic AI and MCP can streamline chat bot development, enabling flexible, adaptive workflows across the end-to-end system.
-
-### Typical Chat Bot System Flow to Fullfil a request
-
-To set the context for implementation details, let's outline the most common requirements for chatbots:
-- Authenticate and establish session
-    - Customer signs in (support MFA) to create a verified session and issued token; associate session context with identity and consent.
-
-- Accept customer input
-    - Receive the user's natural‑language query and attach session metadata (locale, entitlements, recent activity).
-
-- Intent detection and entity extraction
-    - Classify intent, extract entities and confidence score; normalize ambiguous values.
-
-- Workflow decision
-    - If more information is required → ask targeted follow‑up questions a.k.a Human In The Loop.
-    - If the intent is actionable → check authorization, account state, and rate/limits.
-    - If the intent is actionable which modifies data → update address on the account, ask for approval before acting a.k.a Human In The Loop.
-    - If not actionable or out of scope → provide guidance or escalate to human agent.
-
-- Data retrieval and enrichment
-    - Query downstream APIs (accounts, transactions, KYC, limits) with least privilege.
-    - Redact or mask PII before passing to downstream models or logs.
-
-- LLM / agent invocation
-    - Provide the LLM/agent with structured context: intent, entities, retrieved data, system instructions, and safety constraints.
-    - Prefer tool-enabled workflows: let the agent call verified tools rather than exposing raw data to the model.
-
-- Action execution and confirmation
-    - For authorized actions, execute backend API calls with idempotency and audit logging.
-    - Confirm changes to the customer and allow cancellation where appropriate.
-
-- Response formatting and delivery
-    - Produce a concise, user‑facing response with optional supporting details, confidence level, and recommended next steps.
-
-> Non Functional Requirements
-
-- Security, compliance, and auditing
-    - Encrypt session tokens and in‑transit data, maintain audit trails, respect data retention and consent policies, and log access for compliance.
-
-- Error handling and safe fallbacks
-    - Handle low confidence or API failures with safe, transparent responses and automated escalation to human agents when needed.
-
-- Observability and continuous improvement
-    - Monitor intent accuracy, action success rates, and user feedback to refine NLU, workflows, and prompts iteratively.
-
-
-### System & Techology Choices for the various steps with ChatBot Flow.
-
-- Intent Detection.
-  * Various NLU tools are available such as DialogFlow, AWS Lex, LUIS, Rasa, etc.
-  * OpenAI function calling is a new and promising approach that can be used for intent detection when NLP/ NLU confidence score is low.
-- Workflow
-- Data Retrieval and Enrichment
-
-================================================================================
-END OF ORIGINAL DRAFT
-================================================================================
--->
-
-# Leveraging Agentic AI and Model Context Protocol for Banking Chatbots
-## A Comprehensive Implementation Guide
-
-**Author:** Kishore Kumar Kota  
-**Date:** November 2025  
-**Version:** 1.0
+## Patent Specification
 
 ---
 
-## Executive Summary
+## Title
 
-This white paper presents a modern approach to building intelligent banking chatbots using Agentic AI and the Model Context Protocol (MCP). This white paper demonstrate how this architecture reduces implementation complexity, accelerates time-to-market, and enables continuous evolution of conversational banking experiences. Through a proof-of-concept implementation, it aims to prove how to achieved a flexible system that handles account inquiries, transaction management, card services, and secure banking operations with minimal code changes required for adding new and enchancing capabilities.
-
-**Key Benefits:**
-- **Significant reduction** in integration effort for building a chatbot
-- **Modular architecture** enabling independent service updates following modern micro services
-- **Enhanced security** through standardized tool execution patterns and keeping PII out of AI, and providing role based access via JWT.
-
+**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
 
 ---
 
-## 1. Problem Statement
+## Field of the Invention
 
-Modern chat interfaces demands seamless integration between the experience layer and core product APIs to deliver specific business functions. Traditionally, these integrations are rigid and require tightly coupled integration between frontend, backend, NLU, and API layers. This approach can lead to high initial implementation costs and slow adaptation for ever-changing requirements for banking products and services. This white paper explores how Agentic AI and MCP can streamline chatbot development, enabling flexible, adaptive workflows across the end-to-end banking system. As with everything, there are pros and cons to every approach. This white paper focuses on the pros of using Agentic AI and MCP for banking chatbots, why this approach is superior to traditional methods, and how to implement it effectively. This approach may require higher operational costs due to multiple service hops and may have higher latency compared to traditional methods; however, the benefits outweigh the drawbacks for these use cases. Due to the nature of chatbots, response times are not as critical as other real-time systems.
-
-### 1.1 Traditional Architecture Limitations
-
-**Tight Coupling:** Frontend chat interfaces are directly coupled to backend APIs, making changes in either layer require coordinated updates across the entire stack. 
-
-**Inflexible Intent Handling:** Adding new banking capabilities requires modifying multiple components: NLU training data, intent handlers, API integrations, and response formatters.
-
-**High Initial Costs:** Teams must build comprehensive intent libraries upfront, even for features that may see limited adoption.
-
-**Slow Adaptation:** Changing conversational flows or adding new banking products requires lengthy development cycles and regression testing.
-
-**Missing Turn Taking:** So far conversational flows are robotic, does not necessarily support turn taking and have subpar experience in giving authentic natural language interactions.
-
-**Missing Conversational Memory:** So far conversational flows do not remember past interactions and context, leading to repetitive queries and poor user experience. 
-
-**Lack of Human-Based Approach:** Traditional systems' intent interactions cannot cover all possible scenarios, leading to frustration when users encounter unhandled queries. This is critical when dealing with an end user who does not have details on how to fulfill their needs via chat.
-
-### 1.2 The Agentic AI Opportunity
-
-Agentic AI systems, powered by Large Language Models (LLMs), offer a fundamentally different approach. Instead of hardcoded decision trees, agents can:
-
-- **Understand context** from natural language without explicit intent mapping
-- **Chain multiple operations** to fulfill complex requests
-- **Adapt responses** based on retrieved data and user context
-- **Execute tools dynamically** based on conversation state
-- **Learn from examples** through prompt engineering rather than code changes
-
-This approach allows banking chatbots to evolve organically, responding to real-world usage patterns and customer needs with minimal upfront effort. An given intent can map to an abstract Agentic Banking ChatBot, hich can dynamically assess input parameters needed to fulfill the request, and extract from chat coversation and ask for any missing parameters via follow up questions. This significantly reduces the need for rigid intent definitions and extensive NLU training. Subsequently, it can fire off required tool calls via MCP to fullfill the request. This greatly simplifies the overall integrations needed to build and maintain the chatbot system.
-
-
-### 1.3 The Model Context Protocol Advantage
-
-The Model Context Protocol (MCP), developed by Anthropic, provides a standardized way for AI systems to interact with external tools and data sources. MCP enables:
-
-- **Standardized tool interfaces** that work across different LLM providers
-- **Secure tool execution** with built-in parameter validation
-- **Reusable tool definitions** that can be shared across applications
-- **Clear separation** between AI orchestration and business logic
-- **Observable interactions** with structured tool call logging
-
-This white paper explores how combining Agentic AI with MCP streamlines chatbot development, enabling flexible, adaptive workflows across the end-to-end banking system. Thus eliminating the need for tight coupling for fulfilling banking chat bot requests.
+The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI) and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, but not limited to, financial services, e-commerce, telecommunications, healthcare, and technical support.
 
 ---
 
-## 2. Typical Banking Chatbot System Flow
+## Background of the Invention
 
-To establish context for our implementation, we'll first outline the comprehensive requirements for enterprise banking chatbots. Each step must address both functional capabilities and critical non-functional requirements around security, compliance, and user experience.
+Chat-based interfaces are increasingly used to provide users with self-service access to products, services, and support across many industries. These are referred as IVA, interactive virtual assistants (IVA) or Chatbots. Conventional chatbot architectures commonly rely on rigid natural language understanding (NLU) pipelines and tightly coupled integrations between front-end interfaces, back-end services, and intent-specific business logic.
 
-A typical chatbot system flow to fulfill a banking request includes the following steps:
+In typical systems, the chat frontend is directly coupled to backend APIs and domain-specific intent handlers. Adding new capabilities (for example, a new type of account inquiry in banking, or a new order status query in e-commerce) often requires simultaneous updates to multiple components, including NLU training data, intent classification models, backend service integrations, and response formatting logic. This tight coupling results in high initial implementation cost, substantial operational complexity, and slow adaptation to changing products, regulations, and customer expectations.
 
-- Authenticate Customer and Establish Session.
-- Understand Customer Intent via NLP.
-- Execute Defined FullFillment Workflow based on Intent Detection.
-- Retrieve and Enrich Data from Banking APIs.
-- Provide a Fullfillment Response to the Customer.
+Conventional chatbots also struggle with conversational flexibility. Intent libraries must be extensively pre-defined, and unexpected user phrasing or multi-intent queries frequently cause misclassification or fallback behaviors. Many systems lack robust conversational memory, forcing users to repeat information. Additionally, sensitive data (e.g., financial, medical, or personally identifiable information) must be carefully managed to avoid leakage into logs or external AI models, creating significant security and compliance challenges.
 
-These are 5 key steps that are required to perform chat based interactions for banking use cases. Each of these steps are further broken down into sub steps with functional requirements, implementation approaches, data flows, best practices, security considerations, and technology options. However, to focus on the key aspects, this white paper will focus on the key aspects of each step without going into exhaustive detail.
+Recent advances in large language models (LLMs) and agentic AI provide new opportunities for building more flexible, context-aware chatbots. However, naïvely connecting LLMs directly to core APIs without clear boundaries and control (for example, letting an LLM construct arbitrary API calls) can introduce security, compliance, and reliability risks. There is therefore a need for an architecture that leverages agentic AI and autonomous agent capabilities while maintaining strict control over tools, data access, and execution, and that decouples conversational orchestration from domain-specific business logic.
 
-There are many different choices to implement each of these steps using solutions like DialogFlow, AWS Lex for Intent Detection and processing. Those telchologies can still be leveraged within this architecture to take advantage of certain capabilities. However, the key focus of this white paper is to demonstrate how Agentic AI and MCP can be used to streamline the overall architecture and reduce the integration effort needed to build a banking chatbot.
+---
 
-### 2.1 Authentication and Session Establishment
+## Summary of the Invention
 
-**Functional Requirements:**
-- Customer signs in using username/password or biometric authentication
-- Support Multi-Factor Authentication (MFA) for enhanced security
-- Generate secure session token (JWT) with appropriate expiration
-- Associate session context with verified identity and consent records
-- Maintain session state across conversation turns
+In one aspect, the invention provides a system and method for implementing task-oriented chatbots using an agentic AI orchestrator together with a standardized tool interface layer, such as a Model Context Protocol (MCP) server, to access domain services. The architecture decouples the chat frontend, AI orchestration, NLU, and domain microservices through well-defined interfaces, thereby reducing integration complexity, improving maintainability, and enabling rapid introduction of new conversational capabilities.
 
-**Implementation Approach:**
-```javascript
-// Example: JWT-based authentication with session context
-POST /api/auth/login
+According to one embodiment, the system includes:
+
+- A chat frontend configured to capture user messages and display chatbot responses. Referred as Chat UI.
+- An API based chat backend, configured to manage authenticated user sessions, maintain conversation context, and route messages.
+- A NLU component that integrates with one or more NLU services with fallback to Generate AI based Intent Detection.
+- An AI orchestrator configured to:
+  - perform intent analysis and performs specific AI Agent workflows to fulfill user requests,
+  - perform thorough validation of user inpput extraction, and based on defined Prompt, performs data extraction and Human-In-The loop validation to seek any missing inputs.
+  - autonomously executes fullfilment workflows by invoking one or more tools via an MCP-compliant interface, and
+  - generate natural language responses using at least one LLM.
+  - acts as a MCP client to invoke tools exposed by the MCP server.
+- An MCP service layer exposing a plurality of tools corresponding to domain-specific operations (for example, account operations, order management, ticket management, or profile management), with schema-based parameter validation.
+- One or more backend domain services providing the underlying business functions, typically implemented as microservices communicating with domain data stores.
+
+In operation, a user message is received at the chat frontend (Chat UI) and forwarded to the chat backend, where authentication and session context are enforced. 
+
+The chat backend is responsible for managing the session, identifying if a new session is established, and managing new intent vs existing intent response. The chat backend handles the management of chat sessions along with detecting a new intent vs responding to an existing intent follow-up questions. The chat backend also responsible for integrating with the NLU services to perform intent detection and then passes the user message with derived intent to the AI orchestrator.
+
+The AI orchestrator then uses the user messages and intent details to trigger a predefined and generic Agentic workflow to fulfill user requests. This involves selecting the prompt to fulfill the request, which can be a simple mapping between Intent and Prompt. Defining well-written Prompts is a key aspect of the system function. Prompts will define all the required inputs, and LLM-based function calling to fetch data needed via MCP-based tool calling. Based on the detected intent and extracted entities, the AI orchestrator selects one or more MCP tools to execute. The tools are invoked via the MCP service layer, which validates parameters and invokes the corresponding domain microservices.
+
+The microservices return structured data that may be masked or redacted to avoid exposing sensitive information to the LLM. The AI orchestrator then constructs prompts including system instructions, safety constraints, contextual data, and user messages, and invokes the LLM to generate a natural language response that is returned to the user.
+
+In some embodiments, the system additionally implements observability and control features, including structured logging of tool calls with correlation identifiers, monitoring of intent accuracy and action success rates, circuit breakers, and fallback behaviors to human agents upon repeated errors or low-confidence conditions.
+
+The architecture is domain-agnostic: it can be applied to financial use cases (e.g., account inquiries, transaction management, and card services), as well as to other domains such as order tracking in e-commerce, troubleshooting in technical support, or appointment scheduling in healthcare. In one illustrative embodiment, a banking domain is used to demonstrate account inquiries, transaction management, card services, and secure operations; however, the underlying mechanisms are not limited to banking.
+
+In another aspect, the invention provides a method of operating a task-oriented chatbot comprising receiving a user query, determining an intent, selecting at least one MCP tool based on the intent, invoking the tool to perform a domain-specific function, and generating a natural language response using an LLM based on tool outputs and conversation context.
+
+---
+
+## Brief Description of the Drawings
+
+- **FIG. 1** is a block diagram of a system architecture for a task-oriented chatbot using an AI orchestrator and a Model Context Protocol service layer.
+- **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
+- **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
+- **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
+- **FIG. 5** is a flow diagram illustrating error handling, circuit breaking, and human escalation for low-confidence or failed tool executions.
+
+---
+
+## Detailed Description of the Invention
+
+### System Overview
+
+In one embodiment, the system comprises:
+
+#### 1. Chat Frontend
+
+A user interface (web, mobile, or other client) presenting a chat interface that:
+- Accepts user input in the form of text messages or other modalities (e.g., voice, images).
+- Renders messages in a conversational thread, distinguishing between user and assistant messages.
+- Communicates with the chat backend over secure channels (e.g., HTTPS, WebSocket).
+- Maintains session authentication tokens (e.g., JWT) in secure storage (e.g., secure cookies, local storage with appropriate protections).
+
+#### 2. Chat Backend
+
+A server-side component that:
+- Receives incoming messages from the chat frontend and validates authentication tokens.
+- Associates each user message with a conversation identifier (for grouping turns within a single conversation) and a session identifier (for grouping conversations by user and session).
+- Stores or retrieves conversation history and session metadata from a session store (e.g., Redis, database).
+- Implements rate limiting and abuse detection to prevent misuse.
+- Routes validated messages to the AI orchestrator.
+- Receives responses from the AI orchestrator and returns them to the chat frontend.
+
+#### 3. AI Orchestrator
+
+A workflow engine (e.g., based on graph-based orchestration frameworks like LangGraph) that:
+- Receives user messages and session context (e.g., conversation history, user roles, preferences) from the chat backend.
+- Invokes one or more NLU components for intent detection and entity extraction.
+- Applies decision logic based on the detected intent, confidence score, and entity availability to determine whether to:
+  - Request additional clarification from the user if confidence is low or entities are missing.
+  - Check authorization constraints and domain-specific business rules.
+  - Request explicit user confirmation for write operations.
+  - Proceed to tool execution.
+- Selects one or more tools from the MCP registry that correspond to the detected intent.
+- Invokes the tools via the MCP service layer, optionally in parallel when independent.
+- Receives structured results from the tools.
+- Constructs one or more prompts for the LLM, incorporating:
+  - A system prompt defining the assistant's role, domain, safety constraints, and behavioral guidelines.
+  - A user prompt containing the latest user message, detected intent and confidence, relevant context (e.g., user preferences, prior actions in the conversation), and tool outputs.
+  - Optional few-shot examples demonstrating desired response format or reasoning.
+- Invokes at least one LLM (e.g., GPT-4, Claude, or similar) to generate a natural language response based on the constructed prompts.
+- Applies post-processing to the LLM output, including:
+  - Validation of response content (e.g., ensuring no sensitive data is inadvertently exposed).
+  - Formatting (e.g., breaking into paragraphs, adding structured elements).
+  - Inclusion of suggested next actions or follow-up options.
+- Returns the processed response to the chat backend.
+
+#### 4. NLU Services
+
+One or more NLU components that determine user intent and extract entities. In one embodiment, a hybrid approach is used:
+
+- **Primary NLU Engine**: A hosted or on-premises NLU service (e.g., Google Dialogflow, AWS Lex, Microsoft LUIS, or open-source Rasa) trained on domain-specific intents and configured to detect a set of known intents with high confidence.
+- **Secondary Domain-Specific Model**: A custom machine learning model (e.g., a fine-tuned transformer or SVM) trained specifically on domain examples and edge cases to provide additional accuracy and domain awareness.
+- **LLM-Based Function Calling**: A configuration that instructs an LLM to extract intent and entities from a user message by calling a system function with appropriate parameters. This component is used when primary and secondary engines return low confidence scores or encounter novel phrasings.
+
+The AI orchestrator invokes these components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70).
+
+#### 5. MCP Service Layer
+
+A protocol-compliant tool server (implementing the Model Context Protocol specification) that:
+- Maintains a registry of available tools, each defined by:
+  - A unique tool name (e.g., `get_account_balance`, `check_order_status`).
+  - A human-readable description of the tool's purpose.
+  - A JSON schema specifying required and optional input parameters and their types, validation rules, and constraints.
+  - Metadata indicating whether the tool performs a read operation (safe, idempotent) or a write operation (mutating, requiring confirmation).
+- Responds to tool-discovery requests from the AI orchestrator, providing a list of available tools and their schemas. This enables dynamic adaptation without code changes.
+- Validates incoming tool invocation requests from the AI orchestrator against the declared schema, rejecting calls with invalid or missing parameters before invoking backend services.
+- Upon validation, invokes the corresponding backend domain service or data source with the validated parameters.
+- Receives results from the backend service.
+- Applies masking, redaction, or filtering policies to the results (e.g., hiding full account numbers or sensitive fields) according to configuration.
+- Returns the processed results to the AI orchestrator via the MCP protocol.
+- Logs all tool invocations, parameters, and results for audit, observability, and continuous improvement.
+
+#### 6. Domain Services Layer
+
+A collection of microservices or application programming interfaces (APIs) corresponding to the target domain. Each domain service implements business logic specific to a domain and communicates with underlying data stores. Examples across domains include:
+
+**Financial Services Domain**:
+- Account service: retrieve account metadata, list accounts, retrieve balances.
+- Transaction service: retrieve transaction history, retrieve transaction details.
+- Transfer service: execute fund transfers, schedule payments, manage recipients.
+- Card service: retrieve card details, block or unblock cards, order replacements, activate cards.
+- Profile service: retrieve or update customer profile, preferences, and consent.
+- Compliance service: check KYC status, detect suspicious transactions, enforce sanctions screening.
+
+**E-Commerce Domain**:
+- Product catalog service: search products, retrieve product details.
+- Order service: retrieve order status, modify orders, retrieve order history.
+- Shipping service: retrieve tracking information, estimate delivery.
+- Return service: initiate returns, retrieve return status.
+- Inventory service: check stock availability.
+
+**Support Domain**:
+- Ticketing service: create support tickets, retrieve ticket status, update ticket details.
+- Knowledge base service: search knowledge base articles, retrieve troubleshooting steps.
+- Agent escalation service: assign tickets to human agents, retrieve agent availability.
+
+Each domain service enforces its own business rules, authorization policies, and data validation. Services communicate with at least one backend data store (relational database, NoSQL database, or other repository).
+
+#### 7. Data Stores and Caches
+
+- **Primary Database**: A relational database (e.g., PostgreSQL) or other persistent store containing domain data (accounts, orders, tickets, etc.), user profiles, and configuration.
+- **Session Store**: An in-memory cache (e.g., Redis) for storing session data, conversation history, and frequently accessed data to improve performance.
+- **Audit and Observability Store**: A document database or log store (e.g., MongoDB, Elasticsearch) for immutable audit logs, observability metrics, and historical records.
+
+---
+
+### Domain-Agnostic Design with Illustrative Banking Embodiment
+
+The architecture is designed to be domain-neutral. Each target domain is represented by a set of tools exposed via the MCP service layer and a corresponding set of domain-specific microservices. The same orchestration pattern applies across domains:
+
+| Domain | Example Tools | Example Services | Example Use Case |
+|--------|---------------|------------------|-----------------|
+| **Financial Services** | `get_accounts`, `get_balance`, `transfer`, `block_card` | Account, Transaction, Card, Compliance | "What's my checking account balance?" |
+| **E-Commerce** | `search_products`, `get_order_status`, `create_return` | Product Catalog, Order, Shipping, Return | "Where's my order?" |
+| **Technical Support** | `create_ticket`, `search_kb`, `get_ticket_status` | Ticketing, Knowledge Base, Escalation | "How do I reset my password?" |
+| **Healthcare** | `schedule_appointment`, `get_prescription`, `retrieve_lab_results` | Appointment, Pharmacy, Lab | "Can I schedule a doctor's appointment?" |
+| **Telecommunications** | `check_bill`, `upgrade_plan`, `report_outage` | Billing, Plan Management, Network | "What is my current bill?" |
+
+In the illustrative financial services embodiment, tools such as retrieving account information, retrieving transactions, executing transfers, and managing cards are used to demonstrate account inquiries, transaction management, card services, and secure operations. However, the underlying mechanisms—intent detection, tool selection, parameter validation, response generation—are domain-agnostic and apply equally to any domain.
+
+---
+
+### Authentication and Session Management
+
+In one embodiment, users authenticate via a secure endpoint (e.g., `POST /api/auth/login`) using credentials (e.g., username and password) and, optionally, multi-factor authentication (MFA) via one-time passwords or biometric verification.
+
+Upon successful authentication, the system issues a short-lived JWT (JSON Web Token) containing claims such as:
+- User identifier (unique within the system).
+- User roles and permissions.
+- Token expiration time (e.g., 15–60 minutes).
+- Session identifier.
+
+The JWT is transmitted to the chat frontend and stored securely (e.g., in a secure cookie or local storage).
+
+For each incoming chat message, the chat backend extracts and validates the JWT, verifying its signature and expiration. Upon validation, the backend:
+- Extracts the user identifier and roles from the JWT.
+- Associates the message with a conversation identifier (grouping turns within a single conversation) and a session identifier (grouping conversations by user and session).
+- Retrieves or creates session data in the session store, including conversation history, user preferences, and other metadata.
+- Forwards the message and context to the AI orchestrator.
+
+The AI orchestrator maintains session context across turns, enabling multi-turn conversations where the bot remembers prior messages, decisions, and user preferences.
+
+---
+
+### Intent Detection and Workflow Selection
+
+When a new user message is received by the AI orchestrator, the system performs intent detection as follows:
+
+1. **Primary NLU Invocation**: The AI orchestrator sends the user message and session context to the primary NLU engine, which returns an intent label, a confidence score, and extracted entities (if applicable).
+
+2. **Confidence Threshold Check**: If the confidence score exceeds a first threshold (e.g., 0.70), the detected intent is accepted and the system proceeds to tool selection.
+
+3. **Secondary NLU Invocation (if needed)**: If the confidence is between a lower threshold (e.g., 0.50) and the first threshold, the AI orchestrator invokes the secondary, domain-specific NLU model. If this returns a higher confidence, it may be used; otherwise, the system proceeds to the next step.
+
+4. **LLM-Based Function Calling (if needed)**: If both primary and secondary NLUs return low confidence (below the lower threshold), the AI orchestrator constructs a prompt instructing an LLM to extract intent and entities. The LLM is provided with tool function definitions and asked to determine which tool(s) should be invoked. The LLM's response is parsed and used as the detected intent.
+
+5. **Fallback to Clarification or Escalation**: If no NLU component yields sufficient confidence, or if the detected intent is `unknown` or `out_of_scope`, the system generates a clarification question asking the user for more information or offers escalation to a human agent.
+
+After intent detection, a workflow decision module applies business logic:
+
+- **Missing Entities**: If the detected intent requires entities that were not extracted (e.g., account type for a balance inquiry), the system generates a follow-up question to collect the missing information.
+- **Authorization Check**: The system verifies that the user has permission to perform the action associated with the intent (e.g., checking whether the user can access a specific account).
+- **Write vs. Read Operations**: If the intent corresponds to a write operation (e.g., transferring funds, blocking a card, or updating a profile), the system generates a confirmation message and waits for explicit user confirmation before proceeding.
+- **Tool Selection**: Based on the intent and extracted entities, the system selects one or more tools from the MCP registry that should be invoked to satisfy the user's request.
+
+---
+
+### MCP Tool Selection and Execution
+
+In one embodiment, an intent-to-tool mapping configuration defines, for each recognized intent, one or more tools that should be invoked. For example:
+
+```
+Intent: check.balance
+Tools: [banking_get_accounts, banking_get_balance]
+
+Intent: transfer.money
+Tools: [banking_get_accounts, banking_get_balance, banking_transfer]
+
+Intent: card.block
+Tools: [banking_get_cards, banking_block_card]
+```
+
+Based on the detected intent and available entities, the AI orchestrator:
+- Looks up the intent-to-tool mapping to determine candidate tools.
+- Filters tools based on available entities and authorization (e.g., if the user specified a particular account type, only tools relevant to that type are selected).
+- Constructs a tool invocation request for each selected tool, including:
+  - The tool name.
+  - Input parameters matching the tool's JSON schema (extracted from the user message or session context).
+  - Optional metadata (e.g., correlation identifier for tracing, user context for authorization).
+
+The MCP service layer receives each tool invocation request and:
+- Validates the request parameters against the tool's JSON schema.
+- Invokes the corresponding backend domain service with the validated parameters.
+- Receives a response from the backend service.
+- Applies masking or redaction policies to sensitive fields in the response (e.g., replacing full account numbers with the last four digits, omitting full addresses or government identifiers).
+- Returns the processed result to the AI orchestrator.
+
+Tool invocations are logged with all relevant metadata (tool name, parameters, latency, result status, correlation ID) for audit, observability, and continuous improvement.
+
+---
+
+### Data Protection and Privacy
+
+The system implements multiple layers of data protection to ensure sensitive information is not inadvertently exposed to external AI models or logs:
+
+#### Masking and Redaction
+
+Before including tool output in a prompt to the LLM, the system applies masking and redaction policies:
+- Full account numbers are masked to show only the last four digits (e.g., `****1234`).
+- Full card numbers are masked similarly.
+- Full addresses and government identifiers (e.g., SSNs, tax IDs) are omitted from LLM prompts.
+- Salaries, detailed financial data, and other sensitive attributes are redacted according to configuration.
+
+#### Tokenization
+
+Sensitive identifiers may be replaced with non-reversible tokens that can be used for subsequent tool calls but do not reveal the underlying data to the LLM or logs.
+
+#### Audit Logging
+
+All accesses to sensitive data are logged in a separate audit trail, including:
+- User and timestamp.
+- Data accessed.
+- Purpose (e.g., tool execution, compliance check).
+- Authorized role.
+
+Audit logs are stored in a protected store and retained according to compliance requirements (e.g., 7 years for financial services).
+
+#### Role-Based Access Control
+
+Tools and backend services enforce role-based access control, ensuring that only authorized users can access sensitive data or perform certain operations. Authorization checks are performed at the backend service layer, not in the AI orchestrator or LLM.
+
+---
+
+### LLM Response Generation
+
+The AI orchestrator constructs one or more prompts for the LLM that incorporate:
+
+#### System Prompt
+
+A system prompt that describes:
+- The assistant's role and domain (e.g., "You are a banking assistant for SecureBank").
+- Specific responsibilities (e.g., "Help customers with account inquiries, transactions, and card management").
+- Behavioral guidelines (e.g., "Provide clear, accurate information based on retrieved data").
+- Safety constraints and prohibitions:
+  - "NEVER share full account numbers or SSNs".
+  - "NEVER execute transfers without explicit user confirmation".
+  - "NEVER provide financial advice or investment recommendations".
+  - "ALWAYS verify user intent before blocking cards or closing accounts".
+- List of available tools and their purposes.
+
+#### User Prompt
+
+A user prompt that includes:
+- The user's latest message.
+- Detected intent and confidence score.
+- Extracted entities (e.g., account type, amount, date range).
+- Relevant context from the session (e.g., user preferences, prior actions in the conversation).
+- Outputs from tool invocations, masked or redacted as appropriate.
+
+#### Few-Shot Examples (Optional)
+
+In some embodiments, the system includes one or more examples of desired response format or reasoning, e.g.:
+
+```
+Example:
+User: "What's my checking account balance?"
+Intent: check.balance
+Account Data: [{ accountId: ****1234, type: CHECKING, balance: $2,450.00 }]
+
+Expected Response:
+"Your checking account (ending in 1234) has a balance of $2,450.00. 
+Would you like to [view transactions] [transfer funds] [something else]?"
+```
+
+#### LLM Invocation
+
+The AI orchestrator invokes the LLM (e.g., GPT-4 or Claude) with the constructed prompts, specifying:
+- Model name and version.
+- Temperature (e.g., 0.7 for balanced determinism and creativity).
+- Maximum token limit (e.g., 2000 tokens).
+- Tools available for the LLM to call (if using function calling for multi-step reasoning).
+
+#### Response Parsing and Validation
+
+The LLM response is parsed to extract:
+- The main text response.
+- Any function calls requested by the LLM (if function calling is enabled).
+- Structured elements (e.g., suggested actions).
+
+The response is validated to ensure:
+- No sensitive data (full account numbers, SSNs, etc.) appears in the response.
+- The response is coherent and appropriate for the detected intent.
+- Any requested function calls are valid and authorized.
+
+#### Response Formatting
+
+The validated response is formatted for display to the user, including:
+- Concise, natural language text.
+- Optional rich content (e.g., cards displaying account details, buttons for suggested actions).
+- Confidence level, if appropriate (e.g., "I'm about 90% confident that you want to check your balance").
+- Suggested next actions (e.g., "Would you like to [view transactions] [transfer funds]?").
+
+---
+
+### Observability, Logging, and Monitoring
+
+The system implements comprehensive observability to track behavior, identify issues, and support continuous improvement:
+
+#### Structured Logging
+
+For each user message processed, the system logs structured data including:
+- Timestamp and correlation identifier (unique per message, linking logs across all services).
+- User identifier and session identifier.
+- User message text (optionally truncated for privacy).
+- Detected intent, confidence score, and extracted entities.
+- NLU service used and its latency.
+- Tools selected and invoked.
+- Tool invocation parameters (excluding sensitive data) and latencies.
+- Tool invocation results (status, latency, masked data).
+- LLM model, prompt tokens, completion tokens, and latency.
+- Final response generated.
+- User feedback (if any, e.g., thumbs up/down rating).
+
+#### Key Metrics
+
+The system tracks and reports on:
+- **Intent Detection Accuracy**: Percentage of correctly detected intents (evaluated via user feedback or manual review).
+- **Confidence Scores**: Distribution of confidence scores across detected intents, identifying intents with low confidence that may need additional training or refinement.
+- **Tool Success Rate**: Percentage of tool invocations that succeeded vs. failed, identified by tool name and domain.
+- **Latency**: Percentiles (p50, p95, p99) of:
+  - End-to-end message processing time.
+  - Intent detection latency.
+  - Tool execution latency.
+  - LLM response latency.
+- **User Satisfaction**: Ratings, feedback, and engagement metrics (e.g., session length, conversation turns, escalation rate).
+- **Error Rates**: Frequency of errors by type (NLU errors, tool execution errors, LLM errors, etc.).
+
+#### Observability Dashboards
+
+The system provides real-time dashboards and reports showing:
+- Current and historical metrics.
+- Alerts for anomalies (e.g., sudden drop in tool success rate, spike in error rate).
+- Breakdown by intent, tool, time of day, user segment, etc.
+
+---
+
+### Error Handling and Fallback Mechanisms
+
+The system implements multi-layered error handling to ensure robustness and a graceful user experience:
+
+#### Low Confidence Handling
+
+If the primary NLU engine returns a confidence score below a first threshold (e.g., 0.70), the system attempts secondary or tertiary NLU components. If all components return low confidence, the system generates a clarification question asking the user to rephrase or provide more details.
+
+After multiple failed clarifications (e.g., 3 attempts), the system offers to escalate the conversation to a human agent.
+
+#### Tool Execution Failures
+
+If a tool invocation fails (e.g., backend service returns an error), the system:
+- Logs the failure with details (error code, message, timestamp).
+- Attempts to retry the tool call with exponential backoff (e.g., 100ms, 500ms, 2000ms between retries).
+- If retries are exhausted, generates a user-facing message indicating a temporary issue and offering escalation to a human agent.
+
+#### Circuit Breaker Pattern
+
+To prevent cascading failures when a backend service is experiencing outages or degradation, the system implements a circuit breaker:
+- A counter tracks consecutive failures for each backend service.
+- When the failure count exceeds a threshold (e.g., 5 consecutive failures), the circuit opens and further requests to that service are immediately rejected.
+- Requests are retried at intervals (e.g., every 60 seconds) to detect when the service recovers.
+- Upon successful recovery, the circuit closes and normal operation resumes.
+
+#### Fallback Messages
+
+When errors occur, the system provides user-friendly fallback messages, such as:
+- "I'm having trouble accessing that information right now. Please try again in a moment."
+- "I'm experiencing technical difficulties. A human agent will assist you shortly."
+
+The system then routes the conversation to a human agent or a simpler fallback chatbot if available.
+
+#### Escalation to Human Agents
+
+Conversations are escalated to human agents when:
+- Low-confidence intent detection persists after clarification attempts.
+- Tool execution fails repeatedly.
+- The user explicitly requests an agent (e.g., "I want to speak to someone").
+- The detected intent is flagged as sensitive or out-of-scope (e.g., disputes, complaints, or features not yet implemented).
+- The conversation has not reached resolution after a certain duration or number of turns.
+
+Upon escalation, the system provides the human agent with full conversation history, detected intents, extracted context, and any relevant tool outputs to enable efficient handoff.
+
+---
+
+### Multi-Turn Conversation and Context Management
+
+The chat backend maintains conversation history and session state, allowing the AI orchestrator to provide natural multi-turn conversations:
+
+- **Conversation History**: The system stores and retrieves a sliding window of prior messages (e.g., the last 10–20 turns) from the session store.
+- **Context Enrichment**: Prior messages are included in prompts to the LLM, enabling the LLM to refer back to earlier statements and understand evolving user intent.
+- **Entity Persistence**: Entities extracted in earlier turns (e.g., account type, date range) are stored in session context and reused in subsequent turns if applicable.
+- **User Preferences**: User-specific preferences (e.g., preferred language, communication style) are stored and applied across turns.
+
+---
+
+### Configuration and Extensibility
+
+The system is designed for extensibility and domain-agnostic configuration:
+
+#### Intent-to-Tool Mapping Configuration
+
+An intent-to-tool mapping configuration (e.g., a JSON or YAML file) defines:
+```json
 {
-  "username": "customer@example.com",
-  "password": "encrypted_password",
-  "mfaCode": "123456"
-}
-
-Response:
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "sessionId": "sess_abc123",
-  "userId": "user_xyz789",
-  "expiresIn": 3600
-}
-```
-
-**Security Considerations:**
-- Use HTTPS/TLS for all communications
-- Implement token rotation and refresh mechanisms
-- Store session data with encryption at rest
-- Log authentication events for audit trails
-- Rate-limit login attempts to prevent brute force attacks
-
-### 2.2 Accept Customer Input
-
-**Functional Requirements:**
-- Receive natural language queries via REST API or WebSocket
-- Attach session metadata (locale, entitlements, recent activity)
-- Validate input length and content (sanitization)
-- Support multi-turn conversations with context preservation
-- Handle voice-to-text transcription if voice-enabled
-
-**Data Flow:**
-```javascript
-POST /api/chat/message
-Headers:
-  Authorization: Bearer {jwt_token}
-  X-Session-ID: sess_abc123
-
-Body:
-{
-  "message": "What's my checking account balance?",
-  "conversationId": "conv_123",
-  "timestamp": "2025-11-08T10:30:00Z",
-  "metadata": {
-    "channel": "web",
-    "locale": "en-US",
-    "deviceType": "desktop"
-  }
-}
-```
-
-**Best Practices:**
-- Implement input validation and XSS protection
-- Limit message length (typically 500-1000 characters)
-- Preserve conversation history for context (last 10-20 turns)
-- Support file attachments for document-based queries
-- Handle special characters and emoji appropriately
-
-### 2.3 Intent Detection and Entity Extraction
-
-**Functional Requirements:**
-- Classify user intent with confidence scores
-- Extract entities (account types, amounts, dates, card numbers)
-- Normalize ambiguous values (e.g., "last month" → date range)
-- Support multi-intent queries ("Check balance and transfer $100")
-- Fall back to human agent when confidence is low (< 0.70)
-
-**Intent Classification Examples:**
-| User Query | Intent | Entities | Confidence |
-|------------|--------|----------|------------|
-| "What's my balance?" | check.balance | account_type: checking | 0.95 |
-| "Show recent transactions" | view.transactions | timeframe: recent | 0.88 |
-| "I lost my card" | card.lost | card_status: lost | 0.92 |
-| "Transfer $500 to John" | transfer.money | amount: 500, recipient: John | 0.85 |
-
-**Technology Options:**
-- **DialogFlow (Google):** Excellent for structured intents, supports 30+ languages
-- **AWS Lex:** Tight integration with AWS services, good for voice
-- **LUIS (Microsoft):** Strong entity recognition, Azure integration
-- **Rasa:** Open-source, self-hosted, full control over training
-- **OpenAI Function Calling:** Emergent approach using LLM for intent detection
-
-**Hybrid Approach (Recommended):**
-```
-1. Primary NLU (DialogFlow/Lex) → Confidence ≥ 0.70 → Proceed
-2. Secondary NLU (Custom Banking Model) → Confidence ≥ 0.70 → Proceed  
-3. OpenAI Function Calling → Parse intent from context → Proceed
-4. Fallback → Human agent escalation
-```
-
-### 2.4 Workflow Decision Engine
-
-**Decision Tree:**
-```
-┌─────────────────────────────────────────┐
-│ Intent Detected with Confidence Score   │
-└─────────────┬───────────────────────────┘
-              │
-              ├─→ Confidence < 0.70 → Clarification Question
-              │
-              ├─→ Missing Required Entities → Follow-up Questions
-              │                               (Human-in-the-Loop)
-              │
-              ├─→ Actionable + Read-Only → Authorization Check
-              │                             ├─→ Authorized → Execute
-              │                             └─→ Not Authorized → Deny
-              │
-              ├─→ Actionable + Write Operation → Confirmation Required
-              │                                   (Human-in-the-Loop)
-              │                                   ├─→ User Confirms → Execute
-              │                                   └─→ User Cancels → Abort
-              │
-              └─→ Out of Scope → Provide Guidance or Escalate
-```
-
-**Implementation Example:**
-```javascript
-// Workflow decision logic
-function determineWorkflow(intent, confidence, entities, userContext) {
-  // Low confidence → clarification
-  if (confidence < 0.70) {
-    return {
-      action: 'clarify',
-      message: 'I want to make sure I understand. Are you asking about...'
-    };
-  }
-  
-  // Missing required entities → follow-up
-  const required = getRequiredEntities(intent);
-  const missing = required.filter(e => !entities[e]);
-  if (missing.length > 0) {
-    return {
-      action: 'collect_entities',
-      missingEntities: missing,
-      message: generateFollowUpQuestion(missing[0])
-    };
-  }
-  
-  // Check authorization
-  if (!isAuthorized(intent, userContext)) {
-    return {
-      action: 'deny',
-      message: 'You don\'t have permission for this operation.'
-    };
-  }
-  
-  // Write operations require confirmation
-  if (isWriteOperation(intent)) {
-    return {
-      action: 'confirm',
-      message: `You're about to ${getActionDescription(intent)}. Confirm?`,
-      pendingAction: { intent, entities }
-    };
-  }
-  
-  // Read operations proceed directly
-  return {
-    action: 'execute',
-    intent,
-    entities
-  };
-}
-```
-
-### 2.5 Data Retrieval and Enrichment
-
-**Functional Requirements:**
-- Query downstream APIs with least privilege principles
-- Aggregate data from multiple sources (accounts, transactions, KYC)
-- Apply data transformations and calculations
-- Redact or mask PII before passing to LLMs
-- Cache frequently accessed data with appropriate TTL
-
-**API Integration Pattern:**
-```javascript
-// Example: Retrieving account data with PII protection
-async function getEnrichedAccountData(userId, accountType) {
-  // Parallel data retrieval
-  const [accounts, profile, limits] = await Promise.all([
-    bankingAPI.getAccounts(userId),
-    customerAPI.getProfile(userId),
-    complianceAPI.getLimits(userId)
-  ]);
-  
-  // Filter by account type if specified
-  const filtered = accountType 
-    ? accounts.filter(a => a.type === accountType)
-    : accounts;
-  
-  // Mask sensitive data before LLM processing
-  const masked = filtered.map(account => ({
-    accountId: maskAccountNumber(account.accountNumber),
-    type: account.type,
-    balance: account.balance,
-    currency: account.currency,
-    status: account.status,
-    // Exclude: full account number, SSN, etc.
-  }));
-  
-  return {
-    accounts: masked,
-    customerName: profile.firstName, // Safe to include
-    dailyLimit: limits.dailyTransferLimit,
-    // Redacted: profile.ssn, profile.address, etc.
-  };
-}
-```
-
-**Data Sources:**
-- **Core Banking System:** Account balances, transaction history
-- **Card Management System:** Card details, limits, block status
-- **KYC/Compliance:** Customer verification status, sanctions screening
-- **CRM:** Customer preferences, communication history
-- **Fraud Detection:** Risk scores, suspicious activity alerts
-
-**PII Protection Strategy:**
-- **Masking:** Show last 4 digits of account/card numbers
-- **Redaction:** Remove SSN, full address from LLM context
-- **Tokenization:** Replace sensitive IDs with non-reversible tokens
-- **Access Logging:** Record all PII access for compliance audits
-
-### 2.6 LLM / Agent Invocation
-
-**Functional Requirements:**
-- Provide LLM with structured context: intent, entities, retrieved data
-- Include system instructions and safety constraints
-- Use tool-enabled workflows (function calling)
-- Implement prompt templates for consistent responses
-- Apply output parsing and validation
-
-**Prompt Engineering Pattern:**
-```javascript
-// System prompt with instructions and constraints
-const systemPrompt = `You are a banking assistant for SecureBank.
-
-Your role:
-1. Help customers with account inquiries, transactions, and card management
-2. Provide clear, accurate information based on retrieved data
-3. Never fabricate account details or balances
-4. For sensitive operations, explain security implications
-5. Redirect to human agents for complex disputes or complaints
-
-Safety constraints:
-- NEVER share full account numbers or SSNs
-- NEVER execute transfers without explicit user confirmation
-- NEVER provide financial advice or investment recommendations
-- ALWAYS verify user intent before blocking cards or closing accounts
-
-Available tools:
-- banking_get_accounts: Retrieve user account information
-- banking_get_transactions: Get transaction history
-- banking_transfer: Execute fund transfers (requires confirmation)
-- banking_get_cards: Retrieve card details
-- banking_block_card: Block a card (requires confirmation)`;
-
-// User prompt with context
-const userPrompt = `User Question: ${userMessage}
-
-User Context:
-- User ID: ${userId}
-- Detected Intent: ${intent} (confidence: ${confidence})
-- Account Data: ${JSON.stringify(accountData)}
-
-Please help the user with their banking request.`;
-
-// LLM invocation with tool calling
-const response = await openai.chat.completions.create({
-  model: 'gpt-4',
-  messages: [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt }
-  ],
-  tools: toolDefinitions,
-  tool_choice: 'auto',
-  temperature: 0.7,
-  max_tokens: 2000
-});
-```
-
-**Tool-Enabled Workflow Benefits:**
-- **Verification:** LLM calls verified functions rather than generating SQL/API calls
-- **Type Safety:** Tool parameters are validated before execution
-- **Observability:** Tool calls are logged with parameters and results
-- **Controllability:** Tools can enforce business rules and compliance checks
-- **Reliability:** Reduces hallucination by grounding responses in real data
-
-### 2.7 Action Execution and Confirmation
-
-**Functional Requirements:**
-- Execute backend API calls with idempotency keys
-- Implement comprehensive audit logging
-- Allow cancellation for reversible operations
-- Provide clear confirmation messages
-- Handle partial failures gracefully
-
-**Execution Pattern with Audit Trail:**
-```javascript
-async function executeTransfer(transferParams, sessionContext) {
-  const auditLog = {
-    eventType: 'FUND_TRANSFER',
-    userId: sessionContext.userId,
-    sessionId: sessionContext.sessionId,
-    timestamp: new Date().toISOString(),
-    params: transferParams,
-    ipAddress: sessionContext.ipAddress
-  };
-  
-  try {
-    // Idempotency check
-    const existingTransfer = await checkIdempotency(
-      transferParams.idempotencyKey
-    );
-    if (existingTransfer) {
-      return existingTransfer; // Return cached result
-    }
-    
-    // Pre-execution validation
-    await validateTransferLimits(transferParams, sessionContext.userId);
-    await checkAccountBalance(transferParams.fromAccount, transferParams.amount);
-    
-    // Execute transfer
-    const result = await bankingAPI.transfer({
-      ...transferParams,
-      idempotencyKey: transferParams.idempotencyKey
-    });
-    
-    // Log success
-    auditLog.status = 'SUCCESS';
-    auditLog.transactionId = result.transactionId;
-    await auditLogger.log(auditLog);
-    
-    // Send confirmation notification
-    await notificationService.send({
-      userId: sessionContext.userId,
-      type: 'TRANSFER_CONFIRMATION',
-      data: result
-    });
-    
-    return result;
-    
-  } catch (error) {
-    // Log failure
-    auditLog.status = 'FAILED';
-    auditLog.error = error.message;
-    await auditLogger.log(auditLog);
-    
-    throw error;
-  }
-}
-```
-
-**Confirmation Flow for Write Operations:**
-```
-User: "Transfer $500 to my savings"
-   ↓
-Bot: "I'll transfer $500 from your Checking (****1234) to Savings (****5678).
-      Current checking balance: $2,450.00
-      After transfer: $1,950.00
-      
-      Reply 'confirm' to proceed or 'cancel' to abort."
-   ↓
-User: "confirm"
-   ↓
-Bot: "✓ Transfer complete!
-      Transaction ID: TXN-20251108-ABC123
-      $500.00 transferred to Savings
-      New checking balance: $1,950.00"
-```
-
-### 2.8 Response Formatting and Delivery
-
-**Functional Requirements:**
-- Generate concise, user-facing responses
-- Include confidence levels when appropriate
-- Provide recommended next steps
-- Support rich media (cards, buttons, charts)
-- Adapt tone based on user preferences
-
-**Response Structure:**
-```javascript
-{
-  "conversationId": "conv_123",
-  "messageId": "msg_456",
-  "timestamp": "2025-11-08T10:35:00Z",
-  "response": {
-    "text": "Your checking account balance is $2,450.00",
-    "confidence": 0.95,
-    "intent": "check.balance",
-    "richContent": {
-      "type": "account_card",
-      "data": {
-        "accountType": "Checking",
-        "accountNumber": "****1234",
-        "balance": 2450.00,
-        "currency": "USD",
-        "lastUpdated": "2025-11-08T10:30:00Z"
-      }
+  "intents": {
+    "check.balance": {
+      "tools": ["domain_get_accounts", "domain_get_balance"],
+      "requiresConfirmation": false,
+      "description": "Retrieve account balance"
     },
-    "suggestedActions": [
-      {
-        "label": "View transactions",
-        "action": "view_transactions",
-        "payload": { "accountId": "acc_1234" }
-      },
-      {
-        "label": "Transfer funds",
-        "action": "transfer_funds"
-      }
-    ]
-  },
-  "metadata": {
-    "processingTime": 245,
-    "toolsCalled": ["banking_get_accounts"],
-    "llmProvider": "openai",
-    "promptTokens": 450,
-    "completionTokens": 85
-  }
-}
-```
-
-**Tone and Personalization:**
-- **Formal:** For regulatory disclosures, error messages
-- **Friendly:** For routine inquiries, confirmations
-- **Empathetic:** For disputes, card loss, fraud alerts
-- **Concise:** For mobile users, voice interactions
-- **Detailed:** For complex transactions, statements
-
----
-
-## 3. Non-Functional Requirements
-
----
-
-## 3. Non-Functional Requirements
-
-### 3.1 Security, Compliance, and Auditing
-
-**Authentication & Authorization:**
-- Implement OAuth 2.0 or OpenID Connect for authentication
-- Use JWT tokens with short expiration (15-60 minutes)
-- Support token refresh mechanisms
-- Implement role-based access control (RBAC)
-- Apply principle of least privilege for API access
-
-**Data Protection:**
-```javascript
-// Encryption configuration
-const securityConfig = {
-  encryption: {
-    algorithm: 'AES-256-GCM',
-    atRest: true,  // Encrypt database records
-    inTransit: true // TLS 1.3 for all communications
-  },
-  tokenization: {
-    enabled: true,
-    fields: ['accountNumber', 'cardNumber', 'ssn']
-  },
-  piiProtection: {
-    maskInLogs: true,
-    maskInLLMContext: true,
-    retentionDays: 90 // GDPR compliance
-  }
-};
-```
-
-**Audit Trail Requirements:**
-- Log all authentication attempts (success and failure)
-- Record all tool executions with parameters
-- Track all data access (who, what, when, from where)
-- Maintain immutable audit logs for 7 years (regulatory requirement)
-- Support audit log export for compliance reviews
-
-**Compliance Frameworks:**
-- **GDPR:** Right to erasure, data portability, consent management
-- **PCI DSS:** Card data protection, secure transmission
-- **SOC 2:** Security, availability, confidentiality controls
-- **GLBA:** Financial privacy, safeguard requirements
-- **CCPA:** Consumer privacy rights, data disclosure
-
-### 3.2 Error Handling and Safe Fallbacks
-
-**Error Classification:**
-```javascript
-const errorHandling = {
-  // Low confidence → clarification
-  lowConfidence: {
-    threshold: 0.70,
-    response: "I want to make sure I understand correctly. Could you rephrase?"
-  },
-  
-  // API failures → graceful degradation
-  apiFailure: {
-    maxRetries: 3,
-    backoffMs: [100, 500, 2000],
-    fallbackResponse: "I'm having trouble accessing that information. Please try again or contact support."
-  },
-  
-  // LLM errors → safe default
-  llmError: {
-    timeout: 30000, // 30 seconds
-    fallback: "I'm experiencing technical difficulties. A human agent will assist you shortly."
-  },
-  
-  // Tool execution failures → rollback
-  toolFailure: {
-    rollback: true,
-    notifyUser: true,
-    escalateToHuman: true
-  }
-};
-```
-
-**Escalation to Human Agents:**
-- Automatically escalate after 3 failed clarification attempts
-- Escalate for compliance-sensitive queries (disputes, fraud)
-- Escalate when user explicitly requests "speak to agent"
-- Provide context handoff to human agents (conversation history, intent)
-
-**Circuit Breaker Pattern:**
-```javascript
-// Prevent cascading failures
-class CircuitBreaker {
-  constructor(threshold = 5, timeout = 60000) {
-    this.failureCount = 0;
-    this.threshold = threshold;
-    this.timeout = timeout;
-    this.state = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
-  }
-  
-  async execute(apiCall) {
-    if (this.state === 'OPEN') {
-      throw new Error('Service temporarily unavailable');
-    }
-    
-    try {
-      const result = await apiCall();
-      this.onSuccess();
-      return result;
-    } catch (error) {
-      this.onFailure();
-      throw error;
-    }
-  }
-  
-  onSuccess() {
-    this.failureCount = 0;
-    this.state = 'CLOSED';
-  }
-  
-  onFailure() {
-    this.failureCount++;
-    if (this.failureCount >= this.threshold) {
-      this.state = 'OPEN';
-      setTimeout(() => this.state = 'HALF_OPEN', this.timeout);
+    "transfer.money": {
+      "tools": ["domain_get_accounts", "domain_transfer"],
+      "requiresConfirmation": true,
+      "description": "Execute fund transfer"
     }
   }
 }
 ```
 
-### 3.3 Observability and Continuous Improvement
+#### Prompt Template Configuration
 
-**Monitoring Metrics:**
-```javascript
-const monitoringMetrics = {
-  // Intent accuracy
-  intentDetection: {
-    accuracy: 0.85,        // Correct intent / total queries
-    confidence: 0.78,      // Average confidence score
-    fallbackRate: 0.15     // Fallback responses / total
-  },
-  
-  // Action success rates
-  toolExecution: {
-    successRate: 0.95,     // Successful executions / attempts
-    avgLatency: 245,       // Milliseconds
-    errorRate: 0.05        // Failed executions / attempts
-  },
-  
-  // User experience
-  userSatisfaction: {
-    thumbsUp: 892,
-    thumbsDown: 108,
-    resolutionRate: 0.82,  // Resolved / total conversations
-    escalationRate: 0.18   // Escalated to human / total
-  },
-  
-  // System performance
-  systemHealth: {
-    uptime: 0.9995,        // 99.95% SLA
-    p50Latency: 180,       // Median response time (ms)
-    p95Latency: 450,       // 95th percentile
-    p99Latency: 1200       // 99th percentile
-  }
-};
+Prompt templates can be stored in configuration files and versioned:
+```
+system_prompt_banking_v1:
+  "You are a banking assistant for SecureBank. Help customers with account inquiries, transactions, and card management. Never share full account numbers or SSNs."
+
+user_prompt_balance_inquiry_v1:
+  "The user asked: {userMessage}. Their checking account shows: {accountData}. Provide a clear response."
 ```
 
-**Logging Strategy:**
-```javascript
-// Structured logging with correlation IDs
-logger.info('Intent detected', {
-  correlationId: 'req_abc123',
-  userId: 'user_xyz789',
-  sessionId: 'sess_456',
-  intent: 'check.balance',
-  confidence: 0.92,
-  processingTime: 45,
-  toolsCalled: ['banking_get_accounts'],
-  timestamp: '2025-11-08T10:30:00Z'
-});
+#### Tool Registry Configuration
 
-// PII-safe logging (mask sensitive data)
-logger.info('Tool execution', {
-  correlationId: 'req_abc123',
-  tool: 'banking_get_accounts',
-  params: {
-    userId: 'user_xyz789',
-    accountType: 'checking'
-    // Excluded: account numbers, balances
-  },
-  result: {
-    accountsFound: 2,
-    // Excluded: actual account data
-  }
-});
-```
-
-**Continuous Improvement Workflow:**
-1. **Collect Feedback:** Thumbs up/down, explicit ratings, conversation outcomes
-2. **Analyze Patterns:** Identify common fallback scenarios, low-confidence intents
-3. **Refine NLU:** Add training examples for misclassified intents
-4. **Optimize Prompts:** A/B test different system prompts for better responses
-5. **Update Tools:** Add new tools or modify existing ones based on usage patterns
-6. **Monitor Impact:** Track metrics before and after changes
-
-**A/B Testing Framework:**
-```javascript
-// Experiment configuration
-const experiment = {
-  name: 'transaction_prompt_v2',
-  variants: [
+The MCP tool registry can be configured to expose or hide tools based on feature flags, user roles, or gradual rollout strategies:
+```json
+{
+  "tools": [
     {
-      id: 'control',
-      weight: 0.5,
-      promptTemplate: 'transaction_history_v1'
+      "name": "domain_get_accounts",
+      "description": "Retrieve user accounts",
+      "enabled": true,
+      "schema": { ... }
     },
     {
-      id: 'treatment',
-      weight: 0.5,
-      promptTemplate: 'transaction_history_v2'
+      "name": "domain_experimental_feature",
+      "description": "New experimental feature",
+      "enabled": false,
+      "featureFlagKey": "enable_experimental_X"
     }
-  ],
-  metrics: ['userSatisfaction', 'responseAccuracy', 'conversationLength'],
-  duration: 14 // days
-};
-
-// Variant assignment
-function getVariant(userId, experimentName) {
-  const hash = hashCode(userId + experimentName);
-  const bucket = hash % 100;
-  return bucket < 50 ? 'control' : 'treatment';
+  ]
 }
 ```
 
 ---
 
-## 4. System Architecture & Technology Choices
+## Claims
+
+### Preamble
+
+The following claims define the scope of the invention. Independent claims are numbered first, followed by dependent claims. The invention is not limited to the specific embodiments described but extends to all systems and methods meeting the claim language.
 
 ---
 
-## 4. System Architecture & Technology Choices
+### Claims
 
-### 4.1 High-Level Architecture
+**1. A system for providing task-oriented conversational services**, comprising:
 
-Our proof-of-concept implementation uses a microservices architecture with clear separation of concerns:
+- a chat frontend configured to receive user messages and present chatbot responses;
+- a chat backend configured to authenticate users, manage chat sessions, and forward user messages and associated session context;
+- an artificial intelligence (AI) orchestrator configured to:
+  - (i) receive user messages and session context from the chat backend;
+  - (ii) determine a user intent and one or more entities using at least one natural language understanding (NLU) component;
+  - (iii) select at least one tool corresponding to the user intent from a tool registry;
+  - (iv) invoke the at least one tool via a Model Context Protocol (MCP) service layer; and
+  - (v) generate a natural language response based on outputs from the at least one tool and the user message using a large language model (LLM);
+- an MCP service layer configured to expose the at least one tool to the AI orchestrator via a standardized protocol, validate input parameters against a schema, and invoke one or more backend domain services; and
+- a plurality of backend domain services configured to perform domain-specific functions,
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend Layer                          │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  React Chat UI (Material-UI Components)                  │   │
-│  │  - Message thread display                                │   │
-│  │  - User input handling                                    │   │
-│  │  - Session management                                     │   │
-│  │  - Rich content rendering (cards, buttons)               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ HTTPS/WebSocket
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Chat Backend Layer                         │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Chat Backend Service (Express.js)                       │   │
-│  │  - Session validation                                    │   │
-│  │  - Message routing                                       │   │
-│  │  - Conversation history management                       │   │
-│  │  - WebSocket connection handling                         │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ REST API
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AI Orchestration Layer                       │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  AI Orchestrator (LangGraph Workflow)                    │   │
-│  │  ┌────────────┐  ┌────────────┐  ┌──────────────┐       │   │
-│  │  │  Intent    │→ │   Tool     │→ │   Response   │       │   │
-│  │  │  Analysis  │  │ Execution  │  │  Generation  │       │   │
-│  │  └────────────┘  └────────────┘  └──────────────┘       │   │
-│  │                                                           │   │
-│  │  - Prompt template management                            │   │
-│  │  - OpenAI GPT-4 integration                              │   │
-│  │  - Workflow state management                             │   │
-│  │  - Context enrichment                                    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└──────────┬────────────────────────────┬─────────────────────────┘
-           │                            │
-           ▼                            ▼
-┌──────────────────────┐   ┌───────────────────────────────────┐
-│   NLU Service        │   │   MCP Service Layer               │
-│  ┌────────────────┐  │   │  ┌─────────────────────────────┐  │
-│  │  DialogFlow    │  │   │  │  MCP Host Server            │  │
-│  │  Integration   │  │   │  │  - Tool registry            │  │
-│  └────────────────┘  │   │  │  - Parameter validation     │  │
-│  ┌────────────────┐  │   │  │  - Execution orchestration  │  │
-│  │  Banking NLU   │  │   │  └─────────────────────────────┘  │
-│  │  (Custom)      │  │   │                                   │
-│  └────────────────┘  │   │  Available Tools (24):            │
-│                      │   │  - banking_get_accounts           │
-│  - Intent detection  │   │  - banking_get_balance            │
-│  - Entity extraction │   │  - banking_get_transactions       │
-│  - Confidence scoring│   │  - banking_transfer               │
-└──────────────────────┘   │  - banking_get_cards              │
-                           │  - banking_block_card             │
-                           │  - banking_unblock_card           │
-                           │  - banking_replace_card           │
-                           │  - banking_create_dispute         │
-                           │  - banking_get_disputes           │
-                           │  - banking_get_statements         │
-                           │  - banking_update_profile         │
-                           │  - ... and 12 more                │
-                           └───────────────┬───────────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Banking Services Layer                     │
-│  ┌────────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Account       │  │ Transaction  │  │  Card           │     │
-│  │  Service       │  │ Service      │  │  Service        │     │
-│  └────────────────┘  └──────────────┘  └──────────────────┘    │
-│  ┌────────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Customer      │  │  Compliance  │  │  Notification   │     │
-│  │  Service       │  │  Service     │  │  Service        │     │
-│  └────────────────┘  └──────────────┘  └──────────────────┘    │
-│                                                                 │
-│  - PostgreSQL database for account data                        │
-│  - Redis cache for session management                          │
-│  - MongoDB for audit logs                                      │
-└─────────────────────────────────────────────────────────────────┘
-```
+wherein conversational logic executed by the AI orchestrator is decoupled from business logic implemented by the backend domain services.
 
-### 4.2 Technology Stack
+**2. The system of claim 1**, wherein the domain-specific functions comprise at least one of: account management, order management, ticket management, profile management, subscription management, or device management.
 
-#### 4.2.1 Frontend
-**React with Material-UI**
-- **Why React:** Component-based architecture, large ecosystem, excellent TypeScript support
-- **Material-UI:** Pre-built accessible components, consistent design system
-- **State Management:** React Context API for session state, local state for UI
-- **Real-time Updates:** WebSocket connection for streaming responses
+**3. The system of claim 1**, wherein the AI orchestrator is further configured to invoke a plurality of NLU components in a hybrid sequence, including:
+- a first NLU engine configured to detect known intents;
+- a second, domain-specific NLU model configured to refine or supplement the detected intent; and
+- an LLM-based function-calling component configured to determine intent and entities when the first NLU engine and the second NLU model return confidence scores below a threshold.
 
-```jsx
-// Example: Chat message component
-import { Box, TextField, Button, Paper } from '@mui/material';
+**4. The system of claim 1**, wherein the tool registry exposed by the MCP service layer comprises a plurality of tools each described by:
+- a name,
+- a textual description, and
+- a JSON schema defining required and optional input parameters,
 
-function ChatInterface() {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  
-  const sendMessage = async () => {
-    const response = await fetch('/api/chat/message', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ message: input })
-    });
-    
-    const data = await response.json();
-    setMessages([...messages, { role: 'user', text: input }, 
-                               { role: 'assistant', text: data.response.text }]);
-    setInput('');
-  };
-  
-  return (
-    <Box>
-      <Paper>{/* Message history */}</Paper>
-      <TextField value={input} onChange={(e) => setInput(e.target.value)} />
-      <Button onClick={sendMessage}>Send</Button>
-    </Box>
-  );
-}
-```
+and wherein the MCP service layer is configured to reject tool invocations that fail schema validation.
 
-#### 4.2.2 Intent Detection & NLU
+**5. The system of claim 1**, wherein the MCP service layer is configured to apply masking or redaction policies to sensitive fields in tool outputs prior to providing the outputs to the AI orchestrator for inclusion in prompts to the LLM.
 
-**Option 1: DialogFlow (Google Cloud)**
-- **Pros:** 
-  - Excellent intent classification accuracy (85-90%)
-  - Built-in entity extraction
-  - Multi-language support (30+ languages)
-  - Easy to train with conversational examples
-  - Integration with Google Cloud ecosystem
-  
-- **Cons:**
-  - Vendor lock-in
-  - Cost scales with usage
-  - Limited customization of NLU model
-  
-- **Best For:** Production deployments requiring high accuracy and multi-language support
+**6. The system of claim 1**, wherein the AI orchestrator is implemented using a graph-based workflow engine defining:
+- a plurality of nodes including at least an intent analysis node, a tool execution node, and a response generation node, and
+- a plurality of edges defining execution order between the plurality of nodes.
 
-**Implementation:**
-```javascript
-const dialogflow = require('@google-cloud/dialogflow');
+**7. The system of claim 1**, wherein the chat backend is further configured to:
+- associate each user message with a conversation identifier and a session identifier, and
+- store conversation history in a session store accessible by the AI orchestrator to provide multi-turn conversational context.
 
-async function detectIntent(text, sessionId) {
-  const sessionClient = new dialogflow.SessionsClient();
-  const sessionPath = sessionClient.projectAgentSessionPath(
-    projectId, 
-    sessionId
-  );
-  
-  const request = {
-    session: sessionPath,
-    queryInput: {
-      text: {
-        text: text,
-        languageCode: 'en-US',
-      },
-    },
-  };
-  
-  const [response] = await sessionClient.detectIntent(request);
-  return {
-    intent: response.queryResult.intent.displayName,
-    confidence: response.queryResult.intentDetectionConfidence,
-    entities: response.queryResult.parameters.fields
-  };
-}
-```
+**8. The system of claim 1**, further comprising a logging subsystem configured to record, for each processed user message, at least one of:
+- a detected intent,
+- a confidence score,
+- tools invoked,
+- latencies for NLU, tool execution, and LLM calls, and
+- a correlation identifier linking logs across services.
 
-**Option 2: AWS Lex**
-- **Pros:**
-  - Native AWS integration
-  - Good voice support
-  - Automatic speech recognition (ASR)
-  - Pay-per-request pricing
-  
-- **Cons:**
-  - Less accurate than DialogFlow for text-based intents
-  - Steeper learning curve
-  
-- **Best For:** AWS-heavy environments, voice-enabled chatbots
+**9. The system of claim 1**, wherein the AI orchestrator is further configured to:
+- determine that a selected intent corresponds to a write operation that modifies state in at least one backend domain service, and
+- in response, generate a confirmation message and require explicit user confirmation before invoking the at least one tool associated with the write operation.
 
-**Option 3: Custom Banking NLU Model**
-- **Pros:**
-  - Full control over training data
-  - Domain-specific optimization
-  - No vendor lock-in
-  - Can run on-premise
-  
-- **Cons:**
-  - Requires ML expertise
-  - Ongoing maintenance burden
-  - Training data collection effort
-  
-- **Implementation Stack:**
-  - **Training:** Python + scikit-learn or TensorFlow
-  - **Serving:** FastAPI or Flask
-  - **Model:** BERT-based classifier fine-tuned on banking queries
+**10. The system of claim 1**, wherein the AI orchestrator is further configured to escalate a conversation to a human agent upon detecting at least one of:
+- a sequence of low-confidence intents exceeding a predetermined count,
+- repeated tool failures,
+- a user request for escalation, or
+- a compliance-sensitive intent (e.g., fraud dispute or complaint).
 
-```python
-# Example: Custom NLU model
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
+**11. The system of claim 1**, wherein the backend domain services comprise a financial services domain, and wherein the domain-specific functions include at least one of:
+- retrieving financial account information,
+- retrieving transaction history,
+- executing fund transfers, or
+- managing payment cards.
 
-class BankingNLU:
-    def __init__(self, model_path):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
-        self.intents = [
-            'check.balance', 'view.transactions', 'transfer.money',
-            'card.block', 'card.lost', 'dispute.transaction'
-        ]
-    
-    def predict(self, text):
-        inputs = self.tokenizer(text, return_tensors='pt', padding=True)
-        outputs = self.model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-        confidence, idx = torch.max(probs, dim=-1)
-        
-        return {
-            'intent': self.intents[idx.item()],
-            'confidence': confidence.item()
-        }
-```
+**12. The system of claim 11**, wherein the MCP service layer exposes tools configured to:
+- retrieve financial accounts,
+- retrieve financial transactions,
+- execute fund transfers, and
+- block or replace payment cards,
 
-**Option 4: OpenAI Function Calling**
-- **Pros:**
-  - Zero training required
-  - Excellent at understanding complex queries
-  - Handles multi-intent scenarios naturally
-  - Continuous improvement as GPT models evolve
-  
-- **Cons:**
-  - Higher latency (200-500ms)
-  - Cost per request ($0.001 - $0.01 depending on model)
-  - Requires careful prompt engineering
-  
-- **Best For:** Rapid prototyping, handling edge cases, fallback when traditional NLU fails
+and wherein outputs from such tools are masked to reveal only partial account or card numbers to the LLM.
 
-**Recommended Hybrid Approach:**
-```javascript
-async function detectIntentHybrid(userMessage, context) {
-  // Stage 1: Try DialogFlow (fast, accurate for trained intents)
-  const dialogflowResult = await dialogflow.detectIntent(userMessage, context.sessionId);
-  
-  if (dialogflowResult.confidence >= 0.70) {
-    return {
-      source: 'dialogflow',
-      ...dialogflowResult
-    };
-  }
-  
-  // Stage 2: Try custom banking NLU
-  const bankingNLU = await customNLU.predict(userMessage);
-  
-  if (bankingNLU.confidence >= 0.70) {
-    return {
-      source: 'banking_nlu',
-      ...bankingNLU
-    };
-  }
-  
-  // Stage 3: Fallback to OpenAI function calling
-  const openAIResult = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      { 
-        role: 'system', 
-        content: 'Extract intent and entities from banking queries' 
-      },
-      { role: 'user', content: userMessage }
-    ],
-    functions: intentFunctionDefinitions
-  });
-  
-  return {
-    source: 'openai',
-    intent: openAIResult.choices[0].function_call.name,
-    entities: JSON.parse(openAIResult.choices[0].function_call.arguments),
-    confidence: 0.85 // Assumed confidence for LLM-based detection
-  };
-}
-```
+**13. The system of claim 1**, wherein the backend domain services comprise an e-commerce domain, and wherein the domain-specific functions include at least one of:
+- searching products,
+- retrieving product details,
+- checking order status,
+- modifying orders, or
+- initiating returns.
 
-#### 4.2.3 Workflow Orchestration - LangGraph
+**14. The system of claim 1**, wherein the backend domain services comprise a support or ticketing domain, and wherein the domain-specific functions include at least one of:
+- creating support tickets,
+- retrieving ticket status,
+- searching a knowledge base, or
+- escalating to human agents.
 
-**Why LangGraph:**
-- **Stateful workflows:** Maintain conversation context across turns
-- **Graph-based execution:** Clear visualization of decision flows
-- **Built-in checkpointing:** Resume interrupted conversations
-- **Tool integration:** Native support for function calling
-- **Debugging support:** Step-through execution, state inspection
+**15. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code.
 
-**Alternative Options:**
-| Tool | Pros | Cons | Best For |
-|------|------|------|----------|
-| **LangChain** | Mature ecosystem, many integrations | Less control over workflow | Simple linear chains |
-| **Semantic Kernel** | Microsoft backing, C# support | Newer, smaller community | .NET environments |
-| **Haystack** | Production-ready, RAG-focused | Steeper learning curve | Document search + chat |
-| **Custom State Machine** | Full control, no dependencies | More code to maintain | Specific requirements |
+**16. The system of claim 1**, wherein the AI orchestrator is further configured to:
+- maintain multiple prompt templates associated with a given intent, and
+- select among the multiple prompt templates according to an experiment configuration for A/B testing based on user identifiers or sessions,
 
-**LangGraph Implementation:**
-```javascript
-const { StateGraph, END } = require('@langchain/langgraph');
-const { OpenAI } = require('@langchain/openai');
+and wherein metrics collected during operation are used to update the experiment configuration.
 
-// Define conversation state
-const conversationState = {
-  messages: [],
-  intent: null,
-  entities: {},
-  toolResults: {},
-  response: null
-};
+**17. A computer-implemented method for providing task-oriented conversational services**, comprising:
 
-// Create workflow graph
-const workflow = new StateGraph({
-  channels: conversationState
-});
+- receiving, at a chat backend, a user message from a chat frontend together with authentication information;
+- validating the authentication information and associating the user message with a session context;
+- sending the user message and session context to an AI orchestrator;
+- determining, by the AI orchestrator, a user intent and one or more entities using at least one natural language understanding component;
+- selecting, based on the user intent, at least one tool from a plurality of tools exposed via a Model Context Protocol (MCP) service layer;
+- invoking, via the MCP service layer, the at least one tool to perform a domain-specific function using one or more backend domain services;
+- receiving, at the AI orchestrator, output data from the at least one tool;
+- constructing a prompt including at least the user message, the output data, and one or more safety instructions;
+- invoking a large language model using the constructed prompt to generate a natural language response; and
+- returning the natural language response to the chat frontend for display to the user.
 
-// Add nodes
-workflow.addNode('analyze_intent', async (state) => {
-  const intent = await detectIntent(state.messages[state.messages.length - 1]);
-  return { ...state, intent: intent.intent, entities: intent.entities };
-});
+**18. The method of claim 17**, further comprising masking or redacting, prior to constructing the prompt, one or more sensitive fields in the output data according to domain-specific policies to prevent exposure of full account numbers, full card numbers, or government identifiers to the large language model.
 
-workflow.addNode('execute_tools', async (state) => {
-  const tools = getToolsForIntent(state.intent);
-  const results = await executeTools(tools, state.entities, state.context);
-  return { ...state, toolResults: results };
-});
+**19. The method of claim 17**, further comprising:
+- determining that a confidence score associated with the user intent is below a threshold, and
+- in response, transmitting a clarification question to the chat frontend requesting additional information from the user.
 
-workflow.addNode('generate_response', async (state) => {
-  const prompt = buildPrompt(state.intent, state.toolResults, state.entities);
-  const llm = new OpenAI({ modelName: 'gpt-4', temperature: 0.7 });
-  const response = await llm.call(prompt);
-  return { ...state, response: response.text };
-});
+**20. The method of claim 17**, wherein selecting the at least one tool comprises:
+- consulting a configuration mapping from intent labels to sets of tools, and
+- determining a subset of tools based on available entities and authorization data associated with the session context.
 
-// Define edges (workflow flow)
-workflow.addEdge('analyze_intent', 'execute_tools');
-workflow.addEdge('execute_tools', 'generate_response');
-workflow.addEdge('generate_response', END);
+**21. The method of claim 17**, further comprising, in response to detecting that the user intent corresponds to a write operation:
+- generating a confirmation message describing the operation and its impact;
+- transmitting the confirmation message to the user; and
+- proceeding to invoke the at least one tool only upon receiving an explicit confirmation input from the user.
 
-// Set entry point
-workflow.setEntryPoint('analyze_intent');
+**22. The method of claim 17**, further comprising logging, for each invocation of the at least one tool:
+- the tool name,
+- invocation time,
+- latency,
+- result status, and
+- a correlation identifier linking the invocation with the user message.
 
-// Compile and run
-const app = workflow.compile();
-const result = await app.invoke({
-  messages: [{ role: 'user', content: 'What is my balance?' }]
-});
-```
+**23. The method of claim 17**, further comprising:
+- detecting repeated failures or timeouts when invoking the at least one tool,
+- opening a circuit breaker condition in which further invocations of one or more affected backend domain services are temporarily suspended, and
+- providing the user with a fallback message or routing to a human agent.
 
-#### 4.2.4 Data Retrieval and Enrichment
+**24. The method of claim 17**, further comprising:
+- maintaining conversation history in a session store,
+- including relevant prior messages from the conversation history in the constructed prompt to provide multi-turn conversational context.
 
-**Backend Services Architecture:**
-```javascript
-// poc-banking-service: Express.js REST API
-const express = require('express');
-const app = express();
+**25. The method of claim 17**, wherein determining a user intent comprises:
+- invoking a first NLU engine and receiving a confidence score;
+- if the confidence score is above a first threshold, accepting the detected intent;
+- if the confidence score is below the first threshold, invoking a second, domain-specific NLU model; and
+- if the second NLU model returns a low confidence score, invoking an LLM-based function-calling component to extract intent and entities.
 
-// Account endpoints
-app.get('/api/accounts/:userId', async (req, res) => {
-  const accounts = await db.query(
-    'SELECT * FROM accounts WHERE user_id = $1',
-    [req.params.userId]
-  );
-  res.json(accounts.rows);
-});
+**26. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of any of claims 17–25.
 
-// Transaction endpoints
-app.get('/api/transactions/:accountId', async (req, res) => {
-  const { startDate, endDate, limit = 50 } = req.query;
-  const transactions = await db.query(
-    `SELECT * FROM transactions 
-     WHERE account_id = $1 
-     AND transaction_date BETWEEN $2 AND $3
-     ORDER BY transaction_date DESC
-     LIMIT $4`,
-    [req.params.accountId, startDate, endDate, limit]
-  );
-  res.json(transactions.rows);
-});
+**27. The method of claim 17**, wherein the domain-specific function is a financial services function, and the method further comprises:
+- retrieving financial account information,
+- retrieving transaction history,
+- executing fund transfers, or
+- managing payment cards.
 
-// Card endpoints
-app.get('/api/cards/:userId', async (req, res) => {
-  const cards = await db.query(
-    'SELECT * FROM cards WHERE user_id = $1 AND status != \'CLOSED\'',
-    [req.params.userId]
-  );
-  res.json(cards.rows);
-});
+**28. The method of claim 17**, wherein the domain-specific function is an e-commerce function, and the method further comprises:
+- searching for products,
+- checking order status,
+- modifying orders, or
+- initiating returns.
 
-app.post('/api/cards/:cardId/block', async (req, res) => {
-  await db.query(
-    'UPDATE cards SET status = \'BLOCKED\', blocked_at = NOW() WHERE card_id = $1',
-    [req.params.cardId]
-  );
-  res.json({ success: true, message: 'Card blocked successfully' });
-});
-```
+**29. The method of claim 17**, wherein the domain-specific function is a support or ticketing function, and the method further comprises:
+- creating support tickets,
+- retrieving ticket status,
+- searching a knowledge base, or
+- escalating to human agents.
 
-**Database Schema (PostgreSQL):**
-```sql
--- Users table
-CREATE TABLE users (
-  user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  first_name VARCHAR(100),
-  last_name VARCHAR(100),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Accounts table
-CREATE TABLE accounts (
-  account_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(user_id),
-  account_number VARCHAR(20) UNIQUE NOT NULL,
-  account_type VARCHAR(50) NOT NULL, -- CHECKING, SAVINGS, MONEY_MARKET
-  balance DECIMAL(15, 2) DEFAULT 0.00,
-  currency VARCHAR(3) DEFAULT 'USD',
-  status VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, SUSPENDED, CLOSED
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Transactions table
-CREATE TABLE transactions (
-  transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id UUID REFERENCES accounts(account_id),
-  transaction_type VARCHAR(50) NOT NULL, -- DEBIT, CREDIT, TRANSFER
-  amount DECIMAL(15, 2) NOT NULL,
-  description TEXT,
-  merchant VARCHAR(255),
-  category VARCHAR(50),
-  transaction_date TIMESTAMP DEFAULT NOW(),
-  balance_after DECIMAL(15, 2),
-  status VARCHAR(20) DEFAULT 'COMPLETED' -- PENDING, COMPLETED, FAILED
-);
-
--- Cards table
-CREATE TABLE cards (
-  card_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(user_id),
-  card_number VARCHAR(16) UNIQUE NOT NULL,
-  card_type VARCHAR(20) NOT NULL, -- DEBIT, CREDIT
-  expiry_date DATE NOT NULL,
-  cvv VARCHAR(3) NOT NULL,
-  status VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, BLOCKED, EXPIRED
-  daily_limit DECIMAL(10, 2) DEFAULT 5000.00,
-  blocked_at TIMESTAMP,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create indexes for performance
-CREATE INDEX idx_accounts_user_id ON accounts(user_id);
-CREATE INDEX idx_transactions_account_id ON transactions(account_id);
-CREATE INDEX idx_transactions_date ON transactions(transaction_date DESC);
-CREATE INDEX idx_cards_user_id ON cards(user_id);
-```
-
-#### 4.2.5 Model Context Protocol (MCP) - The Game Changer
-
-**What is MCP?**
-The Model Context Protocol is an open standard developed by Anthropic that provides a universal way for AI systems to securely connect to data sources and tools. Think of it as "USB for AI" - a standardized interface that works across different LLM providers and applications.
-
-**MCP Architecture:**
-```
-┌─────────────────────────────────────────────────┐
-│           AI Application (LLM Host)             │
-│  ┌───────────────────────────────────────────┐  │
-│  │  LangGraph / OpenAI / Anthropic Claude    │  │
-│  └─────────────────┬───────────────────────────┘  │
-│                    │                             │
-│                    ▼                             │
-│  ┌───────────────────────────────────────────┐  │
-│  │       MCP Client (Protocol Handler)       │  │
-│  └─────────────────┬───────────────────────────┘  │
-└────────────────────┼─────────────────────────────┘
-                     │ JSON-RPC over stdio/HTTP
-                     ▼
-┌─────────────────────────────────────────────────┐
-│           MCP Server (Tool Provider)            │
-│  ┌───────────────────────────────────────────┐  │
-│  │         Tool Registry & Router            │  │
-│  │  - Discover available tools               │  │
-│  │  - Validate parameters                    │  │
-│  │  - Execute tool functions                 │  │
-│  │  - Return structured results              │  │
-│  └───────────────────────────────────────────┘  │
-│                                                 │
-│  Available Tools:                               │
-│  ┌─────────────┐ ┌──────────────┐ ┌──────────┐ │
-│  │  Banking    │ │  Customer    │ │  Card    │ │
-│  │  Tools      │ │  Tools       │ │  Tools   │ │
-│  └─────────────┘ └──────────────┘ └──────────┘ │
-└─────────────────────────────────────────────────┘
-```
-
-**MCP Server Implementation:**
-```javascript
-// poc-mcp-service/server.js
-const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-
-class BankingMCPServer {
-  constructor() {
-    this.server = new Server({
-      name: 'banking-mcp-server',
-      version: '1.0.0'
-    }, {
-      capabilities: {
-        tools: {},
-        resources: {}
-      }
-    });
-    
-    this.setupToolHandlers();
-  }
-  
-  setupToolHandlers() {
-    // Register tool: Get accounts
-    this.server.setRequestHandler('tools/list', async () => {
-      return {
-        tools: [
-          {
-            name: 'banking_get_accounts',
-            description: 'Retrieve all bank accounts for a user',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                userId: {
-                  type: 'string',
-                  description: 'User ID to fetch accounts for'
-                },
-                accountType: {
-                  type: 'string',
-                  enum: ['CHECKING', 'SAVINGS', 'MONEY_MARKET'],
-                  description: 'Optional filter by account type'
-                }
-              },
-              required: ['userId']
-            }
-          },
-          {
-            name: 'banking_get_transactions',
-            description: 'Retrieve transaction history for an account',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                accountId: {
-                  type: 'string',
-                  description: 'Account ID to fetch transactions for'
-                },
-                startDate: {
-                  type: 'string',
-                  format: 'date',
-                  description: 'Start date for transaction range'
-                },
-                endDate: {
-                  type: 'string',
-                  format: 'date',
-                  description: 'End date for transaction range'
-                },
-                limit: {
-                  type: 'number',
-                  default: 50,
-                  description: 'Maximum number of transactions to return'
-                }
-              },
-              required: ['accountId']
-            }
-          },
-          {
-            name: 'banking_block_card',
-            description: 'Block a card (for lost/stolen cards)',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                cardId: {
-                  type: 'string',
-                  description: 'Card ID to block'
-                },
-                reason: {
-                  type: 'string',
-                  enum: ['LOST', 'STOLEN', 'DAMAGED', 'FRAUD'],
-                  description: 'Reason for blocking the card'
-                }
-              },
-              required: ['cardId', 'reason']
-            }
-          }
-          // ... 21 more tools
-        ]
-      };
-    });
-    
-    // Handle tool execution
-    this.server.setRequestHandler('tools/call', async (request) => {
-      const { name, arguments: args } = request.params;
-      
-      switch (name) {
-        case 'banking_get_accounts':
-          return await this.getAccounts(args);
-        case 'banking_get_transactions':
-          return await this.getTransactions(args);
-        case 'banking_block_card':
-          return await this.blockCard(args);
-        // ... handle other tools
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    });
-  }
-  
-  async getAccounts(args) {
-    const { userId, accountType } = args;
-    const response = await fetch(`http://banking-service:3002/api/accounts/${userId}`);
-    let accounts = await response.json();
-    
-    if (accountType) {
-      accounts = accounts.filter(a => a.account_type === accountType);
-    }
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(accounts, null, 2)
-        }
-      ]
-    };
-  }
-  
-  async getTransactions(args) {
-    const { accountId, startDate, endDate, limit } = args;
-    const params = new URLSearchParams({
-      startDate: startDate || new Date(Date.now() - 30*24*60*60*1000).toISOString(),
-      endDate: endDate || new Date().toISOString(),
-      limit: limit || 50
-    });
-    
-    const response = await fetch(
-      `http://banking-service:3002/api/transactions/${accountId}?${params}`
-    );
-    const transactions = await response.json();
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(transactions, null, 2)
-        }
-      ]
-    };
-  }
-  
-  async blockCard(args) {
-    const { cardId, reason } = args;
-    const response = await fetch(
-      `http://banking-service:3002/api/cards/${cardId}/block`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason })
-      }
-    );
-    const result = await response.json();
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Card ${cardId} blocked successfully. Reason: ${reason}`
-        }
-      ]
-    };
-  }
-  
-  async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.log('Banking MCP Server running');
-  }
-}
-
-// Start server
-const server = new BankingMCPServer();
-server.run();
-```
-
-**Benefits of MCP in Our Architecture:**
-
-1. **Standardization:** All banking tools follow the same interface pattern
-2. **Reusability:** Tools can be used by different AI applications (chatbot, voice assistant, analytics)
-3. **Security:** Parameter validation happens at the MCP layer before tool execution
-4. **Observability:** All tool calls are logged with structured metadata
-5. **Versioning:** Tools can be versioned independently without breaking clients
-6. **Discoverability:** LLMs can discover available tools dynamically
-7. **Type Safety:** JSON Schema validation ensures correct parameter types
-
-**MCP vs Traditional API Integration:**
-
-| Aspect | Traditional API | MCP Approach |
-|--------|----------------|--------------|
-| **Discovery** | Manual documentation | Automatic tool listing |
-| **Validation** | Application layer | Protocol layer |
-| **Versioning** | Breaking changes | Backward compatible |
-| **Reusability** | Tight coupling | Universal interface |
-| **Observability** | Custom logging | Built-in structured logs |
-| **Type Safety** | Runtime errors | Schema validation |
+**30. The system of claim 1**, wherein the AI orchestrator further implements a workflow engine comprising:
+- a state graph defining a plurality of states representing workflow stages (e.g., intent detection, tool selection, tool execution, response generation),
+- transitions between states triggered by events or conditions, and
+- checkpoint mechanisms enabling the workflow to resume from saved states if interrupted.
 
 ---
 
-## 5. Proof of Concept Implementation
+## Abstract
 
-### 5.1 Project Structure
-
-Our POC follows a microservices architecture with clear module separation:
-
-```
-map_demo/
-├── poc-frontend/                 # React chat UI
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── atoms/           # Atomic design: buttons, inputs
-│   │   │   ├── molecules/       # Message bubbles, cards
-│   │   │   ├── organisms/       # Chat thread, input panel
-│   │   │   └── templates/       # Page layouts
-│   │   ├── services/
-│   │   │   └── chatService.js   # API communication
-│   │   └── App.js
-│   └── package.json
-│
-├── poc-chat-backend/             # Chat session management
-│   ├── routes/
-│   │   ├── auth.js              # Authentication endpoints
-│   │   ├── chat.js              # Message routing
-│   │   └── session.js           # Session management
-│   ├── middleware/
-│   │   └── authMiddleware.js    # JWT validation
-│   └── server.js
-│
-├── poc-ai-orchestrator/          # AI workflow orchestration
-│   ├── workflows/
-│   │   └── bankingChatWorkflow.js  # LangGraph workflow
-│   ├── prompts/
-│   │   └── templates/
-│   │       ├── account.js       # Account operation prompts
-│   │       ├── transaction.js   # Transaction prompts
-│   │       ├── card.js          # Card management prompts
-│   │       ├── security.js      # Security prompts
-│   │       └── support.js       # Support prompts
-│   ├── config/
-│   │   └── intentConfig.js      # Intent to tool mapping
-│   ├── services/
-│   │   ├── intentMapper.js      # Prompt template retrieval
-│   │   ├── mcpClient.js         # MCP communication
-│   │   └── openaiService.js     # OpenAI integration
-│   └── server.js
-│
-├── poc-mcp-service/              # MCP tool provider
-│   ├── tools/
-│   │   ├── accountTools.js      # Account operations
-│   │   ├── transactionTools.js  # Transaction operations
-│   │   ├── cardTools.js         # Card management
-│   │   └── complianceTools.js   # Compliance checks
-│   ├── server.js                # MCP server implementation
-│   └── mcp-config.json          # Tool definitions
-│
-├── poc-nlu-service/              # Intent detection
-│   ├── services/
-│   │   ├── dialogflowService.js # DialogFlow integration
-│   │   └── bankingNLU.js        # Custom NLU model
-│   └── server.js
-│
-├── poc-banking-service/          # Backend banking APIs
-│   ├── routes/
-│   │   ├── accounts.js
-│   │   ├── transactions.js
-│   │   ├── cards.js
-│   │   └── compliance.js
-│   ├── models/
-│   │   └── database.js          # PostgreSQL connection
-│   └── server.js
-│
-├── deployment-scripts/           # Deployment automation
-│   ├── setup-all.sh
-│   ├── start-services.sh
-│   └── seed-database.sh
-│
-└── docker-compose-poc-all.yml   # Docker orchestration
-```
-
-### 5.2 Key Implementation Details
-
-#### 5.2.1 Intent Configuration System
-
-The `intentConfig.js` file is the heart of our routing logic:
-
-```javascript
-// poc-ai-orchestrator/config/intentConfig.js
-
-// Map intents to MCP tools
-const INTENT_TOOL_MAPPING = {
-  'check.balance': ['banking_get_accounts', 'banking_get_balance'],
-  'account.list': ['banking_get_accounts'],
-  'view.transactions': ['banking_get_transactions'],
-  'transfer.money': ['banking_transfer', 'banking_get_balance'],
-  'card.block': ['banking_get_cards', 'banking_block_card'],
-  'card.lost': ['banking_get_cards', 'banking_block_card'],
-  'dispute.transaction': ['banking_create_dispute']
-};
-
-// Map intents to prompt templates
-const INTENT_PROMPTS = {
-  'check.balance': {
-    systemPromptTemplate: 'balance_inquiry_system',
-    userPromptTemplate: 'balance_inquiry_user',
-    contextFields: ['userId', 'accountData']
-  },
-  'view.transactions': {
-    systemPromptTemplate: 'transaction_history_system',
-    userPromptTemplate: 'transaction_history_user',
-    contextFields: ['userId', 'timeframe', 'transactions']
-  },
-  'card.block': {
-    systemPromptTemplate: 'card_management_system',
-    userPromptTemplate: 'card_management_user',
-    contextFields: ['userId', 'cards', 'cardAction']
-  }
-};
-
-module.exports = {
-  INTENT_TOOL_MAPPING,
-  INTENT_PROMPTS
-};
-```
-
-#### 5.2.2 Prompt Template System
-
-Modular prompt templates enable easy customization and A/B testing:
-
-```javascript
-// poc-ai-orchestrator/prompts/templates/account.js
-
-const ACCOUNT_PROMPTS = {
-  balance_inquiry_system: `You are a banking assistant helping with account balance inquiries.
-The user is already authenticated and their identity is verified.
-
-Your role is to:
-1. Present the account balance clearly
-2. Provide context (account type, currency)
-3. Offer related actions (view transactions, transfer funds)
-
-Be concise and helpful.`,
-
-  balance_inquiry_user: (context) => `User Question: ${context.question}
-
-User Information:
-- User ID: ${context.userId}
-${context.accountData ? `
-Account Information:
-${context.accountData.map(acc => `  - ${acc.accountType}: $${acc.balance.toFixed(2)}
-    Account Number: ****${acc.accountNumber.slice(-4)}
-    Status: ${acc.status}`).join('\n')}
-` : '- Accounts: [Retrieving...]'}
-
-Help the user understand their account balance.`,
-
-  account_list_system: `You are a banking assistant helping users view their accounts.
-
-Your task:
-1. Present all user accounts clearly
-2. Show account types (checking, savings, etc.)
-3. Display current balances
-4. Include account numbers (masked)
-
-Be helpful and clear in presenting their account portfolio.`,
-
-  account_list_user: (context) => `User Question: ${context.question}
-
-User Information:
-- User ID: ${context.userId}
-${context.accounts && context.accounts.length > 0 ? `
-User Accounts:
-${context.accounts.map(acc => `  - ${acc.accountType || 'Account'}: $${acc.balance?.toFixed(2) || '0.00'}
-    Account Number: ****${acc.accountNumber?.slice(-4) || 'XXXX'}
-    Status: ${acc.status || 'Active'}`).join('\n')}
-` : '- Accounts: [No accounts available]'}
-
-Help the user understand their accounts.`
-};
-
-module.exports = ACCOUNT_PROMPTS;
-```
-
-#### 5.2.3 LangGraph Workflow Implementation
-
-State-driven conversation flow with LangGraph:
-
-```javascript
-// poc-ai-orchestrator/workflows/bankingChatWorkflow.js
-const { StateGraph, END } = require('@langchain/langgraph');
-const { HumanMessage, SystemMessage } = require('@langchain/core/messages');
-const { ChatOpenAI } = require('@langchain/openai');
-
-// Define conversation state structure
-const conversationState = {
-  messages: [],
-  userId: null,
-  sessionId: null,
-  intent: null,
-  entities: {},
-  toolResults: {},
-  context: {},
-  response: null,
-  error: null
-};
-
-// Create workflow graph
-function createBankingChatWorkflow() {
-  const workflow = new StateGraph({ channels: conversationState });
-  
-  // Node 1: Analyze intent
-  workflow.addNode('analyzeIntent', async (state) => {
-    const userMessage = state.messages[state.messages.length - 1].content;
-    
-    const nluResponse = await fetch('http://nlu-service:3003/detect-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: userMessage,
-        sessionId: state.sessionId
-      })
-    });
-    
-    const { intent, entities, confidence } = await nluResponse.json();
-    
-    logger.info('Intent detected', {
-      intent,
-      confidence,
-      entities,
-      sessionId: state.sessionId
-    });
-    
-    return {
-      ...state,
-      intent,
-      entities,
-      context: { ...state.context, confidence }
-    };
-  });
-  
-  // Node 2: Execute tools via MCP
-  workflow.addNode('executeTools', async (state) => {
-    const tools = INTENT_TOOL_MAPPING[state.intent] || [];
-    
-    if (tools.length === 0) {
-      logger.warn('No tools found for intent', { intent: state.intent });
-      return state;
-    }
-    
-    const toolResults = {};
-    
-    for (const toolName of tools) {
-      try {
-        const mcpResponse = await fetch('http://mcp-service:3004/execute-tool', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tool: toolName,
-            arguments: {
-              userId: state.userId,
-              ...state.entities
-            }
-          })
-        });
-        
-        const result = await mcpResponse.json();
-        toolResults[toolName] = result;
-        
-        logger.info('Tool executed', {
-          tool: toolName,
-          success: true,
-          sessionId: state.sessionId
-        });
-      } catch (error) {
-        logger.error('Tool execution failed', {
-          tool: toolName,
-          error: error.message,
-          sessionId: state.sessionId
-        });
-        toolResults[toolName] = { error: error.message };
-      }
-    }
-    
-    return {
-      ...state,
-      toolResults,
-      context: { ...state.context, ...toolResults }
-    };
-  });
-  
-  // Node 3: Generate response with OpenAI
-  workflow.addNode('generateResponse', async (state) => {
-    const promptConfig = INTENT_PROMPTS[state.intent];
-    
-    if (!promptConfig) {
-      logger.warn('No prompt template found, using fallback');
-      return {
-        ...state,
-        response: "I understand your request, but I don't have a specific template for this query. How else can I help?"
-      };
-    }
-    
-    // Get system and user prompts
-    const systemPrompt = getSystemPrompt(promptConfig.systemPromptTemplate);
-    const userPromptFn = getUserPromptFunction(promptConfig.userPromptTemplate);
-    
-    const userPrompt = userPromptFn({
-      question: state.messages[state.messages.length - 1].content,
-      userId: state.userId,
-      ...state.context
-    });
-    
-    // Call OpenAI
-    const llm = new ChatOpenAI({
-      modelName: 'gpt-4',
-      temperature: 0.7,
-      maxTokens: 2000
-    });
-    
-    const messages = [
-      new SystemMessage(systemPrompt),
-      new HumanMessage(userPrompt)
-    ];
-    
-    const response = await llm.invoke(messages);
-    
-    logger.info('Response generated', {
-      intent: state.intent,
-      responseLength: response.content.length,
-      sessionId: state.sessionId
-    });
-    
-    return {
-      ...state,
-      response: response.content
-    };
-  });
-  
-  // Define workflow edges
-  workflow.addEdge('analyzeIntent', 'executeTools');
-  workflow.addEdge('executeTools', 'generateResponse');
-  workflow.addEdge('generateResponse', END);
-  
-  // Set entry point
-  workflow.setEntryPoint('analyzeIntent');
-  
-  return workflow.compile();
-}
-
-module.exports = { createBankingChatWorkflow };
-```
-
-### 5.3 Deployment Configuration
-
-Docker Compose orchestrates all services:
-
-```yaml
-# docker-compose-poc-all.yml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: banking_db
-      POSTGRES_USER: banking_user
-      POSTGRES_PASSWORD: secure_password
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./seed-data.sql:/docker-entrypoint-initdb.d/seed-data.sql
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  banking-service:
-    build: ./poc-banking-service
-    ports:
-      - "3002:3002"
-    environment:
-      DATABASE_URL: postgresql://banking_user:secure_password@postgres:5432/banking_db
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      - postgres
-      - redis
-
-  nlu-service:
-    build: ./poc-nlu-service
-    ports:
-      - "3003:3003"
-    environment:
-      DIALOGFLOW_PROJECT_ID: ${DIALOGFLOW_PROJECT_ID}
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials.json
-    volumes:
-      - ./credentials.json:/app/credentials.json
-
-  mcp-service:
-    build: ./poc-mcp-service
-    ports:
-      - "3004:3004"
-    environment:
-      BANKING_SERVICE_URL: http://banking-service:3002
-    depends_on:
-      - banking-service
-
-  ai-orchestrator:
-    build: ./poc-ai-orchestrator
-    ports:
-      - "3007:3007"
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      NLU_SERVICE_URL: http://nlu-service:3003
-      MCP_SERVICE_URL: http://mcp-service:3004
-    depends_on:
-      - nlu-service
-      - mcp-service
-
-  chat-backend:
-    build: ./poc-chat-backend
-    ports:
-      - "3001:3001"
-    environment:
-      JWT_SECRET: ${JWT_SECRET}
-      AI_ORCHESTRATOR_URL: http://ai-orchestrator:3007
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      - ai-orchestrator
-      - redis
-
-  frontend:
-    build: ./poc-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      REACT_APP_API_URL: http://localhost:3001
-    depends_on:
-      - chat-backend
-
-volumes:
-  postgres_data:
-```
-
-### 5.4 Sample Conversation Flow
-
-Let's trace a complete conversation through the system:
-
-**User Input:** "What's my checking account balance?"
-
-```
-1. Frontend (Port 3000)
-   └─> POST /api/chat/message
-       Headers: Authorization: Bearer eyJhbGc...
-       Body: { "message": "What's my checking account balance?" }
-
-2. Chat Backend (Port 3001)
-   └─> Validates JWT token
-   └─> Extracts userId from token
-   └─> Forwards to AI Orchestrator
-       POST http://ai-orchestrator:3007/process
-       Body: {
-         "message": "What's my checking account balance?",
-         "userId": "user_123",
-         "sessionId": "sess_456"
-       }
-
-3. AI Orchestrator (Port 3007) - LangGraph Workflow
-   
-   Step 1: analyzeIntent
-   └─> POST http://nlu-service:3003/detect-intent
-       Body: { "text": "What's my checking account balance?", "sessionId": "sess_456" }
-   ←─ Response: {
-        "intent": "check.balance",
-        "confidence": 0.95,
-        "entities": { "accountType": "checking" }
-      }
-   
-   Step 2: executeTools
-   └─> Lookup INTENT_TOOL_MAPPING["check.balance"]
-       = ["banking_get_accounts", "banking_get_balance"]
-   
-   └─> POST http://mcp-service:3004/execute-tool
-       Body: {
-         "tool": "banking_get_accounts",
-         "arguments": { "userId": "user_123", "accountType": "checking" }
-       }
-   
-   └─> MCP Service (Port 3004)
-       └─> POST http://banking-service:3002/api/accounts/user_123
-       ←─ Response: [
-            {
-              "accountId": "acc_789",
-              "accountNumber": "1234567890",
-              "accountType": "CHECKING",
-              "balance": 2450.00,
-              "currency": "USD",
-              "status": "ACTIVE"
-            }
-          ]
-   
-   Step 3: generateResponse
-   └─> Load prompt templates: balance_inquiry_system, balance_inquiry_user
-   └─> Build context: {
-         question: "What's my checking account balance?",
-         userId: "user_123",
-         accountData: [{ accountType: "CHECKING", balance: 2450.00, ... }]
-       }
-   └─> Generate prompts:
-       System: "You are a banking assistant helping with account balance inquiries..."
-       User: "User Question: What's my checking account balance?
-              User Information:
-              - User ID: user_123
-              Account Information:
-                - CHECKING: $2450.00
-                  Account Number: ****7890
-                  Status: ACTIVE"
-   
-   └─> POST https://api.openai.com/v1/chat/completions
-       Body: {
-         "model": "gpt-4",
-         "messages": [
-           { "role": "system", "content": "You are a banking assistant..." },
-           { "role": "user", "content": "User Question: What's my checking..." }
-         ],
-         "temperature": 0.7,
-         "max_tokens": 2000
-       }
-   
-   ←─ OpenAI Response: {
-        "choices": [{
-          "message": {
-            "content": "Your checking account (ending in 7890) has a balance of $2,450.00. 
-                        Would you like to view recent transactions or transfer funds?"
-          }
-        }]
-      }
-
-4. Response flows back through the chain
-   AI Orchestrator → Chat Backend → Frontend
-
-5. Frontend displays response to user
-```
-
-**Total Processing Time:** ~500ms
-- Intent detection: 50ms
-- Tool execution: 150ms  
-- OpenAI response: 250ms
-- Network overhead: 50ms
+A system and method for implementing task-oriented chatbots using agentic artificial intelligence and the Model Context Protocol. The system decouples conversational logic (frontend, AI orchestrator, NLU) from domain-specific business logic (backend services) through a standardized tool interface layer. An AI orchestrator determines user intent, selects tools via MCP, invokes backend services, and generates natural language responses using an LLM. The architecture is domain-agnostic and applicable across financial services, e-commerce, support, healthcare, and other domains. Extensive observability, error handling, and multi-turn conversation support ensure robust, scalable, and maintainable conversational experiences.
 
 ---
 
-## 6. Results and Benefits
+## Document Information
 
-### 6.1 Development Velocity Improvements
-
-**Before (Traditional Approach):**
-- Adding new intent: 2-3 days (NLU training, handler code, API integration, testing)
-- Changing response format: 1 day (modify multiple files, regression testing)
-- A/B testing prompts: Not feasible (hardcoded responses)
-
-**After (Agentic AI + MCP):**
-- Adding new intent: 2-4 hours (add intent mapping, create prompt template)
-- Changing response format: 15 minutes (edit prompt template only)
-- A/B testing prompts: 5 minutes (configuration change)
-
-**Productivity Gain:** ~70% reduction in development time
-
-### 6.2 Code Maintainability
-
-**Metrics:**
-- **Fewer lines of code:** 40% reduction compared to traditional approach
-- **Modular components:** Each service can be updated independently
-- **Testability:** Easy to mock MCP tools and test prompts in isolation
-- **Onboarding time:** New developers productive in 2 days vs 1 week
-
-### 6.3 Operational Benefits
-
-**Observability:**
-```javascript
-// All interactions logged with structured metadata
-{
-  "timestamp": "2025-11-08T10:30:00Z",
-  "correlationId": "req_abc123",
-  "userId": "user_123",
-  "sessionId": "sess_456",
-  "intent": "check.balance",
-  "confidence": 0.95,
-  "toolsCalled": ["banking_get_accounts"],
-  "toolLatency": { "banking_get_accounts": 145 },
-  "llmLatency": 250,
-  "totalLatency": 495,
-  "userFeedback": "positive"
-}
-```
-
-**Error Recovery:**
-- Circuit breakers prevent cascading failures
-- Automatic fallback to human agents
-- Graceful degradation when services are unavailable
-
-**Scalability:**
-- Horizontal scaling of individual services
-- Stateless design enables load balancing
-- Redis-backed session management
-
-### 6.4 User Experience Improvements
-
-**Measured Metrics:**
-- **Intent accuracy:** 85% (up from 65% with rule-based approach)
-- **Resolution rate:** 82% (vs 60% previously)
-- **User satisfaction:** 4.2/5 (vs 3.5/5)
-- **Average conversation length:** 3.5 turns (vs 5.2 turns)
-
-**User Feedback:**
-- "Feels more natural and conversational"
-- "Understands my questions better"
-- "Faster responses than before"
+**Title:** Systems and Methods for Chatbots Using Agentic AI and Model Context Protocol  
+**Version:** 1.0 (Patent Specification Format)  
+**Format:** Markdown  
+**Prepared by:** Innovation Team  
+**Date:** December 5, 2025
 
 ---
 
-## 7. Challenges and Lessons Learned
-
-### 7.1 Prompt Engineering Complexity
-
-**Challenge:** Creating effective prompts that consistently produce desired outputs.
-
-**Solution:** 
-- Start with simple, explicit instructions
-- Iterate based on real user queries
-- Use few-shot examples for complex scenarios
-- Implement prompt versioning and A/B testing
-
-### 7.2 Intent Ambiguity
-
-**Challenge:** Users phrase the same request in many different ways.
-
-**Solution:**
-- Hybrid NLU approach (DialogFlow + custom model + OpenAI fallback)
-- Clarification questions for low-confidence intents
-- Entity extraction to reduce ambiguity
-
-### 7.3 Tool Execution Latency
-
-**Challenge:** Chaining multiple tool calls adds latency.
-
-**Solution:**
-- Parallel tool execution where possible
-- Caching frequently accessed data (account balances)
-- Optimize database queries
-- Set aggressive timeouts and implement fallbacks
-
-### 7.4 PII Protection
-
-**Challenge:** Ensuring sensitive data doesn't leak into LLM logs.
-
-**Solution:**
-- Mask account numbers and SSNs before passing to LLM
-- Scrub logs of sensitive data
-- Use separate audit logs for compliance
-- Regular security audits
-
----
-
-## 8. Future Enhancements
-
-### 8.1 Multi-Modal Support
-
-- **Voice Integration:** Add speech-to-text and text-to-speech
-- **Document Understanding:** Process uploaded statements, receipts
-- **Visual Analytics:** Generate charts and graphs for spending patterns
-
-### 8.2 Advanced Personalization
-
-- **User Preferences:** Remember preferred accounts, frequent recipients
-- **Proactive Suggestions:** "Your rent is usually due on the 1st. Transfer now?"
-- **Behavioral Patterns:** Detect unusual activity and alert users
-
-### 8.3 Expanded Tool Ecosystem
-
-- **Investment Tools:** Portfolio balance, stock quotes, trading
-- **Loan Tools:** Application status, payment schedules, refinancing
-- **Insurance Tools:** Policy details, claims status, coverage changes
-
-### 8.4 Agentic Workflows
-
-- **Multi-Step Planning:** "Pay bills and maximize my savings"
-  - Agent plans: Check balances → Pay bills → Calculate surplus → Transfer to savings
-- **Autonomous Actions:** Auto-pay bills when balance permits
-- **Goal Tracking:** "Save $10,000 for vacation" with automated transfers
-
----
-
-## 9. Conclusion
-
-The combination of Agentic AI and the Model Context Protocol represents a paradigm shift in building conversational banking applications. Our proof-of-concept demonstrates:
-
-1. **Dramatic reduction in development effort** (70% faster iteration)
-2. **Improved user experience** through natural language understanding
-3. **Enhanced maintainability** with modular, testable components
-4. **Better observability** via structured logging and monitoring
-5. **Future-proof architecture** ready for new AI capabilities
-
-### Key Takeaways
-
-**For Engineering Teams:**
-- Start with a solid intent configuration system
-- Invest in prompt engineering and testing infrastructure
-- Use MCP for standardized tool interfaces
-- Implement comprehensive logging from day one
-
-**For Product Teams:**
-- Focus on high-frequency use cases first (balance, transactions)
-- Gather user feedback continuously
-- Iterate on prompts based on real conversations
-- Plan for human-in-the-loop for complex scenarios
-
-**For Business Leaders:**
-- Expect 6-12 month ROI through reduced development costs
-- Plan for ongoing prompt optimization as a core activity
-- Budget for LLM API costs (typically $0.001-$0.01 per query)
-- Allocate resources for security and compliance review
-
-### Final Thoughts
-
-Agentic AI doesn't replace traditional software engineering—it augments it. The best results come from combining:
-- **Structured data** (databases, APIs)
-- **Unstructured understanding** (LLMs)
-- **Verified actions** (MCP tools)
-- **Human oversight** (escalation, confirmation)
-
-As LLM capabilities continue to advance, the systems we build today will become even more powerful—without requiring fundamental architectural changes. That's the promise of the Model Context Protocol: a stable foundation for an evolving AI landscape.
-
----
-
-## 10. Appendices
-
-### Appendix A: Tool Inventory
-
-Complete list of 24 MCP banking tools implemented:
-
-| Category | Tool Name | Description |
-|----------|-----------|-------------|
-| **Account** | banking_get_accounts | Retrieve all user accounts |
-| | banking_get_balance | Get specific account balance |
-| | banking_account_info | Detailed account information |
-| **Transaction** | banking_get_transactions | Transaction history with filters |
-| | banking_transfer | Execute fund transfers |
-| | banking_payment_history | Payment records |
-| | banking_schedule_payment | Schedule future payments |
-| **Card** | banking_get_cards | Retrieve all user cards |
-| | banking_block_card | Block lost/stolen cards |
-| | banking_unblock_card | Unblock cards |
-| | banking_replace_card | Request replacement card |
-| | banking_activate_card | Activate new cards |
-| **Dispute** | banking_create_dispute | File transaction dispute |
-| | banking_get_disputes | View dispute status |
-| | banking_upload_evidence | Upload dispute documents |
-| **Statement** | banking_get_statements | Download account statements |
-| | banking_statement_preferences | Update delivery preferences |
-| **Profile** | banking_update_profile | Update customer information |
-| | banking_get_profile | Retrieve customer profile |
-| | banking_update_preferences | Communication preferences |
-| **Security** | banking_change_password | Password management |
-| | banking_setup_mfa | Multi-factor authentication |
-| | banking_trusted_devices | Manage trusted devices |
-| **Notifications** | banking_get_alerts | View account alerts |
-| | banking_configure_alerts | Set up alert preferences |
-
-### Appendix B: Intent Library
-
-Supported intents with example utterances:
-
-| Intent | Example Utterances | Confidence Threshold |
-|--------|-------------------|---------------------|
-| check.balance | "What's my balance?", "How much is in my account?", "Check balance" | 0.70 |
-| account.list | "What accounts do I have?", "Show all my accounts", "List accounts" | 0.70 |
-| view.transactions | "Show recent transactions", "What did I spend last week?", "Transaction history" | 0.70 |
-| transfer.money | "Transfer $100 to savings", "Send money to John", "Move funds" | 0.80 |
-| card.block | "Block my card", "I lost my card", "Card stolen" | 0.80 |
-| card.activate | "Activate my card", "Enable new card", "Card activation" | 0.75 |
-| dispute.transaction | "I don't recognize this charge", "Dispute transaction", "Report fraud" | 0.85 |
-| get.statement | "Download statement", "Show last month's statement", "Email statement" | 0.70 |
-
-### Appendix C: Performance Benchmarks
-
-Based on 10,000 production queries:
-
-| Metric | P50 | P95 | P99 | Max |
-|--------|-----|-----|-----|-----|
-| Total Latency | 425ms | 890ms | 1450ms | 3200ms |
-| Intent Detection | 45ms | 85ms | 150ms | 300ms |
-| Tool Execution | 120ms | 320ms | 650ms | 1500ms |
-| LLM Response | 235ms | 450ms | 750ms | 1800ms |
-
-### Appendix D: Cost Analysis
-
-Monthly operational costs (assuming 100,000 queries):
-
-| Component | Cost | Notes |
-|-----------|------|-------|
-| OpenAI API | $150-300 | GPT-4, ~1000 tokens/query |
-| DialogFlow | $50 | 1000 requests free, then $0.002/request |
-| Infrastructure | $200 | AWS/GCP compute + database |
-| **Total** | **$400-550** | **$0.004-0.0055 per query** |
-
-**ROI Calculation:**
-- Development savings: $50,000/year (reduced engineering time)
-- Support cost reduction: $30,000/year (higher resolution rate)
-- Operational cost: $6,600/year
-- **Net benefit: $73,400/year**
-
----
-
-## References
-
-1. Anthropic. (2024). "Model Context Protocol Specification". https://modelcontextprotocol.io
-2. LangChain. (2024). "LangGraph Documentation". https://langchain.com/langgraph
-3. OpenAI. (2024). "GPT-4 Function Calling Guide". https://platform.openai.com/docs/guides/function-calling
-4. Google Cloud. (2024). "Dialogflow ES Documentation". https://cloud.google.com/dialogflow/es/docs
-5. NIST. (2023). "AI Risk Management Framework". https://www.nist.gov/itl/ai-risk-management-framework
-
----
-
-**Document Version:** 1.0  
-**Last Updated:** November 8, 2025  
-**Authors:** Banking Innovation Team  
-**Contact:** innovation@securebank.com
-
----
-
-*This white paper is based on a working proof-of-concept implementation. Source code available at: https://github.com/banking-innovation/poc-agentic-chatbot*
+*End of Patent Specification*
