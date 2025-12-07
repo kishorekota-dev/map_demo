@@ -76,40 +76,40 @@ In another aspect, the invention provides a method of operating a task-oriented 
 ```mermaid
 flowchart LR
   subgraph Client
-    UI[Chat Frontend (Chat UI)]
+    UI["Chat Frontend / Chat UI"]
   end
 
   subgraph Backend["Chat Backend"]
-    AUTH[Authentication & Session\nValidation]
-    SESS[Session Store Access\n(conversation history,\npreferences)]
-    ROUTE[Message Routing\n& Rate Limiting]
+    AUTH["Authentication & Session Validation"]
+    SESS["Session Store Access - history, preferences"]
+    ROUTE["Message Routing & Rate Limiting"]
   end
 
   subgraph Orchestrator["AI Orchestrator"]
-    CTX[Session & Context\nManagement]
-    NLU_PIPE[Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)]
-    WF[Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)]
-    PROMPTS[Prompt Construction\n(system/user prompts,\nexamples, safety)]
-    RESP[LLM Invocation &\nResponse Post-Processing]
+    CTX["Session & Context Management"]
+    NLU_PIPE["Hybrid NLU Pipeline - primary, secondary, LLM-based extraction"]
+    WF["Graph Workflow - intent analysis, entity checks, HITL, confirmations"]
+    PROMPTS["Prompt Construction - system/user, examples, safety"]
+    RESP["LLM Invocation & Response Post-Processing"]
   end
 
   subgraph PolicyLayer["Policy & Governance"]
-    POLICY[Policy Engine\n(data exposure,\nrole/jurisdiction rules)]
+    POLICY["Policy Engine - data exposure, role/jurisdiction rules"]
   end
 
   subgraph MCP["MCP Service Layer"]
-    REG[Tool Registry\n(names, schemas,\nmetadata, discovery)]
-    VAL[Schema Validation\n& Parameter Checking]
-    MASK[Masking & Redaction\n(sensitive fields)]
-    LOG[Tool Invocation Logging\n(audit, metrics)]
+    REG["Tool Registry - names, schemas, metadata, discovery"]
+    VAL["Schema Validation & Parameter Checking"]
+    MASK["Masking & Redaction - sensitive fields"]
+    LOG["Tool Invocation Logging - audit, metrics"]
   end
 
   subgraph Domain["Domain Services & Data"]
     subgraph Services["Domain Microservices"]
-      ACCT[Account Service]
-      TXN[Transaction Service]
-      CARD[Card Service]
-      OTHER[Other Domain Services\n(e-commerce, support, etc.)]
+      ACCT["Account Service"]
+      TXN["Transaction Service"]
+      CARD["Card Service"]
+      OTHER["Other Domain Services - e-commerce, support, etc."]
     end
 
     subgraph DataStores["Data Stores & Caches"]
@@ -175,13 +175,10 @@ flowchart TD
   MCP2 --> DOM2[Domain Services]
   DOM2 --> MCP2
 
-  MCP2 --> MASK2[Mask/Redact
-  Sensitive Data]
-  MASK2 --> PROMPT2[Construct LLM Prompt
-  (system + user + tools)]
-  PROMPT2 --> LLM2[LLM Invocation]
-  LLM2 --> RESP2[Validate & Format
-  Response]
+  MCP2 --> MASK2["Mask / Redact Sensitive Data"]
+  MASK2 --> PROMPT2["Construct LLM Prompt - system + user + tools"]
+  PROMPT2 --> LLM2["LLM Invocation"]
+  LLM2 --> RESP2["Validate & Format Response"]
   RESP2 --> BE2
   BE2 --> UI2
   UI2 --> U
@@ -224,29 +221,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  REG4[MCP Tool Registry] --- CFG4[Config Store
-  (schemas, metadata,
-  feature flags)]
+  REG4["MCP Tool Registry"] --- CFG4["Config Store - schemas, metadata, feature flags"]
 
   subgraph REGISTRY["MCP Registry View"]
-    T1[Tool: get_accounts
-    - name
-    - JSON schema
-    - sensitivity tags
-    - enabled=true]
+    T1["Tool: get_accounts<br/>name; JSON schema; sensitivity tags; enabled=true"]
 
-    T2[Tool: transfer_funds
-    - name
-    - JSON schema
-    - sensitivity tags
-    - operation=write
-    - requiresConfirmation=true]
+    T2["Tool: transfer_funds<br/>name; JSON schema; sensitivity tags; operation=write; requiresConfirmation=true"]
 
-    T3[Tool: block_card
-    - name
-    - JSON schema
-    - jurisdiction rules
-    - featureFlag=enable_block_card]
+    T3["Tool: block_card<br/>name; JSON schema; jurisdiction rules; featureFlag=enable_block_card"]
   end
 
   ORCH4[AI Orchestrator] -->|tool discovery| REG4
@@ -260,32 +242,25 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  START5([Start]) --> NLU5[NLU/Intent Detection]
-  NLU5 --> DEC5{Low confidence
-  or unknown?}
+  START5([Start]) --> NLU5["NLU / Intent Detection"]
+  NLU5 --> DEC5{"Low confidence or unknown?"}
 
-  DEC5 -->|Yes| CLAR5[Ask Clarification]
-  CLAR5 --> RETRY5{Max attempts
-  reached?}
+  DEC5 -->|Yes| CLAR5["Ask Clarification"]
+  CLAR5 --> RETRY5{"Max attempts reached?"}
   RETRY5 -->|No| NLU5
-  RETRY5 -->|Yes| ESC5[Offer Human
-  Escalation]
+  RETRY5 -->|Yes| ESC5["Offer Human Escalation"]
 
-  DEC5 -->|No| TOOL5[Invoke MCP Tool]
-  TOOL5 --> RES5{Tool success?}
+  DEC5 -->|No| TOOL5["Invoke MCP Tool"]
+  TOOL5 --> RES5{"Tool success?"}
 
-  RES5 -->|No| CB5[Update Failure Counters
-  & Circuit Breaker]
-  CB5 --> CBOPEN5{Circuit open?}
-  CBOPEN5 -->|Yes| MSG5[Return Fallback
-  Message + Escalation]
-  CBOPEN5 -->|No| RETRYT5[Retry with
-  Backoff]
+  RES5 -->|No| CB5["Update Failure Counters & Circuit Breaker"]
+  CB5 --> CBOPEN5{"Circuit open?"}
+  CBOPEN5 -->|Yes| MSG5["Return Fallback Message + Escalation"]
+  CBOPEN5 -->|No| RETRYT5["Retry with Backoff"]
   RETRYT5 --> TOOL5
 
-  RES5 -->|Yes| RESP5[Generate LLM Response]
-  RESP5 --> END5([Return Response
-  to User])
+  RES5 -->|Yes| RESP5["Generate LLM Response"]
+  RESP5 --> END5([Return Response to User])
 
   MSG5 --> END5
 ```
