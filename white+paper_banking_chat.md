@@ -71,7 +71,7 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 - **FIG. 1** is a block diagram of a system architecture for a task-oriented chatbot using an AI orchestrator and a Model Context Protocol service layer.
 
-![FIG. 1 – System Architecture](diagrams/chatbot_architecture_fig1.png)
+![FIG. 1 – System Architecture](diagrams/chatbot-architecture-fig1.png)
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
 - **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
