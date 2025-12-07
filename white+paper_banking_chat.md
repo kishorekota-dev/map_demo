@@ -1022,47 +1022,47 @@ A system and method for implementing task-oriented chatbots using agentic artifi
 
 ```mermaid
 flowchart LR
-    subgraph Client
-        UI[Chat Frontend (Chat UI)]
-    end
+  subgraph Client
+    UI["Chat Frontend (Chat UI)"]
+  end
 
     subgraph Backend["Chat Backend"]
-        AUTH[Authentication & Session\nValidation]
-        SESS[Session Store Access\n(conversation history,\npreferences)]
-        ROUTE[Message Routing\n& Rate Limiting]
+      AUTH["Authentication & Session\nValidation"]
+      SESS["Session Store Access\n(conversation history,\npreferences)"]
+      ROUTE["Message Routing\n& Rate Limiting"]
     end
 
     subgraph Orchestrator["AI Orchestrator"]
-        CTX[Session & Context\nManagement]
-        NLU_PIPE[Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)]
-        WF[Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)]
-        PROMPTS[Prompt Construction\n(system/user prompts,\nexamples, safety)]
-        RESP[LLM Invocation &\nResponse Post-Processing]
+      CTX["Session & Context\nManagement"]
+      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
+      WF["Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)"]
+      PROMPTS["Prompt Construction\n(system/user prompts,\nexamples, safety)"]
+      RESP["LLM Invocation &\nResponse Post-Processing"]
     end
 
     subgraph PolicyLayer["Policy & Governance"]
-        POLICY[Policy Engine\n(data exposure,\nrole/jurisdiction rules)]
+      POLICY["Policy Engine\n(data exposure,\nrole/jurisdiction rules)"]
     end
 
     subgraph MCP["MCP Service Layer"]
-        REG[Tool Registry\n(names, schemas,\nmetadata, discovery)]
-        VAL[Schema Validation\n& Parameter Checking]
-        MASK[Masking & Redaction\n(sensitive fields)]
-        LOG[Tool Invocation Logging\n(audit, metrics)]
+      REG["Tool Registry\n(names, schemas,\nmetadata, discovery)"]
+      VAL["Schema Validation\n& Parameter Checking"]
+      MASK["Masking & Redaction\n(sensitive fields)"]
+      LOG["Tool Invocation Logging\n(audit, metrics)"]
     end
 
     subgraph Domain["Domain Services & Data"]
-        subgraph Services["Domain Microservices"]
-            ACCT[Account Service]
-            TXN[Transaction Service]
-            CARD[Card Service]
-            OTHER[Other Domain Services\n(e-commerce, support, etc.)]
+      subgraph Services["Domain Microservices"]
+        ACCT["Account Service"]
+        TXN["Transaction Service"]
+        CARD["Card Service"]
+        OTHER["Other Domain Services\n(e-commerce, support, etc.)"]
         end
 
-        subgraph DataStores["Data Stores & Caches"]
-            DB[(Primary Database)]
-            SSTORE[(Session Store)]
-            AUDIT[(Audit & Observability Store)]
+      subgraph DataStores["Data Stores & Caches"]
+        DB[("Primary Database")]
+        SSTORE[("Session Store")]
+        AUDIT[("Audit & Observability Store")]
         end
     end
 
