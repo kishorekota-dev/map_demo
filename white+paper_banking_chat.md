@@ -61,7 +61,7 @@ The microservices return structured data that may be masked or redacted to avoid
 
 In some embodiments, the system additionally implements observability and control features, including structured logging of tool calls with correlation identifiers, monitoring of intent accuracy and action success rates, circuit breakers, and fallback behaviors to human agents upon repeated errors or low-confidence conditions.
 
-The architecture is domain-agnostic: it can be applied to financial use cases (e.g., account inquiries, transaction management, and card services), as well as to other domains such as order tracking in e-commerce, troubleshooting in technical support, or appointment scheduling in healthcare. In one illustrative embodiment, a banking domain is used to demonstrate account inquiries, transaction management, card services, and secure operations; however, the underlying mechanisms are not limited to banking.
+The architecture is domain-agnostic and can be applied to financial use cases (for example, account inquiries, transaction management, and card services) as well as to other domains such as e-commerce, telecommunications, and healthcare—generally, any customer-servicing workflow that can be automated via a chatbot. In one illustrative embodiment, a banking domain is used to demonstrate account inquiries, transaction management, card services, and secure operations; however, the underlying mechanisms are not limited to banking.
 
 In another aspect, the invention provides a method of operating a task-oriented chatbot comprising receiving a user query, determining an intent, selecting at least one MCP tool based on the intent, invoking the tool to perform a domain-specific function, and generating a natural language response using an LLM based on tool outputs and conversation context.
 
@@ -76,79 +76,79 @@ In another aspect, the invention provides a method of operating a task-oriented 
 ```mermaid
 flowchart LR
   subgraph Client
-    UI["Chat Frontend / Chat UI"]
+    UI["Chat Frontend (Chat UI)"]
   end
 
-  subgraph Backend["Chat Backend"]
-    AUTH["Authentication & Session Validation"]
-    SESS["Session Store Access - history, preferences"]
-    ROUTE["Message Routing & Rate Limiting"]
-  end
-
-  subgraph Orchestrator["AI Orchestrator"]
-    CTX["Session & Context Management"]
-    NLU_PIPE["Hybrid NLU Pipeline - primary, secondary, LLM-based extraction"]
-    WF["Graph Workflow - intent analysis, entity checks, HITL, confirmations"]
-    PROMPTS["Prompt Construction - system/user, examples, safety"]
-    RESP["LLM Invocation & Response Post-Processing"]
-  end
-
-  subgraph PolicyLayer["Policy & Governance"]
-    POLICY["Policy Engine - data exposure, role/jurisdiction rules"]
-  end
-
-  subgraph MCP["MCP Service Layer"]
-    REG["Tool Registry - names, schemas, metadata, discovery"]
-    VAL["Schema Validation & Parameter Checking"]
-    MASK["Masking & Redaction - sensitive fields"]
-    LOG["Tool Invocation Logging - audit, metrics"]
-  end
-
-  subgraph Domain["Domain Services & Data"]
-    subgraph Services["Domain Microservices"]
-      ACCT["Account Service"]
-      TXN["Transaction Service"]
-      CARD["Card Service"]
-      OTHER["Other Domain Services - e-commerce, support, etc."]
+    subgraph Backend["Chat Backend"]
+      AUTH["Authentication & Session\nValidation"]
+      SESS["Session Store Access\n(conversation history,\npreferences)"]
+      ROUTE["Message Routing\n& Rate Limiting"]
     end
 
-    subgraph DataStores["Data Stores & Caches"]
-      DB[(Primary Database)]
-      SSTORE[(Session Store)]
-      AUDIT[(Audit & Observability Store)]
+    subgraph Orchestrator["AI Orchestrator"]
+      CTX["Session & Context\nManagement"]
+      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
+      WF["Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)"]
+      PROMPTS["Prompt Construction\n(system/user prompts,\nexamples, safety)"]
+      RESP["LLM Invocation &\nResponse Post-Processing"]
     end
-  end
 
-  %% Client to Backend
-  UI -->|HTTPS/WebSocket\nuser messages| AUTH
-  AUTH --> ROUTE
-  ROUTE -->|validated messages\nwith session ids| CTX
-  AUTH -->|session ids,\nauth context| SESS
+    subgraph PolicyLayer["Policy & Governance"]
+      POLICY["Policy Engine\n(data exposure,\nrole/jurisdiction rules)"]
+    end
 
-  %% Orchestrator internal flows
-  CTX --> NLU_PIPE
-  NLU_PIPE --> WF
-  WF -->|missing/ambiguous entities| CTX
-  WF --> PROMPTS
-  PROMPTS --> POLICY
-  POLICY --> PROMPTS
-  PROMPTS --> RESP
+    subgraph MCP["MCP Service Layer"]
+      REG["Tool Registry\n(names, schemas,\nmetadata, discovery)"]
+      VAL["Schema Validation\n& Parameter Checking"]
+      MASK["Masking & Redaction\n(sensitive fields)"]
+      LOG["Tool Invocation Logging\n(audit, metrics)"]
+    end
 
-  %% Orchestrator to MCP
-  WF -->|tool invocations\nwith parameters| VAL
-  VAL --> REG
-  VAL --> MASK
-  MASK --> Services
-  Services --> MASK
-  MASK --> WF
-  VAL --> LOG
-  Services --> DB
-  SESS --> SSTORE
-  LOG --> AUDIT
+    subgraph Domain["Domain Services & Data"]
+      subgraph Services["Domain Microservices"]
+        ACCT["Account Service"]
+        TXN["Transaction Service"]
+        CARD["Card Service"]
+        OTHER["Other Domain Services\n(e-commerce, support, etc.)"]
+        end
 
-  %% Responses back to client
-  RESP --> ROUTE
-  ROUTE -->|chatbot responses| UI
+      subgraph DataStores["Data Stores & Caches"]
+        DB[("Primary Database")]
+        SSTORE[("Session Store")]
+        AUDIT[("Audit & Observability Store")]
+        end
+    end
+
+    %% Client to Backend
+    UI -->|HTTPS/WebSocket\nuser messages| AUTH
+    AUTH --> ROUTE
+    ROUTE -->|validated messages\nwith session ids| CTX
+    AUTH -->|session ids,\nauth context| SESS
+
+    %% Orchestrator internal flows
+    CTX --> NLU_PIPE
+    NLU_PIPE --> WF
+    WF -->|missing/ambiguous entities| CTX
+    WF --> PROMPTS
+    PROMPTS --> POLICY
+    POLICY --> PROMPTS
+    PROMPTS --> RESP
+
+    %% Orchestrator to MCP
+    WF -->|tool invocations\nwith parameters| VAL
+    VAL --> REG
+    VAL --> MASK
+    MASK --> Services
+    Services --> MASK
+    MASK --> WF
+    VAL --> LOG
+    Services --> DB
+    SESS --> SSTORE
+    LOG --> AUDIT
+
+    %% Responses back to client
+    RESP --> ROUTE
+    ROUTE -->|chatbot responses| UI
 ```
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
@@ -340,6 +340,8 @@ A protocol-compliant tool server (implementing the Model Context Protocol specif
 - Applies masking, redaction, or filtering policies to the results (e.g., hiding full account numbers or sensitive fields) according to configuration.
 - Returns the processed results to the AI orchestrator via the MCP protocol.
 - Logs all tool invocations, parameters, and results for audit, observability, and continuous improvement.
+- MCP Service Layer apply additional policy checks based on user role, and data sensitivity before allowing tool invocation or data exposure. This enforces governance and compliance requirements to ensure account data is only accessed by authorized users and that sensitive data is protected.
+- The MCP service layer also normalizes and adjusts payloads to meet data requirements for agentic AI processing, including applying necessary transformations, tokenization, and data minimization before passing data to the AI orchestrator. These adaptations may be required on a case-by-case basis, particularly when integrating with legacy enterprise systems that are not AI-ready or that lack clear, machine-interpretable API specifications.
 
 #### 6. Domain Services Layer
 
@@ -360,16 +362,11 @@ A collection of microservices or application programming interfaces (APIs) corre
 - Return service: initiate returns, retrieve return status.
 - Inventory service: check stock availability.
 
-**Support Domain**:
-- Ticketing service: create support tickets, retrieve ticket status, update ticket details.
-- Knowledge base service: search knowledge base articles, retrieve troubleshooting steps.
-- Agent escalation service: assign tickets to human agents, retrieve agent availability.
-
-Each domain service enforces its own business rules, authorization policies, and data validation. Services communicate with at least one backend data store (relational database, NoSQL database, or other repository).
+These services typically expose APIs (e.g., REST, GraphQL, or gRPC) that implement the core business functions of the target domain.
 
 #### 7. Data Stores and Caches
 
-- **Primary Database**: A relational database (e.g., PostgreSQL) or other persistent store containing domain data (accounts, orders, tickets, etc.), user profiles, and configuration.
+- **Primary Database**: A relational database (e.g., PostgreSQL) or other persistent store containing domain data (accounts, orders, tickets, etc.), user profiles, and configuration. The chat backend may utilize a dedicated database to store user sessions, conversation history, and metadata. Similarly, the AI Orchestrator may utilize a database or cache for maintaining conversational memory. The specific choice of database technologies is implementation-dependent and adaptable to enterprise standards.
 - **Session Store**: An in-memory cache (e.g., Redis) for storing session data, conversation history, and frequently accessed data to improve performance.
 - **Audit and Observability Store**: A document database or log store (e.g., MongoDB, Elasticsearch) for immutable audit logs, observability metrics, and historical records.
 
@@ -989,80 +986,3 @@ A system and method for implementing task-oriented chatbots using agentic artifi
 
 *End of Patent Specification*
 
-```mermaid
-flowchart LR
-  subgraph Client
-    UI["Chat Frontend (Chat UI)"]
-  end
-
-    subgraph Backend["Chat Backend"]
-      AUTH["Authentication & Session\nValidation"]
-      SESS["Session Store Access\n(conversation history,\npreferences)"]
-      ROUTE["Message Routing\n& Rate Limiting"]
-    end
-
-    subgraph Orchestrator["AI Orchestrator"]
-      CTX["Session & Context\nManagement"]
-      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
-      WF["Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)"]
-      PROMPTS["Prompt Construction\n(system/user prompts,\nexamples, safety)"]
-      RESP["LLM Invocation &\nResponse Post-Processing"]
-    end
-
-    subgraph PolicyLayer["Policy & Governance"]
-      POLICY["Policy Engine\n(data exposure,\nrole/jurisdiction rules)"]
-    end
-
-    subgraph MCP["MCP Service Layer"]
-      REG["Tool Registry\n(names, schemas,\nmetadata, discovery)"]
-      VAL["Schema Validation\n& Parameter Checking"]
-      MASK["Masking & Redaction\n(sensitive fields)"]
-      LOG["Tool Invocation Logging\n(audit, metrics)"]
-    end
-
-    subgraph Domain["Domain Services & Data"]
-      subgraph Services["Domain Microservices"]
-        ACCT["Account Service"]
-        TXN["Transaction Service"]
-        CARD["Card Service"]
-        OTHER["Other Domain Services\n(e-commerce, support, etc.)"]
-        end
-
-      subgraph DataStores["Data Stores & Caches"]
-        DB[("Primary Database")]
-        SSTORE[("Session Store")]
-        AUDIT[("Audit & Observability Store")]
-        end
-    end
-
-    %% Client to Backend
-    UI -->|HTTPS/WebSocket\nuser messages| AUTH
-    AUTH --> ROUTE
-    ROUTE -->|validated messages\nwith session ids| CTX
-    AUTH -->|session ids,\nauth context| SESS
-
-    %% Orchestrator internal flows
-    CTX --> NLU_PIPE
-    NLU_PIPE --> WF
-    WF -->|missing/ambiguous entities| CTX
-    WF --> PROMPTS
-    PROMPTS --> POLICY
-    POLICY --> PROMPTS
-    PROMPTS --> RESP
-
-    %% Orchestrator to MCP
-    WF -->|tool invocations\nwith parameters| VAL
-    VAL --> REG
-    VAL --> MASK
-    MASK --> Services
-    Services --> MASK
-    MASK --> WF
-    VAL --> LOG
-    Services --> DB
-    SESS --> SSTORE
-    LOG --> AUDIT
-
-    %% Responses back to client
-    RESP --> ROUTE
-    ROUTE -->|chatbot responses| UI
-```
