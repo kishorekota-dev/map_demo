@@ -18,7 +18,7 @@ The present invention relates generally to conversational user interfaces and ch
 
 ## Background of the Invention
 
-Chat-based interfaces are increasingly used to provide users with self-service access to products, services, and support across many industries. These are referred as IVA, interactive virtual assistants (IVA) or Chatbots. Conventional chatbot architectures commonly rely on rigid natural language understanding (NLU) pipelines and tightly coupled integrations between front-end interfaces, back-end services, and intent-specific business logic.
+Chat-based interfaces are increasingly used to provide users with self-service access to products, services, and support across many industries. These are referred to as interactive virtual assistants (IVAs) or chatbots. Conventional chatbot architectures commonly rely on rigid natural language understanding (NLU) pipelines and tightly coupled integrations between front-end interfaces, back-end services, and intent-specific business logic.
 
 In typical systems, the chat frontend is directly coupled to backend APIs and domain-specific intent handlers. Adding new capabilities (for example, a new type of account inquiry in banking, or a new order status query in e-commerce) often requires simultaneous updates to multiple components, including NLU training data, intent classification models, backend service integrations, and response formatting logic. This tight coupling results in high initial implementation cost, substantial operational complexity, and slow adaptation to changing products, regulations, and customer expectations.
 
@@ -26,21 +26,25 @@ Conventional chatbots also struggle with conversational flexibility. Intent libr
 
 Recent advances in large language models (LLMs) and agentic AI provide new opportunities for building more flexible, context-aware chatbots. However, naïvely connecting LLMs directly to core APIs without clear boundaries and control (for example, letting an LLM construct arbitrary API calls) can introduce security, compliance, and reliability risks. There is therefore a need for an architecture that leverages agentic AI and autonomous agent capabilities while maintaining strict control over tools, data access, and execution, and that decouples conversational orchestration from domain-specific business logic.
 
+Many existing LLM-based agent frameworks provide generic "tools" or function-calling interfaces but do not prescribe a domain-agnostic, policy-aware architecture for separating conversational workflows from business logic. In such systems, LLMs may directly plan and invoke arbitrary tools or APIs, with limited schema validation, limited masking of sensitive outputs before inclusion in prompts, and little support for configuration-driven reuse of workflows across domains. As a result, conventional approaches can be difficult to govern, may require code changes to introduce new capabilities, and can expose organizations to increased security and compliance risk.
+
 ---
 
 ## Summary of the Invention
 
 In one aspect, the invention provides a system and method for implementing task-oriented chatbots using an agentic AI orchestrator together with a standardized tool interface layer, such as a Model Context Protocol (MCP) server, to access domain services. The architecture decouples the chat frontend, AI orchestration, NLU, and domain microservices through well-defined interfaces, thereby reducing integration complexity, improving maintainability, and enabling rapid introduction of new conversational capabilities.
 
+Unlike generic LLM agent patterns that allow models to construct and invoke tools in an ad hoc fashion, the disclosed system constrains all tool access through an MCP-compliant service layer with schema-based validation, masking and redaction policies, and policy-driven governance, and drives orchestration behavior from configuration rather than code. A graph-based AI orchestrator coordinates a hybrid NLU pipeline, human-in-the-loop entity completion, and controlled tool execution, enabling autonomous, domain-agnostic workflows that can be safely extended to new domains by updating configuration artifacts rather than rewriting orchestrator logic.
+
 According to one embodiment, the system includes:
 
 - A chat frontend configured to capture user messages and display chatbot responses. Referred as Chat UI.
 - An API based chat backend, configured to manage authenticated user sessions, maintain conversation context, and route messages.
-- A NLU component that integrates with one or more NLU services with fallback to Generate AI based Intent Detection.
+- A NLU component that integrates with one or more NLU services with fallback to generative AI based intent detection.
 - An AI orchestrator configured to:
-  - perform intent analysis and performs specific AI Agent workflows to fulfill user requests,
-  - perform thorough validation of user inpput extraction, and based on defined Prompt, performs data extraction and Human-In-The loop validation to seek any missing inputs.
-  - autonomously executes fullfilment workflows by invoking one or more tools via an MCP-compliant interface, and
+  - perform intent analysis and perform specific AI agent workflows to fulfill user requests,
+  - perform thorough validation of user input extraction, and based on defined prompts, perform data extraction and human-in-the-loop validation to seek any missing inputs.
+  - autonomously execute fulfillment workflows by invoking one or more tools via an MCP-compliant interface, and
   - generate natural language responses using at least one LLM.
   - acts as a MCP client to invoke tools exposed by the MCP server.
 - An MCP service layer exposing a plurality of tools corresponding to domain-specific operations (for example, account operations, order management, ticket management, or profile management), with schema-based parameter validation.
@@ -50,7 +54,8 @@ In operation, a user message is received at the chat frontend (Chat UI) and forw
 
 The chat backend is responsible for managing the session, identifying if a new session is established, and managing new intent vs existing intent response. The chat backend handles the management of chat sessions along with detecting a new intent vs responding to an existing intent follow-up questions. The chat backend also responsible for integrating with the NLU services to perform intent detection and then passes the user message with derived intent to the AI orchestrator.
 
-The AI orchestrator then uses the user messages and intent details to trigger a predefined and generic Agentic workflow to fulfill user requests. This involves selecting the prompt to fulfill the request, which can be a simple mapping between Intent and Prompt. Defining well-written Prompts is a key aspect of the system function. Prompts will define all the required inputs, and LLM-based function calling to fetch data needed via MCP-based tool calling. Based on the detected intent and extracted entities, the AI orchestrator selects one or more MCP tools to execute. The tools are invoked via the MCP service layer, which validates parameters and invokes the corresponding domain microservices.
+The AI orchestrator then uses the user messages and intent details to trigger a predefined and generic agentic workflow to fulfill user requests. This involves selecting the predefined prompt to fulfill the request, which can be a simple mapping between intent and prompt. Defining well-written prompts is a key aspect of the system function. Prompts define all the required inputs and utilize LLM-based function calling to fetch data needed via MCP-based tool calling. Based on the detected intent and extracted entities, the AI orchestrator selects one or more MCP tools to execute. The tools are invoked via the MCP service layer, which validates parameters and invokes the corresponding domain microservices. A key aspect of autonomous execution is to define workflows with processing predefined prompts, and key capabilities include data extraction from user input, identifying missing inputs, and performing human-in-the-loop validation to obtain any missing inputs from the user before proceeding with tool execution. All of these are implemented in a generic manner, decoupled from domain-specific logic so that new capabilities can be added rapidly by defining new prompts and mapping them to existing or new tools. This key capability is the crux of the invention to enable autonomous execution of user requests in a generic manner with domain-agnostic design.
+
 
 The microservices return structured data that may be masked or redacted to avoid exposing sensitive information to the LLM. The AI orchestrator then constructs prompts including system instructions, safety constraints, contextual data, and user messages, and invokes the LLM to generate a natural language response that is returned to the user.
 
@@ -239,6 +244,16 @@ After intent detection, a workflow decision module applies business logic:
 - **Write vs. Read Operations**: If the intent corresponds to a write operation (e.g., transferring funds, blocking a card, or updating a profile), the system generates a confirmation message and waits for explicit user confirmation before proceeding.
 - **Tool Selection**: Based on the intent and extracted entities, the system selects one or more tools from the MCP registry that should be invoked to satisfy the user's request.
 
+### Human-in-the-Loop Entity Completion and Validation
+
+In one embodiment, the system implements a human-in-the-loop entity completion mechanism that uses the structure of the selected intent and associated tool schemas to determine when user input is incomplete or ambiguous, and to obtain clarification before any tool invocation that could result in an incorrect or unauthorized action.
+
+For each recognized intent, the system maintains a machine-readable specification of required and optional entities, including types, allowed value ranges, and domain-specific constraints (for example, that a transfer amount must be positive and that a source and destination account must be distinct). When an intent is detected, the AI orchestrator compares the entities extracted by NLU components against this specification to determine which entities are missing, ambiguous, or invalid.
+
+If one or more entities are missing or ambiguous, the AI orchestrator generates targeted clarification prompts asking the user for exactly the missing information. For example, if a user says, "Transfer $500," and the intent is `transfer.money` but no source or destination account is provided, the AI orchestrator generates questions such as "Which account should we transfer from?" and "Which account should we transfer to?" The AI orchestrator updates the session context with the user’s subsequent responses, re-validates the entity set against the specification, and only proceeds to tool selection once all required entities are present and valid.
+
+In some embodiments, the system further applies domain-specific validation rules before tool invocation. These rules can include checking that an amount is within daily transaction limits, that an account is active, and that the user’s role permits the requested operation. If validation fails, the AI orchestrator explains the reason to the user and may offer alternative actions rather than attempting the tool call.
+
 ---
 
 ### MCP Tool Selection and Execution
@@ -304,6 +319,20 @@ Audit logs are stored in a protected store and retained according to compliance 
 #### Role-Based Access Control
 
 Tools and backend services enforce role-based access control, ensuring that only authorized users can access sensitive data or perform certain operations. Authorization checks are performed at the backend service layer, not in the AI orchestrator or LLM.
+
+### Policy Engine for Data Protection and Tool Governance
+
+In one embodiment, the system includes a policy engine that governs which data may be exposed to large language models, which tools may be invoked for a given user or context, and how tool outputs must be transformed before inclusion in any LLM prompt.
+
+The policy engine evaluates rules expressed over attributes such as:
+- User role, segment, and jurisdiction.
+- Tool identity and operation type (for example, read vs. write).
+- Data field sensitivity classifications (for example, public, internal, confidential, regulated).
+- Target LLM provider (for example, internal model vs. external hosted provider) and its allowed data handling profile.
+
+Tools and backend services annotate output fields with sensitivity metadata or schema tags. Before constructing an LLM prompt, the AI orchestrator submits a policy evaluation request that includes the tool outputs and intended target model. The policy engine returns transformation requirements specifying which fields must be masked, redacted, tokenized, or omitted entirely. The AI orchestrator or MCP service layer then applies these transformations to the tool outputs before they are embedded into prompts.
+
+The same policy mechanism can be used to determine which tools appear as available to a given user or session at runtime. For example, a `block_card` tool may be disabled for users in certain jurisdictions, or enabled only for users with a particular authorization claim. The AI orchestrator receives the set of permitted tools based on policy evaluation and constrains its tool-selection and planning logic accordingly.
 
 ---
 
@@ -534,6 +563,20 @@ The MCP tool registry can be configured to expose or hide tools based on feature
 }
 ```
 
+### Configuration-Driven Domain Specialization
+
+In one embodiment, the system achieves domain-agnostic behavior by treating domain details as configuration rather than code. The AI orchestrator is implemented as a generic workflow engine that reads intent definitions, tool mappings, prompt templates, and validation rules from configuration artifacts (for example, JSON, YAML, or database-backed configuration), such that introducing a new domain or capability does not require changes to orchestrator source code.
+
+For a given deployment, domain experts or developers define:
+- A set of intents and their descriptions.
+- Mappings from intents to one or more MCP tools, including whether each intent corresponds to a read or write operation and what confirmation semantics apply.
+- Prompt templates used for system and user prompts, including placeholders for entities, tool outputs, and safety instructions.
+- Entity specifications and validation rules for each intent.
+
+The AI orchestrator loads these configurations at startup or on a scheduled basis and interprets them to construct workflows. For example, adding support for a new healthcare scheduling intent may consist of adding a new intent label, mapping it to existing scheduling tools exposed via the MCP layer, and defining appropriate prompt templates and validation rules. No changes to the orchestrator code are required, which enables rapid extension to new domains and use cases.
+
+In some embodiments, configuration changes can be safely rolled out using versioned configurations and feature flags, allowing new intents or tools to be enabled for a subset of users or sessions before global rollout.
+
 ---
 
 ## Claims
@@ -711,6 +754,30 @@ and wherein metrics collected during operation are used to update the experiment
 - a state graph defining a plurality of states representing workflow stages (e.g., intent detection, tool selection, tool execution, response generation),
 - transitions between states triggered by events or conditions, and
 - checkpoint mechanisms enabling the workflow to resume from saved states if interrupted.
+
+**31. The system of claim 1**, wherein the AI orchestrator is further configured to:
+- determine, based on a schema associated with the selected intent, that one or more required entities are missing or ambiguous;
+- generate at least one clarification message requesting the missing or disambiguating information from the user; and
+- update a session context with user responses and resume tool selection and invocation once all required entities are present and valid.
+
+**32. The system of claim 1**, further comprising a policy engine configured to:
+- classify fields in tool outputs according to sensitivity levels; and
+- determine, prior to construction of a prompt for the large language model, one or more transformations to be applied to the tool outputs, the transformations including at least one of masking, redaction, tokenization, or omission of sensitive fields.
+
+**33. The system of claim 1**, wherein the MCP service layer is further configured to:
+- provide, responsive to a discovery request from the AI orchestrator, a registry of tools that are currently enabled for a given user or session context, including respective input schemas and sensitivity metadata; and
+- hide or disable tools based on feature flags, user roles, or jurisdictional constraints,
+
+and wherein the AI orchestrator limits tool selection to tools indicated as enabled in the registry.
+
+**34. The method of claim 17**, further comprising:
+- determining, based on an entity specification associated with the user intent, that one or more required entities are missing or ambiguous;
+- transmitting at least one clarification question to the chat frontend requesting the missing or disambiguating information; and
+- upon receiving user responses, updating the session context and proceeding with tool selection and invocation when the entity specification is satisfied.
+
+**35. The method of claim 17**, further comprising:
+- evaluating, by a policy engine, one or more rules over the output data from the at least one tool and over metadata associated with a target large language model; and
+- in response to the evaluation, applying at least one of masking, redaction, tokenization, or omission to sensitive fields in the output data before including the output data in the constructed prompt.
 
 ---
 
