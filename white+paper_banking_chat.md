@@ -67,16 +67,234 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 ---
 
-## Brief Description of the Drawings
+## High-Level Overview of the System Architecture
 
 - **FIG. 1** is a block diagram of a system architecture for a task-oriented chatbot using an AI orchestrator and a Model Context Protocol service layer.
 
 ![FIG. 1 – System Architecture](diagrams/chatbot-architecture-fig1.png)
 
+```mermaid
+flowchart LR
+  subgraph Client
+    UI[Chat Frontend (Chat UI)]
+  end
+
+  subgraph Backend["Chat Backend"]
+    AUTH[Authentication & Session\nValidation]
+    SESS[Session Store Access\n(conversation history,\npreferences)]
+    ROUTE[Message Routing\n& Rate Limiting]
+  end
+
+  subgraph Orchestrator["AI Orchestrator"]
+    CTX[Session & Context\nManagement]
+    NLU_PIPE[Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)]
+    WF[Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)]
+    PROMPTS[Prompt Construction\n(system/user prompts,\nexamples, safety)]
+    RESP[LLM Invocation &\nResponse Post-Processing]
+  end
+
+  subgraph PolicyLayer["Policy & Governance"]
+    POLICY[Policy Engine\n(data exposure,\nrole/jurisdiction rules)]
+  end
+
+  subgraph MCP["MCP Service Layer"]
+    REG[Tool Registry\n(names, schemas,\nmetadata, discovery)]
+    VAL[Schema Validation\n& Parameter Checking]
+    MASK[Masking & Redaction\n(sensitive fields)]
+    LOG[Tool Invocation Logging\n(audit, metrics)]
+  end
+
+  subgraph Domain["Domain Services & Data"]
+    subgraph Services["Domain Microservices"]
+      ACCT[Account Service]
+      TXN[Transaction Service]
+      CARD[Card Service]
+      OTHER[Other Domain Services\n(e-commerce, support, etc.)]
+    end
+
+    subgraph DataStores["Data Stores & Caches"]
+      DB[(Primary Database)]
+      SSTORE[(Session Store)]
+      AUDIT[(Audit & Observability Store)]
+    end
+  end
+
+  %% Client to Backend
+  UI -->|HTTPS/WebSocket\nuser messages| AUTH
+  AUTH --> ROUTE
+  ROUTE -->|validated messages\nwith session ids| CTX
+  AUTH -->|session ids,\nauth context| SESS
+
+  %% Orchestrator internal flows
+  CTX --> NLU_PIPE
+  NLU_PIPE --> WF
+  WF -->|missing/ambiguous entities| CTX
+  WF --> PROMPTS
+  PROMPTS --> POLICY
+  POLICY --> PROMPTS
+  PROMPTS --> RESP
+
+  %% Orchestrator to MCP
+  WF -->|tool invocations\nwith parameters| VAL
+  VAL --> REG
+  VAL --> MASK
+  MASK --> Services
+  Services --> MASK
+  MASK --> WF
+  VAL --> LOG
+  Services --> DB
+  SESS --> SSTORE
+  LOG --> AUDIT
+
+  %% Responses back to client
+  RESP --> ROUTE
+  ROUTE -->|chatbot responses| UI
+```
+
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
 - **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
 - **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
 - **FIG. 5** is a flow diagram illustrating error handling, circuit breaking, and human escalation for low-confidence or failed tool executions.
+
+```mermaid
+flowchart TD
+  U[User] --> UI2[Chat Frontend]
+  UI2 --> BE2[Chat Backend]
+  BE2 --> AUTH2[Authenticate & Load Session]
+  AUTH2 --> ORCH2[AI Orchestrator]
+
+  ORCH2 --> NLU2[Hybrid NLU
+  (primary, secondary,
+  LLM-based)]
+  NLU2 -->|intent + entities| DEC2{Confident &
+  entities complete?}
+
+  DEC2 -->|No| CLAR2[Ask Clarification
+  / Collect Entities]
+  CLAR2 --> ORCH2
+
+  DEC2 -->|Yes| WF2[Select Workflow &
+  Tools via Config]
+  WF2 --> TOOLSEL2[Select MCP Tools
+  from Registry]
+  TOOLSEL2 --> MCP2[MCP Service Layer]
+  MCP2 --> DOM2[Domain Services]
+  DOM2 --> MCP2
+
+  MCP2 --> MASK2[Mask/Redact
+  Sensitive Data]
+  MASK2 --> PROMPT2[Construct LLM Prompt
+  (system + user + tools)]
+  PROMPT2 --> LLM2[LLM Invocation]
+  LLM2 --> RESP2[Validate & Format
+  Response]
+  RESP2 --> BE2
+  BE2 --> UI2
+  UI2 --> U
+```
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant UI as Chat Frontend
+  participant BE as Chat Backend
+  participant ORCH as AI Orchestrator
+  participant NLU as NLU Services
+  participant MCP as MCP Server
+  participant SVC as Domain Services
+
+  U->>UI: Enter message
+  UI->>BE: POST /chat (message, token)
+  BE->>BE: Validate auth & load session
+  BE->>ORCH: Forward message + context
+
+  ORCH->>NLU: Detect intent & entities
+  NLU-->>ORCH: Intent, confidence, entities
+  ORCH->>ORCH: Check confidence, entities
+  ORCH->>U: (via UI/BE) Clarification (if needed)
+  U-->>ORCH: Additional details (via UI/BE)
+
+  ORCH->>ORCH: Select workflow & MCP tools
+  ORCH->>MCP: Invoke tool(s) with params
+  MCP->>SVC: Call domain API(s)
+  SVC-->>MCP: Structured results
+  MCP->>MCP: Mask/redact sensitive fields
+  MCP-->>ORCH: Tool outputs
+
+  ORCH->>ORCH: Build prompts (system + user + tools)
+  ORCH->>ORCH: Invoke LLM & post-process
+  ORCH-->>BE: Final response payload
+  BE-->>UI: Chatbot response
+  UI-->>U: Render response
+```
+
+```mermaid
+flowchart LR
+  REG4[MCP Tool Registry] --- CFG4[Config Store
+  (schemas, metadata,
+  feature flags)]
+
+  subgraph REGISTRY["MCP Registry View"]
+    T1[Tool: get_accounts
+    - name
+    - JSON schema
+    - sensitivity tags
+    - enabled=true]
+
+    T2[Tool: transfer_funds
+    - name
+    - JSON schema
+    - sensitivity tags
+    - operation=write
+    - requiresConfirmation=true]
+
+    T3[Tool: block_card
+    - name
+    - JSON schema
+    - jurisdiction rules
+    - featureFlag=enable_block_card]
+  end
+
+  ORCH4[AI Orchestrator] -->|tool discovery| REG4
+  REG4 --> ORCH4
+
+  REG4 -->|maps to| API1[Account APIs]
+  REG4 -->|maps to| API2[Payment APIs]
+  REG4 -->|maps to| API3[Card APIs]
+  CFG4 --> REG4
+```
+
+```mermaid
+flowchart TD
+  START5([Start]) --> NLU5[NLU/Intent Detection]
+  NLU5 --> DEC5{Low confidence
+  or unknown?}
+
+  DEC5 -->|Yes| CLAR5[Ask Clarification]
+  CLAR5 --> RETRY5{Max attempts
+  reached?}
+  RETRY5 -->|No| NLU5
+  RETRY5 -->|Yes| ESC5[Offer Human
+  Escalation]
+
+  DEC5 -->|No| TOOL5[Invoke MCP Tool]
+  TOOL5 --> RES5{Tool success?}
+
+  RES5 -->|No| CB5[Update Failure Counters
+  & Circuit Breaker]
+  CB5 --> CBOPEN5{Circuit open?}
+  CBOPEN5 -->|Yes| MSG5[Return Fallback
+  Message + Escalation]
+  CBOPEN5 -->|No| RETRYT5[Retry with
+  Backoff]
+  RETRYT5 --> TOOL5
+
+  RES5 -->|Yes| RESP5[Generate LLM Response]
+  RESP5 --> END5([Return Response
+  to User])
+
+  MSG5 --> END5
+```
 
 ---
 
@@ -688,7 +906,7 @@ and wherein metrics collected during operation are used to update the experiment
 - receiving, at a chat backend, a user message from a chat frontend together with authentication information;
 - validating the authentication information and associating the user message with a session context;
 - sending the user message and session context to an AI orchestrator;
-- determining, by the AI orchestrator, a user intent and one or more entities using at least one natural language understanding component;
+- determining, by the AI orchestrator, a user intent and one or more entities using at least one natural language understanding (NLU) component;
 - selecting, based on the user intent, at least one tool from a plurality of tools exposed via a Model Context Protocol (MCP) service layer;
 - invoking, via the MCP service layer, the at least one tool to perform a domain-specific function using one or more backend domain services;
 - receiving, at the AI orchestrator, output data from the at least one tool;
@@ -801,3 +1019,81 @@ A system and method for implementing task-oriented chatbots using agentic artifi
 ---
 
 *End of Patent Specification*
+
+```mermaid
+flowchart LR
+    subgraph Client
+        UI[Chat Frontend (Chat UI)]
+    end
+
+    subgraph Backend["Chat Backend"]
+        AUTH[Authentication & Session\nValidation]
+        SESS[Session Store Access\n(conversation history,\npreferences)]
+        ROUTE[Message Routing\n& Rate Limiting]
+    end
+
+    subgraph Orchestrator["AI Orchestrator"]
+        CTX[Session & Context\nManagement]
+        NLU_PIPE[Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)]
+        WF[Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)]
+        PROMPTS[Prompt Construction\n(system/user prompts,\nexamples, safety)]
+        RESP[LLM Invocation &\nResponse Post-Processing]
+    end
+
+    subgraph PolicyLayer["Policy & Governance"]
+        POLICY[Policy Engine\n(data exposure,\nrole/jurisdiction rules)]
+    end
+
+    subgraph MCP["MCP Service Layer"]
+        REG[Tool Registry\n(names, schemas,\nmetadata, discovery)]
+        VAL[Schema Validation\n& Parameter Checking]
+        MASK[Masking & Redaction\n(sensitive fields)]
+        LOG[Tool Invocation Logging\n(audit, metrics)]
+    end
+
+    subgraph Domain["Domain Services & Data"]
+        subgraph Services["Domain Microservices"]
+            ACCT[Account Service]
+            TXN[Transaction Service]
+            CARD[Card Service]
+            OTHER[Other Domain Services\n(e-commerce, support, etc.)]
+        end
+
+        subgraph DataStores["Data Stores & Caches"]
+            DB[(Primary Database)]
+            SSTORE[(Session Store)]
+            AUDIT[(Audit & Observability Store)]
+        end
+    end
+
+    %% Client to Backend
+    UI -->|HTTPS/WebSocket\nuser messages| AUTH
+    AUTH --> ROUTE
+    ROUTE -->|validated messages\nwith session ids| CTX
+    AUTH -->|session ids,\nauth context| SESS
+
+    %% Orchestrator internal flows
+    CTX --> NLU_PIPE
+    NLU_PIPE --> WF
+    WF -->|missing/ambiguous entities| CTX
+    WF --> PROMPTS
+    PROMPTS --> POLICY
+    POLICY --> PROMPTS
+    PROMPTS --> RESP
+
+    %% Orchestrator to MCP
+    WF -->|tool invocations\nwith parameters| VAL
+    VAL --> REG
+    VAL --> MASK
+    MASK --> Services
+    Services --> MASK
+    MASK --> WF
+    VAL --> LOG
+    Services --> DB
+    SESS --> SSTORE
+    LOG --> AUDIT
+
+    %% Responses back to client
+    RESP --> ROUTE
+    ROUTE -->|chatbot responses| UI
+```
