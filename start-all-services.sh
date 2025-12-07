@@ -50,30 +50,23 @@ echo -e "${YELLOW}Stopping any existing services...${NC}"
 pm2 delete all 2>/dev/null || true
 echo ""
 
-# Phase 1: Infrastructure Services
-echo -e "${BLUE}═══ Phase 1: Infrastructure Services ═══${NC}"
-start_service "api-gateway" "./poc-api-gateway" "server.js" 3001
-sleep 3
-
-# Phase 2: Processing Services
-echo ""
-echo -e "${BLUE}═══ Phase 2: Processing Services ═══${NC}"
-start_service "nlp-service" "./poc-nlp-service/src" "server.js" 3002
+# Phase 1: Processing Services
+echo -e "${BLUE}═══ Phase 1: Processing Services ═══${NC}"
 start_service "nlu-service" "./poc-nlu-service/src" "server.js" 3003
 start_service "mcp-service" "./poc-mcp-service/src" "server.js" 3004
 sleep 3
 
-# Phase 3: Domain Services
+# Phase 2: Domain Services
 echo ""
-echo -e "${BLUE}═══ Phase 3: Domain Services ═══${NC}"
-start_service "banking-service" "./poc-banking-service" "server.js" 3005
-start_service "chat-backend" "./poc-chat-backend" "server.js" 3006
+echo -e "${BLUE}═══ Phase 2: Domain Services ═══${NC}"
+start_service "banking-service" "./poc-banking-service" "server.js" 3010
+start_service "chat-backend" "./poc-chat-backend" "server.js" 3001
 sleep 3
 
-# Phase 4: Frontend Services
+# Phase 3: Frontend Services
 echo ""
-echo -e "${BLUE}═══ Phase 4: Frontend Services ═══${NC}"
-start_service "agent-ui" "./poc-agent-ui" "server.js" 8081
+echo -e "${BLUE}═══ Phase 3: Frontend Services ═══${NC}"
+start_service "frontend" "./poc-frontend" "node_modules/.bin/vite" 3002
 
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
@@ -88,7 +81,6 @@ pm2 status
 echo ""
 echo -e "${YELLOW}Service URLs:${NC}"
 echo "  • API Gateway:      http://localhost:3001"
-echo "  • NLP Service:      http://localhost:3002"
 echo "  • NLU Service:      http://localhost:3003"
 echo "  • MCP Service:      http://localhost:3004"
 echo "  • Banking Service:  http://localhost:3005"
