@@ -163,20 +163,14 @@ flowchart TD
   BE2 --> AUTH2[Authenticate & Load Session]
   AUTH2 --> ORCH2[AI Orchestrator]
 
-  ORCH2 --> NLU2[Hybrid NLU
-  (primary, secondary,
-  LLM-based)]
-  NLU2 -->|intent + entities| DEC2{Confident &
-  entities complete?}
+  ORCH2 --> NLU2["Hybrid NLU - primary, secondary, LLM-based"]
+  NLU2 -->|intent + entities| DEC2{"Confident & entities complete?"}
 
-  DEC2 -->|No| CLAR2[Ask Clarification
-  / Collect Entities]
+  DEC2 -->|No| CLAR2["Ask Clarification / Collect Entities"]
   CLAR2 --> ORCH2
 
-  DEC2 -->|Yes| WF2[Select Workflow &
-  Tools via Config]
-  WF2 --> TOOLSEL2[Select MCP Tools
-  from Registry]
+  DEC2 -->|Yes| WF2["Select Workflow & Tools via Config"]
+  WF2 --> TOOLSEL2["Select MCP Tools from Registry"]
   TOOLSEL2 --> MCP2[MCP Service Layer]
   MCP2 --> DOM2[Domain Services]
   DOM2 --> MCP2
