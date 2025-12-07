@@ -2,6 +2,113 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
 
+// Reusable handler: process a session message (used by both /sessions/:sessionId/messages and /chat/message compatibility)
+async function processSessionMessageHandler(req, res, next) {
+    try {
+        const { sessionId } = req.params;
+        const { content, type, metadata } = req.body;
+
+        if (!content) {
+            return res.status(400).json({ error: 'Message content required', timestamp: new Date().toISOString() });
+        }
+
+        const { chatService, agentOrchestrator, sessionManager } = req.app.locals.services;
+
+        if (!chatService || !agentOrchestrator || !sessionManager) {
+            return res.status(503).json({ error: 'Services not available', timestamp: new Date().toISOString() });
+        }
+
+        // Get session (try sessionManager first, then fallback to chatService if present)
+        let session = null;
+        try {
+            if (sessionManager && typeof sessionManager.getSession === 'function') {
+                session = await sessionManager.getSession(sessionId);
+            }
+        } catch (err) {
+            // ignore and try chatService fallback
+            session = null;
+        }
+
+        // If sessionManager doesn't know about this session, check chatService (in-memory chat sessions)
+        if (!session && chatService && typeof chatService.getSession === 'function') {
+            try {
+                const cs = chatService.getSession(sessionId);
+                if (cs) session = cs;
+            } catch (err) {
+                // keep session null
+            }
+        }
+
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found', sessionId, timestamp: new Date().toISOString() });
+        }
+
+        // Process message via chatService
+        const message = await chatService.processMessage(
+            sessionId,
+            {
+                content,
+                type: type || 'text',
+                attachments: req.body.attachments || []
+            },
+            metadata || {}
+        );
+
+        // Process through orchestrator
+        const agentResult = await agentOrchestrator.processMessage(sessionId, message, session.state || {});
+
+        // Send response
+        const response = await chatService.sendResponse(
+            sessionId,
+            agentResult.finalResponse,
+            {
+                agentId: 'orchestrator',
+                agentType: 'ai',
+                processingTime: agentResult.processingTime
+            }
+        );
+
+        logger.info('Message processed via REST API', { sessionId, messageId: message.id, responseId: response.id });
+
+        return res.status(200).json({
+            message,
+            response,
+            agentResult: { processingTime: agentResult.processingTime, agentsInvolved: agentResult.agentsInvolved },
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('Message processing error via REST API', {
+            error: error.message,
+            sessionId: req.params?.sessionId,
+            messageContent: req.body?.content?.substring(0, 100)
+        });
+
+        return res.status(500).json({ error: 'Failed to process message', details: error.message, timestamp: new Date().toISOString() });
+    }
+}
+
+// Reusable handler: retrieve session history (used by both /sessions/:sessionId/history and /chat/history compatibility)
+async function getSessionHistoryHandler(req, res, next) {
+    try {
+        const { sessionId } = req.params;
+        const limit = parseInt(req.query.limit) || 50;
+
+        const { chatService } = req.app.locals.services;
+        if (!chatService) {
+            return res.status(503).json({ error: 'Chat service not available', timestamp: new Date().toISOString() });
+        }
+
+        const history = chatService.getConversationHistory(sessionId, limit);
+
+        return res.status(200).json({ sessionId, history, count: history.length, timestamp: new Date().toISOString() });
+
+    } catch (error) {
+        logger.error('History retrieval error', { error: error.message, sessionId: req.params.sessionId });
+        return res.status(500).json({ error: 'Failed to retrieve history', details: error.message, timestamp: new Date().toISOString() });
+    }
+}
+
 /**
  * Compatibility routes for frontend expectations
  * - POST /api/chat/message -> maps to POST /api/sessions/:sessionId/messages
@@ -18,11 +125,11 @@ router.post('/chat/message', async (req, res, next) => {
             return res.status(400).json({ error: 'Session ID required in X-Session-ID header or body', timestamp: new Date().toISOString() });
         }
 
-        // Reuse the session messages handler by forwarding to the internal route
+        // Delegate to the reusable handler
         req.params.sessionId = sessionId;
         req.body.content = req.body.message;
 
-        return router.handle(req, res, next);
+        return processSessionMessageHandler(req, res, next);
     } catch (err) {
         next(err);
     }
@@ -39,7 +146,7 @@ router.get('/chat/history', async (req, res, next) => {
 
         // Forward to the existing sessions/:sessionId/history handler
         req.params.sessionId = sessionId;
-        return router.handle(req, res, next);
+        return getSessionHistoryHandler(req, res, next);
     } catch (err) {
         next(err);
     }
@@ -112,40 +219,7 @@ router.post('/process', async (req, res) => {
  * @access Private
  */
 router.get('/sessions/:sessionId/history', async (req, res) => {
-    try {
-        const { sessionId } = req.params;
-        const limit = parseInt(req.query.limit) || 50;
-
-        const { chatService } = req.app.locals.services;
-        
-        if (!chatService) {
-            return res.status(503).json({
-                error: 'Chat service not available',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        const history = chatService.getConversationHistory(sessionId, limit);
-
-        res.status(200).json({
-            sessionId,
-            history,
-            count: history.length,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        logger.error('History retrieval error', {
-            error: error.message,
-            sessionId: req.params.sessionId
-        });
-
-        res.status(500).json({
-            error: 'Failed to retrieve history',
-            details: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
+    return getSessionHistoryHandler(req, res);
 });
 
 /**
@@ -220,19 +294,19 @@ router.post('/sessions', async (req, res) => {
             });
         }
 
-        // Create chat session
-        const chatSession = await chatService.createChatSession(userId, null, userData || {});
-
-        // Create session manager session
+        // Create session manager session first to generate canonical sessionId
         const session = await sessionManager.createSession(userId, metadata || {});
 
+        // Use the sessionManager-generated sessionId when creating chatService session so both stay in sync
+        const chatSession = await chatService.createChatSession(userId, session.sessionId, userData || {});
+
         logger.info('Session created via REST API', {
-            sessionId: chatSession.sessionId,
+            sessionId: session.sessionId,
             userId
         });
 
         res.status(201).json({
-            sessionId: chatSession.sessionId,
+            sessionId: session.sessionId,
             chatSession,
             session,
             timestamp: new Date().toISOString()
@@ -258,94 +332,7 @@ router.post('/sessions', async (req, res) => {
  * @access Private
  */
 router.post('/sessions/:sessionId/messages', async (req, res) => {
-    try {
-        const { sessionId } = req.params;
-        const { content, type, metadata } = req.body;
-
-        if (!content) {
-            return res.status(400).json({
-                error: 'Message content required',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        const { chatService, agentOrchestrator, sessionManager } = req.app.locals.services;
-        
-        if (!chatService || !agentOrchestrator || !sessionManager) {
-            return res.status(503).json({
-                error: 'Services not available',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        // Get session
-        const session = await sessionManager.getSession(sessionId);
-        if (!session) {
-            return res.status(404).json({
-                error: 'Session not found',
-                sessionId,
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        // Process message
-        const message = await chatService.processMessage(
-            sessionId,
-            {
-                content,
-                type: type || 'text',
-                attachments: req.body.attachments || []
-            },
-            metadata || {}
-        );
-
-        // Process through orchestrator
-        const agentResult = await agentOrchestrator.processMessage(
-            sessionId,
-            message,
-            session.state || {}
-        );
-
-        // Send response
-        const response = await chatService.sendResponse(
-            sessionId,
-            agentResult.finalResponse,
-            {
-                agentId: 'orchestrator',
-                agentType: 'ai',
-                processingTime: agentResult.processingTime
-            }
-        );
-
-        logger.info('Message processed via REST API', {
-            sessionId,
-            messageId: message.id,
-            responseId: response.id
-        });
-
-        res.status(200).json({
-            message,
-            response,
-            agentResult: {
-                processingTime: agentResult.processingTime,
-                agentsInvolved: agentResult.agentsInvolved
-            },
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        logger.error('Message processing error via REST API', {
-            error: error.message,
-            sessionId: req.params.sessionId,
-            messageContent: req.body?.content?.substring(0, 100)
-        });
-
-        res.status(500).json({
-            error: 'Failed to process message',
-            details: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
+    return processSessionMessageHandler(req, res);
 });
 
 /**

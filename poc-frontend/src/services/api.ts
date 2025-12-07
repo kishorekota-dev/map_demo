@@ -16,7 +16,7 @@ class ApiService {
 
   constructor() {
     this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
-    this.sessionId = this.generateSessionId();
+    this.sessionId = this.generateSessionId(); // temporary until we create a real session
     
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -27,6 +27,9 @@ class ApiService {
     });
 
     this.setupInterceptors();
+    
+    // Initialize a real session with the backend
+    this.initializeSession();
   }
 
   private setupInterceptors() {
@@ -79,6 +82,28 @@ class ApiService {
 
   public setSessionId(sessionId: string): void {
     this.sessionId = sessionId;
+  }
+
+  // Initialize a session with the backend
+  private async initializeSession(): Promise<void> {
+    try {
+      const response = await this.client.post('/sessions', {
+        userId: 'frontend-user', // TODO: replace with actual user identification
+        userData: {},
+        metadata: {
+          userAgent: navigator.userAgent,
+          timestamp: new Date().toISOString()
+        }
+      });
+
+      if (response.data.sessionId) {
+        this.sessionId = response.data.sessionId;
+        console.log('Session initialized:', this.sessionId);
+      }
+    } catch (error) {
+      console.error('Failed to initialize session, using temporary ID:', error);
+      // Keep the temporary session ID if backend is unavailable
+    }
   }
 
   // Chat endpoints
