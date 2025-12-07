@@ -196,10 +196,11 @@ sequenceDiagram
   U->>UI: Enter message
   UI->>BE: POST /chat (message, token)
   BE->>BE: Validate auth & load session
-  BE->>ORCH: Forward message + context
 
-  ORCH->>NLU: Detect intent & entities
-  NLU-->>ORCH: Intent, confidence, entities
+  BE->>NLU: Detect intent & entities
+  NLU-->>BE: Intent, confidence, entities
+
+  BE->>ORCH: Forward message + context + intent
   ORCH->>ORCH: Check confidence, entities
   ORCH->>U: (via UI/BE) Clarification (if needed)
   U-->>ORCH: Additional details (via UI/BE)
