@@ -98,6 +98,53 @@ export interface ChatHistory {
   };
 }
 
+// Authentication types
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  data?: {
+    user: UserProfile;
+    tokens: TokenPair;
+    roles?: string[];
+  };
+  user?: UserProfile;
+  tokens?: TokenPair;
+  error?: string;
+}
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn?: number;
+}
+
+export interface UserProfile {
+  userId: string;
+  username: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  roles?: string[];
+  customerId?: string;
+}
+
+// Session types
+export interface SessionDetail {
+  id: string;
+  sessionId: string;
+  userId: string;
+  createdAt: Date;
+  lastActivity: Date;
+  isActive: boolean;
+  status?: string;
+  messageCount?: number;
+}
+
 export interface PaginationParams {
   offset: number;
   limit: number;
