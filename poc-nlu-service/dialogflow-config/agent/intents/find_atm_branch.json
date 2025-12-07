@@ -1,0 +1,30 @@
+{
+  "displayName": "find.atm.branch",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Find ATM"}]},
+    {"parts": [{"text": "Where is the nearest branch"}]},
+    {"parts": [{"text": "Locate ATM"}]},
+    {"parts": [{"text": "Branch near me"}]},
+    {"parts": [{"text": "Find bank branch"}]},
+    {"parts": [{"text": "ATM locations"}]},
+    {"parts": [{"text": "Closest ATM"}]},
+    {"parts": [{"text": "Branch hours"}]},
+    {"parts": [{"text": "Is the branch open"}]},
+    {"parts": [{"text": "Bank near me"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "location",
+      "entityType": "@sys.location",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you find the nearest ATM or branch location."]
+      }
+    }
+  ]
+}

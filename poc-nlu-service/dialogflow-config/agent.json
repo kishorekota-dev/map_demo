@@ -1,0 +1,12 @@
+{
+  "displayName": "POC Banking Assistant",
+  "defaultLanguageCode": "en",
+  "supportedLanguageCodes": ["en-US", "en-GB"],
+  "timeZone": "America/New_York",
+  "description": "Comprehensive banking chatbot with full NLU capabilities",
+  "apiVersion": "API_VERSION_V2",
+  "tier": "TIER_STANDARD",
+  "enableLogging": true,
+  "matchMode": "MATCH_MODE_HYBRID",
+  "classificationThreshold": 0.3
+}

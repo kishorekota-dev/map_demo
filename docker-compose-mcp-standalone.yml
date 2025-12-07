@@ -1,0 +1,50 @@
+version: '3.8'
+
+# Standalone MCP Service - requires Banking Service running separately
+# Use this for development/testing when Banking Service is already running
+
+services:
+  # MCP Service - Model Context Protocol Host
+  poc-mcp-service:
+    build:
+      context: ./poc-mcp-service
+      dockerfile: Dockerfile
+    container_name: poc-mcp-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3004
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - HOST=0.0.0.0
+      
+      # Banking Service Configuration (assumes running on host)
+      - BANKING_SERVICE_URL=${BANKING_SERVICE_URL:-http://host.docker.internal:3005/api/v1}
+      
+      # WebSocket Configuration
+      - WS_PORT=3004
+      - WS_PATH=/ws
+      - WS_HEARTBEAT_INTERVAL=30000
+      - WS_MAX_CONNECTIONS=100
+      
+      # Security
+      - JWT_SECRET=${MCP_JWT_SECRET:-mcp-dev-secret}
+      - JWT_EXPIRY=24h
+      - WS_AUTH_REQUIRED=false
+      
+      # CORS
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8080}
+      
+    volumes:
+      - ./poc-mcp-service/logs:/app/logs
+      # Uncomment for development with live reload
+      # - ./poc-mcp-service/src:/app/src
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

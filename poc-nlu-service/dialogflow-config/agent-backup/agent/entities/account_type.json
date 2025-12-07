@@ -1,0 +1,13 @@
+{
+  "displayName": "account_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "checking", "synonyms": ["checking", "checking account", "current account", "checking acct"]},
+    {"value": "savings", "synonyms": ["savings", "savings account", "saving", "savings acct"]},
+    {"value": "credit", "synonyms": ["credit", "credit card", "cc", "card"]},
+    {"value": "loan", "synonyms": ["loan", "loan account", "lending"]},
+    {"value": "mortgage", "synonyms": ["mortgage", "home loan", "housing loan"]},
+    {"value": "investment", "synonyms": ["investment", "brokerage", "trading"]},
+    {"value": "business", "synonyms": ["business", "business account", "commercial"]}
+  ]
+}

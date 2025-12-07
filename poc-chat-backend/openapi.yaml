@@ -1,0 +1,820 @@
+openapi: 3.0.3
+info:
+  title: POC Chat Backend API
+  description: |
+    Real-time chat processing backend with agent orchestration for POC Banking Chatbot.
+    
+    ## Features
+    - Real-time messaging via WebSocket
+    - Multi-agent orchestration
+    - Banking service integration
+    - NLP/NLU processing
+    - Session management with database persistence
+    - Chat history storage and retrieval
+    - Session resume functionality for unresolved conversations
+    - JWT authentication
+    - Rate limiting
+    
+    ## Architecture
+    This service integrates with:
+    - **API Gateway** (port 3001): Main entry point
+    - **Banking Service** (port 3005): Banking operations
+    - **NLP Service** (port 3002): Natural language processing
+    - **NLU Service** (port 3003): Natural language understanding
+    - **MCP Service** (port 3004): Model Context Protocol
+    - **PostgreSQL Database**: Chat history and session persistence
+    
+  version: 1.0.0
+  contact:
+    name: POC Development Team
+    email: support@poc-banking.example.com
+  license:
+    name: ISC
+
+servers:
+  - url: http://localhost:3006
+    description: Development server
+  - url: http://localhost:3006/api
+    description: API base path
+
+tags:
+  - name: Health
+    description: Health check and service status endpoints
+  - name: Authentication
+    description: User authentication endpoints
+  - name: Sessions
+    description: Chat session management
+  - name: Messages
+    description: Message processing and history
+  - name: Agents
+    description: Agent orchestration status
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Check if the service is running and healthy
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: 'healthy'
+                service: 'poc-chat-backend'
+                version: '1.0.0'
+                uptime: 12345
+                timestamp: '2025-10-11T10:00:00.000Z'
+                dependencies:
+                  database:
+                    status: 'connected'
+                    responseTime: 15
+                  redis:
+                    status: 'connected'
+                    responseTime: 5
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: 'john.doe'
+                password:
+                  type: string
+                  format: password
+                  example: 'SecurePassword123!'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sessions:
+    post:
+      tags:
+        - Sessions
+      summary: Create new chat session
+      description: Create a new chat session for a user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userId
+              properties:
+                userId:
+                  type: string
+                  example: 'user_12345'
+                metadata:
+                  type: object
+                  properties:
+                    userAgent:
+                      type: string
+                    ipAddress:
+                      type: string
+                    deviceInfo:
+                      type: string
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sessions/{sessionId}:
+    get:
+      tags:
+        - Sessions
+      summary: Get session details
+      description: Retrieve detailed information about a specific session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Session ID
+      responses:
+        '200':
+          description: Session details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetail'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Sessions
+      summary: End session
+      description: End an active chat session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: 'user_request'
+      responses:
+        '200':
+          description: Session ended successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  sessionId:
+                    type: string
+                  reason:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/users/{userId}/sessions:
+    get:
+      tags:
+        - Sessions
+      summary: Get user sessions
+      description: |
+        Get all sessions for a user. Can filter by type:
+        - `active`: Currently active sessions
+        - `unresolved`: Sessions that haven't been fully resolved
+        - `recent`: Most recent sessions (up to limit)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: User ID
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [active, unresolved, recent]
+            default: active
+          description: Type of sessions to retrieve
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+          description: Maximum number of sessions (only for type=recent)
+      responses:
+        '200':
+          description: User sessions retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSessionsResponse'
+              example:
+                userId: 'user_12345'
+                type: 'unresolved'
+                count: 2
+                sessions:
+                  - sessionId: 'sess_abc123'
+                    status: 'active'
+                    isActive: true
+                    isResolved: false
+                    lastActivity: '2025-10-11T09:45:00.000Z'
+                    messageCount: 15
+                    createdAt: '2025-10-11T09:00:00.000Z'
+                    recentMessages:
+                      - message_id: 'msg_xyz789'
+                        content: 'I need help with my account'
+                        direction: 'incoming'
+                        created_at: '2025-10-11T09:45:00.000Z'
+
+  /api/sessions/{sessionId}/resume:
+    post:
+      tags:
+        - Sessions
+      summary: Resume chat session
+      description: |
+        Resume an existing chat session. This endpoint:
+        - Loads the session from database
+        - Retrieves full conversation history
+        - Reactivates the session
+        - Returns context for continuing the conversation
+        
+        Use this when a user wants to continue an unresolved conversation.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Session ID to resume
+      responses:
+        '200':
+          description: Session resumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResumeResponse'
+              example:
+                success: true
+                sessionId: 'sess_abc123'
+                session:
+                  userId: 'user_12345'
+                  isActive: true
+                  lastActivity: '2025-10-11T10:00:00.000Z'
+                  messageCount: 15
+                  conversationContext:
+                    currentIntent: 'account_balance'
+                    bankingContext:
+                      accountId: 'ACC123'
+                history:
+                  - message_id: 'msg_001'
+                    direction: 'incoming'
+                    content: 'What is my account balance?'
+                    created_at: '2025-10-11T09:00:00.000Z'
+                  - message_id: 'msg_002'
+                    direction: 'outgoing'
+                    content: 'Let me check that for you.'
+                    created_at: '2025-10-11T09:00:05.000Z'
+                message: 'Session resumed successfully. You can continue the conversation.'
+                timestamp: '2025-10-11T10:00:00.000Z'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sessions/{sessionId}/resolve:
+    post:
+      tags:
+        - Sessions
+      summary: Mark session as resolved
+      description: Mark a chat session as fully resolved (all user queries answered)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+                  description: Optional notes about the resolution
+                  example: 'User query fully answered, account balance provided'
+      responses:
+        '200':
+          description: Session marked as resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  sessionId:
+                    type: string
+                  message:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/sessions/{sessionId}/history:
+    get:
+      tags:
+        - Messages
+      summary: Get conversation history
+      description: Retrieve the full conversation history for a session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Conversation history retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationHistoryResponse'
+
+  /api/sessions/{sessionId}/messages:
+    post:
+      tags:
+        - Messages
+      summary: Send message
+      description: Send a message in a session and get agent response
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            example:
+              content: 'What is my account balance?'
+              type: 'text'
+              metadata:
+                clientTimestamp: '2025-10-11T10:00:00.000Z'
+      responses:
+        '200':
+          description: Message processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /api/chat/message:
+    post:
+      tags:
+        - Messages
+      summary: Send message (convenience endpoint)
+      description: |
+        Convenience endpoint for sending messages. 
+        - Requires X-Session-ID header or sessionId in body
+        - Auto-creates session if it doesn't exist
+        - Compatible with legacy frontend implementations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: X-Session-ID
+          in: header
+          schema:
+            type: string
+          description: Session ID (alternative to body parameter)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/SendMessageRequest'
+                - type: object
+                  properties:
+                    sessionId:
+                      type: string
+                      description: Session ID (alternative to header)
+                    userId:
+                      type: string
+                      description: User ID (for auto-creating sessions)
+      responses:
+        '200':
+          description: Message processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /api/chat/history:
+    get:
+      tags:
+        - Messages
+      summary: Get chat history (convenience endpoint)
+      description: Convenience endpoint for retrieving chat history
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Chat history retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationHistoryResponse'
+
+  /api/agents:
+    get:
+      tags:
+        - Agents
+      summary: Get agent status
+      description: Get status of all available agents in the orchestrator
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Agent status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatusResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT authentication token
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        service:
+          type: string
+        version:
+          type: string
+        uptime:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+        dependencies:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              responseTime:
+                type: number
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        token:
+          type: string
+          description: JWT token for authentication
+        expiresIn:
+          type: string
+          example: '24h'
+        user:
+          type: object
+          properties:
+            userId:
+              type: string
+            username:
+              type: string
+
+    SessionResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        isActive:
+          type: boolean
+        status:
+          type: string
+          enum: [active, pending, resolved, expired, terminated]
+
+    SessionDetail:
+      allOf:
+        - $ref: '#/components/schemas/SessionResponse'
+        - type: object
+          properties:
+            lastActivity:
+              type: string
+              format: date-time
+            messageCount:
+              type: integer
+            conversationContext:
+              type: object
+            metadata:
+              type: object
+
+    UserSessionsResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+        type:
+          type: string
+          enum: [active, unresolved, recent]
+        count:
+          type: integer
+        sessions:
+          type: array
+          items:
+            type: object
+            properties:
+              sessionId:
+                type: string
+              status:
+                type: string
+              isActive:
+                type: boolean
+              isResolved:
+                type: boolean
+              lastActivity:
+                type: string
+                format: date-time
+              messageCount:
+                type: integer
+              createdAt:
+                type: string
+                format: date-time
+              recentMessages:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+
+    SessionResumeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        sessionId:
+          type: string
+        session:
+          type: object
+          properties:
+            userId:
+              type: string
+            isActive:
+              type: boolean
+            lastActivity:
+              type: string
+              format: date-time
+            messageCount:
+              type: integer
+            conversationContext:
+              type: object
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ConversationHistoryResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        count:
+          type: integer
+        hasMore:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+
+    SendMessageRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          description: Message content
+        type:
+          type: string
+          default: text
+          enum: [text, image, file, action]
+        metadata:
+          type: object
+          description: Additional message metadata
+
+    MessageResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        message:
+          $ref: '#/components/schemas/Message'
+        response:
+          $ref: '#/components/schemas/Message'
+        agent:
+          type: object
+          properties:
+            type:
+              type: string
+            confidence:
+              type: number
+            agentsInvolved:
+              type: array
+              items:
+                type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        message_id:
+          type: string
+        direction:
+          type: string
+          enum: [incoming, outgoing]
+        content:
+          type: string
+        message_type:
+          type: string
+        intent:
+          type: string
+        confidence_score:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        sequence_number:
+          type: integer
+
+    AgentStatusResponse:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+              availability:
+                type: boolean
+              lastCheck:
+                type: string
+                format: date-time
+        summary:
+          type: object
+          properties:
+            totalAgents:
+              type: integer
+            activeAgents:
+              type: integer
+            healthyAgents:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        requestId:
+          type: string

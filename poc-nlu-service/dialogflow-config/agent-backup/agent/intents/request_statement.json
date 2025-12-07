@@ -1,0 +1,40 @@
+{
+  "displayName": "request.statement",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "I need my statement"}]},
+    {"parts": [{"text": "Send me my bank statement"}]},
+    {"parts": [{"text": "Download statement"}]},
+    {"parts": [{"text": "Get statement from "}, {"text": "last month", "entityType": "@time_period"}]},
+    {"parts": [{"text": "Account statement"}]},
+    {"parts": [{"text": "Monthly statement"}]},
+    {"parts": [{"text": "Statement for "}, {"text": "checking", "entityType": "@account_type"}]},
+    {"parts": [{"text": "Tax documents"}]},
+    {"parts": [{"text": "Year end statement"}]},
+    {"parts": [{"text": "1099 form"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "time_period",
+      "entityType": "@time_period",
+      "isList": false
+    },
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    },
+    {
+      "displayName": "document_type",
+      "entityType": "@document_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll retrieve your statement for you."]
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "displayName": "time_period",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "today", "synonyms": ["today", "this day", "current day"]},
+    {"value": "yesterday", "synonyms": ["yesterday", "last day", "previous day"]},
+    {"value": "this_week", "synonyms": ["this week", "current week", "week"]},
+    {"value": "last_week", "synonyms": ["last week", "previous week", "past week"]},
+    {"value": "this_month", "synonyms": ["this month", "current month", "month"]},
+    {"value": "last_month", "synonyms": ["last month", "previous month", "past month"]},
+    {"value": "this_year", "synonyms": ["this year", "current year", "year"]},
+    {"value": "last_year", "synonyms": ["last year", "previous year"]},
+    {"value": "recent", "synonyms": ["recent", "latest", "last", "most recent"]}
+  ]
+}

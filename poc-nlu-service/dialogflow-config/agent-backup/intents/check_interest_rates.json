@@ -1,0 +1,34 @@
+{
+  "displayName": "check.interest.rates",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "What are your interest rates"}]},
+    {"parts": [{"text": "Interest rate for "}, {"text": "savings", "entityType": "@account_type"}]},
+    {"parts": [{"text": "Loan rates"}]},
+    {"parts": [{"text": "APR"}]},
+    {"parts": [{"text": "APY"}]},
+    {"parts": [{"text": "Mortgage rates"}]},
+    {"parts": [{"text": "CD rates"}]},
+    {"parts": [{"text": "Current rates"}]},
+    {"parts": [{"text": "Best rates"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    },
+    {
+      "displayName": "loan_type",
+      "entityType": "@loan_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["Let me get you our current interest rates."]
+      }
+    }
+  ]
+}

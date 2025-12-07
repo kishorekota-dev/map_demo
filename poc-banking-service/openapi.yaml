@@ -1,0 +1,1801 @@
+openapi: 3.0.3
+info:
+  title: POC Banking Service API
+  description: |
+    Comprehensive Banking Service API with JWT Authentication and Role-Based Access Control (RBAC).
+    
+    ## Features
+    - JWT-based authentication with access and refresh tokens
+    - Role-based access control (ADMIN, MANAGER, CUSTOMER, SUPPORT, AUDITOR)
+    - Customer management with KYC verification
+    - Comprehensive audit logging
+    - Secure password handling with bcrypt
+    
+    ## Authentication
+    Most endpoints require authentication. Include the JWT token in the Authorization header:
+    ```
+    Authorization: Bearer <your-jwt-token>
+    ```
+    
+    ## Rate Limiting
+    API requests are rate-limited to prevent abuse. Current limits:
+    - Anonymous: 100 requests per 15 minutes
+    - Authenticated: 1000 requests per 15 minutes
+    
+  version: 1.0.0
+  contact:
+    name: POC Banking Service Support
+    email: support@pocbanking.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3010/api/v1
+    description: Local development server
+  - url: http://localhost:3001/api/v1
+    description: API Gateway (local)
+  - url: https://api.pocbanking.com/v1
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and token management
+  - name: Accounts
+    description: Bank account management and balance operations
+  - name: Transactions
+    description: Transaction history, search, and management
+  - name: Cards
+    description: Debit and credit card management
+  - name: Transfers
+    description: Internal, external, and peer-to-peer transfers
+  - name: Fraud
+    description: Fraud detection, alerts, and reporting
+  - name: Disputes
+    description: Transaction dispute management
+  - name: Customers
+    description: Customer management operations
+  - name: KYC
+    description: Know Your Customer verification
+  - name: Health
+    description: Service health and monitoring
+
+paths:
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: |
+        Authenticate user with username and password. Returns JWT access token and refresh token.
+        The access token expires in 15 minutes, refresh token in 7 days.
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: User's username
+                  example: admin
+                password:
+                  type: string
+                  format: password
+                  description: User's password
+                  example: Password123!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserProfile'
+                      tokens:
+                        $ref: '#/components/schemas/TokenPair'
+                      roles:
+                        type: array
+                        items:
+                          type: string
+                        example: [ADMIN]
+                      permissions:
+                        type: array
+                        items:
+                          type: string
+                        example: [customers.read, customers.create]
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Generate a new access token using a valid refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  description: Valid refresh token
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      accessToken:
+                        type: string
+                        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                      tokenType:
+                        type: string
+                        example: Bearer
+                      expiresIn:
+                        type: string
+                        example: 15m
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate refresh token and log out user
+      operationId: logoutUser
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  description: Refresh token to invalidate
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Logged out successfully
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Retrieve authenticated user's profile information, roles, and permissions
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/UserProfile'
+                      - type: object
+                        properties:
+                          roles:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Role'
+                          permissions:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Permission'
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customers:
+    get:
+      tags:
+        - Customers
+      summary: Get all customers
+      description: Retrieve paginated list of customers with optional filters
+      operationId: getCustomers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Filter by customer status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE, SUSPENDED, CLOSED]
+        - name: kyc_status
+          in: query
+          description: Filter by KYC status
+          schema:
+            type: string
+            enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+      responses:
+        '200':
+          description: Customers retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Customer'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - Customers
+      summary: Create new customer
+      description: Create a new customer record
+      operationId: createCustomer
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomerRequest'
+      responses:
+        '201':
+          description: Customer created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Customer'
+                  metadata:
+                    allOf:
+                      - $ref: '#/components/schemas/ResponseMetadata'
+                      - type: object
+                        properties:
+                          action:
+                            type: string
+                            example: create
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customers/{id}:
+    get:
+      tags:
+        - Customers
+      summary: Get customer by ID
+      description: Retrieve detailed information about a specific customer
+      operationId: getCustomerById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Customer UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Customer retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Customer'
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - Customers
+      summary: Update customer
+      description: Update customer information
+      operationId: updateCustomer
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Customer UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomerRequest'
+      responses:
+        '200':
+          description: Customer updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Customer'
+                  metadata:
+                    allOf:
+                      - $ref: '#/components/schemas/ResponseMetadata'
+                      - type: object
+                        properties:
+                          action:
+                            type: string
+                            example: update
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customers/{id}/kyc:
+    get:
+      tags:
+        - KYC
+      summary: Get customer KYC status
+      description: Retrieve KYC verification status and related information
+      operationId: getCustomerKYC
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Customer UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: KYC status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/CustomerKYC'
+                  metadata:
+                    $ref: '#/components/schemas/ResponseMetadata'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /customers/{id}/kyc/verify:
+    post:
+      tags:
+        - KYC
+      summary: Verify customer KYC
+      description: Update KYC verification status and risk rating
+      operationId: verifyCustomerKYC
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Customer UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+                - verifiedBy
+              properties:
+                status:
+                  type: string
+                  enum: [VERIFIED, REJECTED, EXPIRED]
+                  description: KYC verification status
+                verifiedBy:
+                  type: string
+                  description: Name of the verifier
+                  example: John Smith
+                riskRating:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+                  description: Customer risk rating
+      responses:
+        '200':
+          description: KYC verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Customer'
+                  metadata:
+                    allOf:
+                      - $ref: '#/components/schemas/ResponseMetadata'
+                      - type: object
+                        properties:
+                          action:
+                            type: string
+                            example: kyc_verification
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Check service health status and database connectivity
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: customer-service
+                  database:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: connected
+                      currentTime:
+                        type: string
+                        format: date-time
+                      version:
+                        type: string
+                        example: PostgreSQL 15.14
+                  uptime:
+                    type: number
+                    example: 12345.67
+                  timestamp:
+                    type: string
+                    format: date-time
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: unhealthy
+                  error:
+                    type: string
+
+  /transactions:
+    get:
+      tags:
+        - Transactions
+      summary: Get all transactions
+      description: Retrieve all transactions for the authenticated user with pagination and filtering
+      operationId: getAllTransactions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [purchase, withdrawal, deposit, transfer, refund, fee]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, completed, failed, cancelled]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags:
+        - Transactions
+      summary: Create new transaction
+      description: Create a new transaction (requires sufficient balance and within limits)
+      operationId: createTransaction
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - type
+                - amount
+              properties:
+                accountId:
+                  type: string
+                  format: uuid
+                type:
+                  type: string
+                  enum: [purchase, withdrawal, deposit, transfer]
+                amount:
+                  type: number
+                  format: decimal
+                description:
+                  type: string
+                merchantName:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '201':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /transactions/{transactionId}:
+    get:
+      tags:
+        - Transactions
+      summary: Get transaction by ID
+      description: Retrieve specific transaction details
+      operationId: getTransactionById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transaction retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /transactions/categories:
+    get:
+      tags:
+        - Transactions
+      summary: Get transaction categories
+      description: Retrieve list of available transaction categories
+      operationId: getTransactionCategories
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      type: string
+                    example: [Food & Dining, Groceries, Shopping, Utilities, Healthcare]
+
+  /fraud/alerts:
+    get:
+      tags:
+        - Fraud
+      summary: Get fraud alerts
+      description: Retrieve fraud alerts for the authenticated user
+      operationId: getAllFraudAlerts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, investigating, confirmed, false_positive, resolved]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+      responses:
+        '200':
+          description: Fraud alerts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FraudAlert'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags:
+        - Fraud
+      summary: Create fraud alert
+      description: Report suspicious activity or create a fraud alert
+      operationId: createFraudAlert
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - alertType
+              properties:
+                accountId:
+                  type: string
+                  format: uuid
+                transactionId:
+                  type: string
+                  format: uuid
+                alertType:
+                  type: string
+                  enum: [unusual_activity, high_value_transaction, multiple_failed_attempts, location_mismatch, velocity_check, suspicious_merchant]
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Fraud alert created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/FraudAlert'
+
+  /fraud/alerts/{alertId}:
+    get:
+      tags:
+        - Fraud
+      summary: Get fraud alert by ID
+      description: Retrieve specific fraud alert details
+      operationId: getFraudAlertById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Fraud alert retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/FraudAlert'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /disputes:
+    get:
+      tags:
+        - Disputes
+      summary: Get all disputes
+      description: Retrieve all disputes for the authenticated user
+      operationId: getAllDisputes
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [submitted, under_review, pending_merchant, pending_customer, resolved_in_favor, resolved_against, withdrawn]
+      responses:
+        '200':
+          description: Disputes retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Dispute'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    post:
+      tags:
+        - Disputes
+      summary: Create dispute
+      description: Create a new dispute for a transaction
+      operationId: createDispute
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transactionId
+                - disputeType
+                - amountDisputed
+                - reason
+              properties:
+                transactionId:
+                  type: string
+                  format: uuid
+                disputeType:
+                  type: string
+                  enum: [unauthorized_transaction, incorrect_amount, duplicate_charge, service_not_received, fraudulent_charge, billing_error, other]
+                amountDisputed:
+                  type: number
+                  format: decimal
+                reason:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Dispute created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Dispute'
+
+  /disputes/{disputeId}:
+    get:
+      tags:
+        - Disputes
+      summary: Get dispute by ID
+      description: Retrieve specific dispute details
+      operationId: getDisputeById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: disputeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Dispute retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    $ref: '#/components/schemas/Dispute'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login endpoint
+
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: User UUID
+        username:
+          type: string
+          description: Username
+          example: admin
+        email:
+          type: string
+          format: email
+          description: User email
+          example: admin@pocbanking.com
+        customerId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Linked customer ID (null for non-customer users)
+        customerNumber:
+          type: string
+          nullable: true
+          description: Linked customer number
+          example: CUS_SEED_001
+        name:
+          type: string
+          nullable: true
+          description: Full name (from linked customer)
+        isVerified:
+          type: boolean
+          description: Email verification status
+        mustChangePassword:
+          type: boolean
+          description: Whether user must change password on next login
+        twoFactorEnabled:
+          type: boolean
+          description: 2FA enablement status
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token (expires in 15 minutes)
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          description: JWT refresh token (expires in 7 days)
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: string
+          description: Access token expiration time
+          example: 15m
+
+    Role:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [ADMIN, MANAGER, CUSTOMER, SUPPORT, AUDITOR]
+          description: Role name
+        description:
+          type: string
+          description: Role description
+
+    Permission:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Permission name
+          example: customers.read
+        resource:
+          type: string
+          description: Resource type
+          example: customers
+        action:
+          type: string
+          description: Action allowed
+          example: read
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_number:
+          type: string
+          example: CUS_SEED_001
+        title:
+          type: string
+          enum: [Mr, Mrs, Ms, Dr, Prof]
+          nullable: true
+        first_name:
+          type: string
+          example: James
+        middle_name:
+          type: string
+          nullable: true
+        last_name:
+          type: string
+          example: Patterson
+        date_of_birth:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [MALE, FEMALE, OTHER]
+          nullable: true
+        nationality:
+          type: string
+          example: USA
+          nullable: true
+        email:
+          type: string
+          format: email
+          example: james.patterson@premiumbank.com
+        phone:
+          type: string
+          example: +1-555-0101
+        address_line1:
+          type: string
+          nullable: true
+        address_line2:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal_code:
+          type: string
+          nullable: true
+        country:
+          type: string
+          example: USA
+          nullable: true
+        customer_segment:
+          type: string
+          enum: [RETAIL, PREMIUM, BUSINESS, CORPORATE]
+        kyc_status:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+        kyc_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        kyc_verified_by:
+          type: string
+          nullable: true
+        risk_rating:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, SUSPENDED, CLOSED]
+        id_type:
+          type: string
+          nullable: true
+        id_number:
+          type: string
+          nullable: true
+        id_expiry_date:
+          type: string
+          format: date
+          nullable: true
+        id_issuing_country:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_by:
+          type: string
+          nullable: true
+
+    CreateCustomerRequest:
+      type: object
+      required:
+        - firstName
+        - lastName
+        - dateOfBirth
+        - email
+        - phone
+      properties:
+        title:
+          type: string
+          enum: [Mr, Mrs, Ms, Dr, Prof]
+        firstName:
+          type: string
+          maxLength: 100
+          example: James
+        middleName:
+          type: string
+          maxLength: 100
+        lastName:
+          type: string
+          maxLength: 100
+          example: Patterson
+        dateOfBirth:
+          type: string
+          format: date
+          example: 1985-03-15
+        gender:
+          type: string
+          enum: [MALE, FEMALE, OTHER]
+        nationality:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: USA
+        email:
+          type: string
+          format: email
+          example: customer@example.com
+        phone:
+          type: string
+          example: +1-555-0100
+        addressLine1:
+          type: string
+          maxLength: 255
+        addressLine2:
+          type: string
+          maxLength: 255
+        city:
+          type: string
+          maxLength: 100
+        state:
+          type: string
+          maxLength: 100
+        postalCode:
+          type: string
+          maxLength: 20
+        country:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: USA
+        idType:
+          type: string
+          maxLength: 50
+          example: PASSPORT
+        idNumber:
+          type: string
+          maxLength: 100
+        idExpiryDate:
+          type: string
+          format: date
+        idIssuingCountry:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    UpdateCustomerRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          enum: [Mr, Mrs, Ms, Dr, Prof]
+        firstName:
+          type: string
+          maxLength: 100
+        middleName:
+          type: string
+          maxLength: 100
+        lastName:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        addressLine1:
+          type: string
+          maxLength: 255
+        addressLine2:
+          type: string
+          maxLength: 255
+        city:
+          type: string
+          maxLength: 100
+        state:
+          type: string
+          maxLength: 100
+        postalCode:
+          type: string
+          maxLength: 20
+        country:
+          type: string
+          minLength: 3
+          maxLength: 3
+        kycStatus:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+        riskRating:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, SUSPENDED, CLOSED]
+
+    CustomerKYC:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_number:
+          type: string
+          example: CUS_SEED_001
+        kyc_status:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+        kyc_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        kyc_verified_by:
+          type: string
+          nullable: true
+        risk_rating:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        id_type:
+          type: string
+          nullable: true
+        id_number:
+          type: string
+          nullable: true
+        id_expiry_date:
+          type: string
+          format: date
+          nullable: true
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 100
+        totalPages:
+          type: integer
+          example: 10
+
+    Transaction:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+          example: 99535f4f-77ae-48b2-82a4-b9556afa2530
+        account_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        transaction_type:
+          type: string
+          enum: [purchase, withdrawal, deposit, transfer, refund, fee, payment]
+          example: purchase
+        amount:
+          type: number
+          format: decimal
+          example: -285.70
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [pending, completed, failed, cancelled]
+          example: completed
+        description:
+          type: string
+          example: Coffee shop purchase
+        merchant_name:
+          type: string
+          nullable: true
+          example: Starbucks
+        merchant_category:
+          type: string
+          nullable: true
+          example: Food & Dining
+        category:
+          type: string
+          example: Food & Dining
+        location:
+          type: string
+          nullable: true
+        reference_number:
+          type: string
+          example: TXN_2025_001234
+        balance_after:
+          type: number
+          format: decimal
+          example: 5214.30
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FraudAlert:
+      type: object
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+          example: e17ff6d9-0d25-4785-aee2-a412450c28a6
+        user_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        transaction_id:
+          type: string
+          format: uuid
+          nullable: true
+        alert_type:
+          type: string
+          enum: [unusual_activity, high_value_transaction, multiple_failed_attempts, location_mismatch, velocity_check, suspicious_merchant, card_not_present, account_takeover]
+          example: high_value_transaction
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 56
+        status:
+          type: string
+          enum: [pending, investigating, confirmed, false_positive, resolved]
+          example: investigating
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          example: medium
+        description:
+          type: string
+          example: High value transaction detected
+        details:
+          type: object
+          nullable: true
+        triggered_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Dispute:
+      type: object
+      properties:
+        dispute_id:
+          type: string
+          format: uuid
+          example: 7680c244-ef16-4aa3-9909-97eb4d51f2ce
+        user_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        transaction_id:
+          type: string
+          format: uuid
+        dispute_type:
+          type: string
+          enum: [unauthorized_transaction, incorrect_amount, duplicate_charge, service_not_received, product_not_received, defective_product, cancelled_service, fraudulent_charge, billing_error, other]
+          example: unauthorized_transaction
+        amount_disputed:
+          type: number
+          format: decimal
+          example: 492.62
+        reason:
+          type: string
+          example: I did not authorize this transaction
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [submitted, under_review, pending_merchant, pending_customer, resolved_in_favor, resolved_against, partially_resolved, withdrawn, escalated]
+          example: submitted
+        evidence:
+          type: array
+          items:
+            type: object
+          nullable: true
+        resolution:
+          type: string
+          nullable: true
+        resolution_amount:
+          type: number
+          format: decimal
+          nullable: true
+        submitted_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ResponseMetadata:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+        correlationId:
+          type: string
+          format: uuid
+          description: Request correlation ID for tracing
+
+    Error:
+      type: object
+      properties:
+        status:
+          type: string
+          example: error
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+            message:
+              type: string
+              description: Error message
+            details:
+              type: object
+              description: Additional error details
+        metadata:
+          $ref: '#/components/schemas/ResponseMetadata'
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required or token invalid/expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: UNAUTHORIZED
+              message: Authentication required
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: FORBIDDEN
+              message: Insufficient permissions
+              details:
+                required: customers.read
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: NOT_FOUND
+              message: Customer not found
+              details:
+                customerId: 123e4567-e89b-12d3-a456-426614174000
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Error'
+              - type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      details:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            field:
+                              type: string
+                            message:
+                              type: string
+          example:
+            status: error
+            error:
+              code: VALIDATION_ERROR
+              message: Validation failed
+              details:
+                - field: email
+                  message: must be a valid email
+                - field: firstName
+                  message: is required
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    ConflictError:
+      description: Resource conflict (e.g., duplicate email)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: CONFLICT
+              message: Customer with this email already exists
+              details:
+                email: customer@example.com
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: RATE_LIMIT_EXCEEDED
+              message: Too many requests. Please try again later.
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            status: error
+            error:
+              code: INTERNAL_SERVER_ERROR
+              message: An unexpected error occurred
+            metadata:
+              timestamp: 2025-10-08T01:45:00.000Z
+              correlationId: 123e4567-e89b-12d3-a456-426614174000
+
+  examples:
+    AdminLoginRequest:
+      value:
+        username: admin
+        password: Password123!
+    
+    CustomerLoginRequest:
+      value:
+        username: james.patterson
+        password: Password123!
+    
+    CreateCustomerRequest:
+      value:
+        title: Mr
+        firstName: John
+        lastName: Doe
+        dateOfBirth: 1990-01-15
+        gender: MALE
+        nationality: USA
+        email: john.doe@example.com
+        phone: +1-555-0100
+        addressLine1: 123 Main Street
+        city: New York
+        state: NY
+        postalCode: 10001
+        country: USA
+        idType: PASSPORT
+        idNumber: P12345678
+        idExpiryDate: 2030-12-31
+        idIssuingCountry: USA
+
+security:
+  - BearerAuth: []

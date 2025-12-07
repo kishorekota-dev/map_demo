@@ -1,0 +1,12 @@
+{
+  "displayName": "loan_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "personal", "synonyms": ["personal", "personal loan", "unsecured loan"]},
+    {"value": "auto", "synonyms": ["auto", "car loan", "vehicle loan", "auto loan"]},
+    {"value": "mortgage", "synonyms": ["mortgage", "home loan", "housing loan"]},
+    {"value": "student", "synonyms": ["student", "student loan", "education loan"]},
+    {"value": "business", "synonyms": ["business", "business loan", "commercial loan"]},
+    {"value": "line_of_credit", "synonyms": ["line of credit", "credit line", "loc"]}
+  ]
+}

@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  poc-nlu-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: poc-nlu-service
+    image: poc-nlu-service:latest
+    ports:
+      - "3003:3003"
+    environment:
+      # Server Configuration
+      - NODE_ENV=development
+      - PORT=3003
+      - LOG_LEVEL=debug
+      
+      # CORS Configuration
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3006,http://localhost:8080
+      
+      # DialogFlow Configuration (optional - falls back to mock if not configured)
+      - DIALOGFLOW_PROJECT_ID=${DIALOGFLOW_PROJECT_ID:-}
+      - DIALOGFLOW_LANGUAGE_CODE=en-US
+      - DIALOGFLOW_SESSION_PATH_PREFIX=projects/${DIALOGFLOW_PROJECT_ID:-demo}/agent/sessions/
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/dialogflow-key.json
+      
+      # Service Configuration
+      - SERVICE_NAME=poc-nlu-service
+      - SERVICE_VERSION=1.0.0
+      - MAX_REQUEST_SIZE=10mb
+      - REQUEST_TIMEOUT=30000
+      
+      # Cache Configuration
+      - CACHE_ENABLED=true
+      - CACHE_TTL=300
+      - CACHE_MAX_ITEMS=500
+      
+      # Rate Limiting
+      - RATE_LIMIT_WINDOW=15
+      - RATE_LIMIT_MAX_REQUESTS=200
+      
+    volumes:
+      # Mount source code for development (hot reload with nodemon)
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      
+      # Mount DialogFlow credentials if available
+      - ./credentials:/app/credentials:ro
+      
+      # Mount logs directory
+      - ./logs:/app/logs
+      
+      # Exclude node_modules
+      - /app/node_modules
+      
+    networks:
+      - poc-network
+      
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    restart: unless-stopped
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  poc-network:
+    driver: bridge
+    name: poc-network

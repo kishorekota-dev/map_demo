@@ -1,0 +1,20 @@
+{
+  "displayName": "setup.direct.deposit",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Set up direct deposit"}]},
+    {"parts": [{"text": "Direct deposit information"}]},
+    {"parts": [{"text": "Routing number"}]},
+    {"parts": [{"text": "Account number"}]},
+    {"parts": [{"text": "Payroll setup"}]},
+    {"parts": [{"text": "Direct deposit form"}]},
+    {"parts": [{"text": "How to set up direct deposit"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll provide you with the information needed for direct deposit setup."]
+      }
+    }
+  ]
+}

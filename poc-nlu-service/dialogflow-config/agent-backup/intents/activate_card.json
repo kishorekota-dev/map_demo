@@ -1,0 +1,27 @@
+{
+  "displayName": "activate.card",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Activate my card"}]},
+    {"parts": [{"text": "Activate "}, {"text": "debit", "entityType": "@card_type"}, {"text": " card"}]},
+    {"parts": [{"text": "New card activation"}]},
+    {"parts": [{"text": "I received my card"}]},
+    {"parts": [{"text": "Turn on my card"}]},
+    {"parts": [{"text": "Enable card"}]},
+    {"parts": [{"text": "Start using my card"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "card_type",
+      "entityType": "@card_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you activate your card right away."]
+      }
+    }
+  ]
+}

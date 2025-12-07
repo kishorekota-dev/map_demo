@@ -1,0 +1,16 @@
+{
+  "displayName": "Default Fallback Intent",
+  "priority": 500000,
+  "isFallback": true,
+  "messages": [
+    {
+      "text": {
+        "text": [
+          "I'm not sure I understood. Could you rephrase that?",
+          "I didn't quite get that. Can you try asking in a different way?",
+          "I'm here to help with banking services. Could you provide more details?"
+        ]
+      }
+    }
+  ]
+}

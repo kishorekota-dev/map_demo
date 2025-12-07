@@ -1,0 +1,27 @@
+{
+  "displayName": "close.account",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Close my account"}]},
+    {"parts": [{"text": "I want to close my "}, {"text": "checking", "entityType": "@account_type"}, {"text": " account"}]},
+    {"parts": [{"text": "Close account"}]},
+    {"parts": [{"text": "Cancel my account"}]},
+    {"parts": [{"text": "Deactivate account"}]},
+    {"parts": [{"text": "Stop my account"}]},
+    {"parts": [{"text": "Remove account"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "account_type",
+      "entityType": "@account_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I understand you want to close an account. Let me help you with that process."]
+      }
+    }
+  ]
+}

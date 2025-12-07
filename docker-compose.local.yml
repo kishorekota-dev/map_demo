@@ -1,0 +1,293 @@
+version: '3.8'
+
+# POC Banking System - Local Development Docker Compose
+# This orchestrates all core services for local development
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: poc-postgres
+    environment:
+      - POSTGRES_DB=poc_banking
+      - POSTGRES_USER=poc_user
+      - POSTGRES_PASSWORD=poc_password
+      - POSTGRES_MULTIPLE_DATABASES=poc_banking,poc_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
+    networks:
+      - poc-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poc_user -d poc_banking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: poc-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - poc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Banking Service
+  poc-banking-service:
+    build:
+      context: ./poc-banking-service
+      dockerfile: Dockerfile
+    container_name: poc-banking-service
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+      - LOG_LEVEL=debug
+      
+      # Database Configuration
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=poc_banking
+      - DB_USER=poc_user
+      - DB_PASSWORD=poc_password
+      - DB_POOL_MIN=2
+      - DB_POOL_MAX=10
+      
+      # Security
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      - JWT_EXPIRY=24h
+      - BCRYPT_ROUNDS=10
+      
+      # CORS
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3006,http://localhost:8080
+      
+      # Service URLs
+      - MCP_SERVICE_URL=http://poc-mcp-service:3004
+      - NLU_SERVICE_URL=http://poc-nlu-service:3003
+      
+    volumes:
+      - ./poc-banking-service/src:/app/src
+      - ./poc-banking-service/logs:/app/logs
+      - /app/node_modules
+    networks:
+      - poc-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3005/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # NLU Service (Natural Language Understanding)
+  poc-nlu-service:
+    build:
+      context: ./poc-nlu-service
+      dockerfile: Dockerfile
+    container_name: poc-nlu-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - LOG_LEVEL=debug
+      
+      # CORS Configuration
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3006,http://localhost:8080
+      
+      # DialogFlow Configuration (optional)
+      - DIALOGFLOW_PROJECT_ID=${DIALOGFLOW_PROJECT_ID:-}
+      - DIALOGFLOW_LANGUAGE_CODE=en-US
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/dialogflow-key.json
+      
+      # Service Configuration
+      - SERVICE_NAME=poc-nlu-service
+      - MAX_REQUEST_SIZE=10mb
+      - REQUEST_TIMEOUT=30000
+      
+      # Cache
+      - CACHE_ENABLED=true
+      - CACHE_TTL=300
+      
+    volumes:
+      - ./poc-nlu-service/src:/app/src
+      - ./poc-nlu-service/credentials:/app/credentials:ro
+      - ./poc-nlu-service/logs:/app/logs
+      - /app/node_modules
+    networks:
+      - poc-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # MCP Service (Model Context Protocol)
+  poc-mcp-service:
+    build:
+      context: ./poc-mcp-service
+      dockerfile: Dockerfile
+    container_name: poc-mcp-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+      - PORT=3004
+      - LOG_LEVEL=debug
+      
+      # CORS Configuration
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3006,http://localhost:8080
+      
+      # Service URLs
+      - BANKING_SERVICE_URL=http://poc-banking-service:3005
+      
+      # MCP Configuration
+      - MCP_SERVER_NAME=poc-banking-mcp
+      - MCP_PROTOCOL_VERSION=1.0.0
+      
+    volumes:
+      - ./poc-mcp-service/src:/app/src
+      - ./poc-mcp-service/logs:/app/logs
+      - /app/node_modules
+    networks:
+      - poc-network
+    depends_on:
+      - poc-banking-service
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3004/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Chat Backend
+  poc-chat-backend:
+    build:
+      context: ./poc-chat-backend
+      dockerfile: Dockerfile
+    container_name: poc-chat-backend
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - PORT=3006
+      - LOG_LEVEL=debug
+      - HOST=0.0.0.0
+      
+      # Security
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      - JWT_EXPIRY=24h
+      
+      # CORS
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:8080
+      
+      # Database
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=poc_chat
+      - DB_USER=poc_user
+      - DB_PASSWORD=poc_password
+      
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # Microservice URLs
+      - BANKING_SERVICE_URL=http://poc-banking-service:3005
+      - NLU_SERVICE_URL=http://poc-nlu-service:3003
+      - MCP_SERVICE_URL=http://poc-mcp-service:3004
+      
+      # Agent Configuration
+      - MAX_CONCURRENT_AGENTS=10
+      - AGENT_RESPONSE_TIMEOUT=30000
+      - AGENT_RETRY_ATTEMPTS=3
+      - AGENT_FALLBACK_ENABLED=true
+      
+      # WebSocket
+      - WS_HEARTBEAT_INTERVAL=30000
+      - WS_MAX_CONNECTIONS=500
+      
+    volumes:
+      - ./poc-chat-backend:/app
+      - ./poc-chat-backend/logs:/app/logs
+      - /app/node_modules
+    networks:
+      - poc-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      poc-nlu-service:
+        condition: service_healthy
+      poc-banking-service:
+        condition: service_healthy
+      poc-mcp-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3006/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Frontend (React)
+  poc-frontend:
+    build:
+      context: ./poc-frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: poc-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:3006
+      - VITE_WS_URL=ws://localhost:3006
+      - VITE_BANKING_API_URL=http://localhost:3005
+      - VITE_ENABLE_DEBUG=true
+    volumes:
+      - ./poc-frontend/src:/app/src
+      - ./poc-frontend/public:/app/public
+      - /app/node_modules
+    networks:
+      - poc-network
+    depends_on:
+      - poc-chat-backend
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+networks:
+  poc-network:
+    driver: bridge
+    name: poc-network
+
+volumes:
+  postgres_data:
+    name: poc-postgres-data
+  redis_data:
+    name: poc-redis-data

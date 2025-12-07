@@ -13,8 +13,8 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
-const mcpRoutes = require('./routes/mcp.routes');
-const MCPServer = require('./services/mcp-server.service');
+const mcpApiRoutes = require('./routes/mcpApi.routes'); // New HTTP API routes
+const MCPProtocolServer = require('./mcp/mcpProtocolServer'); // Updated true MCP protocol server
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
 
@@ -25,7 +25,7 @@ class MCPService {
     this.wss = new WebSocket.Server({ server: this.server });
     this.port = config.port;
     
-    this.mcpServer = new MCPServer();
+    this.mcpProtocolServer = new MCPProtocolServer(); // MCP protocol server
     
     this.setupMiddleware();
     this.setupRoutes();
@@ -71,49 +71,59 @@ class MCPService {
         mcp: {
           protocolVersion: '2024-11-05',
           connectedClients: this.wss.clients.size,
-          availableTools: this.mcpServer.getAvailableTools().length
+          activeConnections: this.mcpProtocolServer.getConnectionCount()
         }
       });
     });
   }
 
   setupRoutes() {
-    this.app.use('/api/mcp', mcpRoutes);
+    // New HTTP API routes for tool execution
+    this.app.use('/api/mcp', mcpApiRoutes);
     
     // Service info endpoint
     this.app.get('/api', (req, res) => {
       res.json({
         service: 'POC MCP Service',
         version: require('../package.json').version,
-        description: 'Model Context Protocol Host Microservice',
-        protocol: {
-          version: '2024-11-05',
-          features: [
-            'Tool Discovery',
-            'Tool Execution',
-            'Resource Management',
-            'Prompt Templates',
-            'Logging',
-            'Progress Tracking'
-          ]
-        },
+        description: 'Model Context Protocol Host Microservice with Hybrid Protocol Support',
+        protocols: [
+          {
+            name: 'MCP Protocol (WebSocket)',
+            version: '2024-11-05',
+            endpoint: 'ws://localhost:' + this.port + '/mcp',
+            transport: 'WebSocket',
+            features: ['Tool Discovery', 'Tool Execution', 'Resources', 'Prompts', 'Real-time']
+          },
+          {
+            name: 'HTTP API',
+            version: '1.0.0',
+            endpoint: '/api/mcp',
+            transport: 'REST',
+            features: ['Tool Discovery', 'Tool Execution', 'Batch Execution', 'Validation']
+          }
+        ],
         endpoints: {
           health: '/health',
-          mcp: '/api/mcp',
+          info: '/api',
           tools: '/api/mcp/tools',
-          execute: '/api/mcp/tools/execute',
-          resources: '/api/mcp/resources',
-          prompts: '/api/mcp/prompts',
-          websocket: 'ws://localhost:3004/mcp'
+          execute: '/api/mcp/execute',
+          executeBatch: '/api/mcp/execute-batch',
+          validate: '/api/mcp/validate',
+          categories: '/api/mcp/categories',
+          websocket: 'ws://localhost:' + this.port
         },
         capabilities: [
+          'MCP Protocol (WebSocket)',
+          'HTTP REST API',
           'Banking Tool Integration',
-          'NLP Tool Calls',
-          'NLU Tool Calls',
+          'Automatic Tool Discovery',
+          'Batch Tool Execution',
+          'Parameter Validation',
           'Real-time Communication',
-          'Tool Result Caching',
           'Error Handling',
-          'Security Validation'
+          'Security Validation',
+          'Request Tracing'
         ]
       });
     });
@@ -121,62 +131,27 @@ class MCPService {
 
   setupWebSocket() {
     this.wss.on('connection', (ws, req) => {
+      const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       logger.info('MCP WebSocket connection established', {
+        connectionId,
         clientIP: req.socket.remoteAddress,
         userAgent: req.headers['user-agent']
       });
 
-      // Initialize MCP session
-      const sessionId = this.mcpServer.createSession(ws);
+      // Use the new MCP Protocol Server
+      this.mcpProtocolServer.handleConnection(ws, connectionId);
       
-      ws.on('message', async (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          const response = await this.mcpServer.handleMessage(sessionId, message);
-          ws.send(JSON.stringify(response));
-        } catch (error) {
-          logger.error('WebSocket message error', { error: error.message });
-          ws.send(JSON.stringify({
-            error: {
-              code: -32603,
-              message: 'Internal error',
-              data: error.message
-            }
-          }));
-        }
-      });
-
       ws.on('close', () => {
-        logger.info('MCP WebSocket connection closed', { sessionId });
-        this.mcpServer.removeSession(sessionId);
+        logger.info('MCP WebSocket connection closed', { connectionId });
       });
 
       ws.on('error', (error) => {
-        logger.error('WebSocket error', { error: error.message, sessionId });
-        this.mcpServer.removeSession(sessionId);
+        logger.error('WebSocket error', { error: error.message, connectionId });
       });
-
-      // Send initialization message
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {
-            tools: {},
-            resources: {},
-            prompts: {},
-            logging: {}
-          },
-          serverInfo: {
-            name: 'poc-mcp-service',
-            version: require('../package.json').version
-          }
-        }
-      }));
     });
 
-    logger.info('MCP WebSocket server initialized');
+    logger.info('MCP WebSocket server initialized on port ' + this.port);
   }
 
   setupErrorHandling() {

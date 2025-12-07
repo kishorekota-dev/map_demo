@@ -9,10 +9,15 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "db:migrate": "cd database && npm run migrate",
+    "db:seed": "cd database && npm run seed",
+    "db:setup": "cd database && npm run setup",
+    "db:reset": "cd database && npm run reset"
   },
   "dependencies": {
     "express": "^4.18.2",
+    "express-rate-limit": "^7.1.0",
     "helmet": "^7.1.0",
     "cors": "^2.8.5",
     "morgan": "^1.10.0",
@@ -25,7 +30,9 @@
     "axios": "^1.6.0",
     "lodash": "^4.17.21",
     "moment": "^2.29.4",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "pg": "^8.11.3",
+    "node-flywaydb": "^3.0.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",

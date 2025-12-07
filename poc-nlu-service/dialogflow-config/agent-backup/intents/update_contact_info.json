@@ -1,0 +1,21 @@
+{
+  "displayName": "update.contact.info",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Update my phone number"}]},
+    {"parts": [{"text": "Change my email"}]},
+    {"parts": [{"text": "Update address"}]},
+    {"parts": [{"text": "Change contact information"}]},
+    {"parts": [{"text": "New phone number"}]},
+    {"parts": [{"text": "Update my details"}]},
+    {"parts": [{"text": "Change mailing address"}]},
+    {"parts": [{"text": "Modify contact info"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I can help you update your contact information. What would you like to change?"]
+      }
+    }
+  ]
+}

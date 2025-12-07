@@ -1,0 +1,63 @@
+{
+  "name": "poc-ai-orchestrator",
+  "version": "1.0.0",
+  "description": "AI Orchestrator with LangGraph workflow, MCP client integration, and human-in-the-loop capabilities",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .js",
+    "lint:fix": "eslint src --ext .js --fix"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "compression": "^1.7.4",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.3.1",
+    "winston": "^3.10.0",
+    "axios": "^1.5.0",
+    "uuid": "^9.0.0",
+    "joi": "^17.9.2",
+    "express-validator": "^7.0.1",
+    "express-rate-limit": "^6.10.0",
+    "@langchain/core": "^0.2.0",
+    "@langchain/openai": "^0.2.0",
+    "@langchain/community": "^0.2.0",
+    "@langchain/langgraph": "^0.0.20",
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "eventsource": "^2.0.2",
+    "pg": "^8.11.0",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.35.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "moment": "^2.29.4",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^8.55.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "ai",
+    "orchestrator",
+    "langgraph",
+    "mcp",
+    "banking",
+    "chatbot",
+    "human-in-the-loop"
+  ],
+  "author": "POC Development Team",
+  "license": "ISC"
+}

@@ -11,6 +11,34 @@ const { validateRequest } = require('../middleware/validation');
 const router = express.Router();
 
 /**
+ * POST /api/nlu/analyze
+ * Unified endpoint to analyze user input from chat
+ * Integrates with DialogFlow for intent detection
+ */
+router.post('/analyze',
+  [
+    body('user_input')
+      .isString()
+      .isLength({ min: 1, max: 1000 })
+      .withMessage('user_input must be between 1 and 1000 characters'),
+    body('sessionId')
+      .optional()
+      .isString()
+      .withMessage('Session ID must be a string'),
+    body('userId')
+      .optional()
+      .isString()
+      .withMessage('User ID must be a string'),
+    body('languageCode')
+      .optional()
+      .isString()
+      .withMessage('Language code must be a string')
+  ],
+  validateRequest,
+  NLUController.analyzeUserInput
+);
+
+/**
  * POST /api/nlu/intents
  * Detect intent from user message
  */

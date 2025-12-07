@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Credentials and secrets (NEVER COMMIT!)
+credentials/
+*-key.json
+service-account*.json
+dialogflow-key.json
+*.pem
+*.key
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Build outputs
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+.docker-cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

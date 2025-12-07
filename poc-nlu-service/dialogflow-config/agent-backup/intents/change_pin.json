@@ -1,0 +1,20 @@
+{
+  "displayName": "change.pin",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Change my PIN"}]},
+    {"parts": [{"text": "Reset PIN"}]},
+    {"parts": [{"text": "Update PIN"}]},
+    {"parts": [{"text": "I forgot my PIN"}]},
+    {"parts": [{"text": "New PIN"}]},
+    {"parts": [{"text": "Change ATM PIN"}]},
+    {"parts": [{"text": "Modify PIN"}]}
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you change your PIN securely."]
+      }
+    }
+  ]
+}

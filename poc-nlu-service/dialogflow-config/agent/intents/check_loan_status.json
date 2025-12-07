@@ -1,0 +1,29 @@
+{
+  "displayName": "check.loan.status",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Check my loan status"}]},
+    {"parts": [{"text": "What's the status of my loan"}]},
+    {"parts": [{"text": "Loan application status"}]},
+    {"parts": [{"text": "Did my loan get approved"}]},
+    {"parts": [{"text": "Is my loan approved"}]},
+    {"parts": [{"text": "Loan status"}]},
+    {"parts": [{"text": "Check "}, {"text": "mortgage", "entityType": "@loan_type"}, {"text": " status"}]},
+    {"parts": [{"text": "Update on loan"}]},
+    {"parts": [{"text": "Where is my loan application"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "loan_type",
+      "entityType": "@loan_type",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["Let me check the status of your loan application."]
+      }
+    }
+  ]
+}

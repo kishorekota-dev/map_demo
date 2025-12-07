@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>POC Banking Service - API Documentation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 1200px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .option {
+            background: #f9f9f9;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        .option h2 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+        a.button {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 5px;
+            font-weight: bold;
+        }
+        a.button:hover {
+            background: #45a049;
+        }
+        .secondary {
+            background: #2196F3;
+        }
+        .secondary:hover {
+            background: #0b7dda;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-card h3 {
+            margin: 0;
+            font-size: 2em;
+        }
+        .stat-card p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏦 POC Banking Service - API Documentation</h1>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>50+</h3>
+                <p>API Endpoints</p>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                <h3>7</h3>
+                <p>Categories</p>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                <h3>JWT</h3>
+                <p>Authentication</p>
+            </div>
+            <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                <h3>RBAC</h3>
+                <p>Authorization</p>
+            </div>
+        </div>
+
+        <div class="option">
+            <h2>📖 Option 1: View in Swagger Editor (Recommended)</h2>
+            <p>Open the OpenAPI specification in the online Swagger Editor for full interactive documentation:</p>
+            <a href="https://editor.swagger.io/?url=http://localhost:3005/openapi.yaml" 
+               class="button" 
+               target="_blank">
+                Open in Swagger Editor
+            </a>
+            <p><small>⚠️ Note: Swagger Editor needs to access localhost:3005. Make sure your browser allows this.</small></p>
+        </div>
+
+        <div class="option">
+            <h2>📄 Option 2: Download OpenAPI Spec</h2>
+            <p>Download the OpenAPI YAML file to view in your preferred API documentation tool:</p>
+            <a href="/openapi.yaml" class="button secondary" download>Download openapi.yaml</a>
+            <p><small>You can use tools like: Swagger UI, Postman, Insomnia, or VS Code REST Client</small></p>
+        </div>
+
+        <div class="option">
+            <h2>🔗 Option 3: Direct API Endpoints</h2>
+            <p>Access the raw API documentation endpoints:</p>
+            <a href="/openapi.yaml" class="button secondary" target="_blank">OpenAPI Spec (YAML)</a>
+            <a href="/api/docs" class="button secondary" target="_blank">API Info (JSON)</a>
+        </div>
+
+        <div class="option">
+            <h2>🧪 Option 4: Test with cURL</h2>
+            <p>Example cURL commands to test the API:</p>
+            <pre><code># Login
+curl -X POST http://localhost:3005/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Password123!"}'
+
+# Get all transactions (with token)
+curl http://localhost:3005/api/v1/transactions \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+
+# Get account balance
+curl http://localhost:3005/api/v1/accounts/ACCOUNT_ID/balance \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"</code></pre>
+        </div>
+
+        <div class="option">
+            <h2>📚 API Categories</h2>
+            <ul>
+                <li><strong>Authentication</strong> - Login, Register, Token Management</li>
+                <li><strong>Accounts</strong> - Account management, balances, statements</li>
+                <li><strong>Transactions</strong> - View transactions, categories, details</li>
+                <li><strong>Cards</strong> - Card management, activate, block</li>
+                <li><strong>Transfers</strong> - Internal, external, and P2P transfers</li>
+                <li><strong>Fraud Alerts</strong> - View and manage fraud alerts</li>
+                <li><strong>Disputes</strong> - Create and manage disputes</li>
+            </ul>
+        </div>
+
+        <div class="option">
+            <h2>🔐 Test Users</h2>
+            <p>Available test users (password for all: <code>Password123!</code>):</p>
+            <ul>
+                <li><strong>admin</strong> - Full system access</li>
+                <li><strong>manager</strong> - Management functions</li>
+                <li><strong>michael.chen</strong> - Customer account</li>
+                <li><strong>sarah.martinez</strong> - Customer account</li>
+            </ul>
+        </div>
+
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666;">
+            <p>POC Banking Service v1.0.0 | Running on port 3005</p>
+            <p><a href="/health" target="_blank">Health Check</a> | 
+               <a href="https://github.com" target="_blank">Documentation</a></p>
+        </div>
+    </div>
+
+    <script>
+        // Test if OpenAPI spec is accessible
+        fetch('/openapi.yaml')
+            .then(response => {
+                if (!response.ok) {
+                    console.error('OpenAPI spec not accessible');
+                }
+            })
+            .catch(error => console.error('Error loading OpenAPI spec:', error));
+    </script>
+</body>
+</html>

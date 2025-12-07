@@ -1,0 +1,27 @@
+{
+  "displayName": "wire.transfer",
+  "priority": 500000,
+  "trainingPhrases": [
+    {"parts": [{"text": "Send a wire transfer"}]},
+    {"parts": [{"text": "International wire"}]},
+    {"parts": [{"text": "Domestic wire"}]},
+    {"parts": [{"text": "Wire money"}]},
+    {"parts": [{"text": "SWIFT transfer"}]},
+    {"parts": [{"text": "Bank wire"}]},
+    {"parts": [{"text": "Wire transfer fees"}]}
+  ],
+  "parameters": [
+    {
+      "displayName": "amount",
+      "entityType": "@sys.currency",
+      "isList": false
+    }
+  ],
+  "messages": [
+    {
+      "text": {
+        "text": ["I'll help you set up a wire transfer. This is a secure way to send money."]
+      }
+    }
+  ]
+}

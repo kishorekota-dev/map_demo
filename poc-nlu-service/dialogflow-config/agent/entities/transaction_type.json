@@ -1,0 +1,14 @@
+{
+  "displayName": "transaction_type",
+  "kind": "KIND_MAP",
+  "entities": [
+    {"value": "deposit", "synonyms": ["deposit", "credit", "add money", "put in"]},
+    {"value": "withdrawal", "synonyms": ["withdrawal", "withdraw", "take out", "debit"]},
+    {"value": "transfer", "synonyms": ["transfer", "move money", "send", "wire"]},
+    {"value": "payment", "synonyms": ["payment", "pay", "bill payment", "pay bill"]},
+    {"value": "purchase", "synonyms": ["purchase", "buy", "transaction", "charge"]},
+    {"value": "refund", "synonyms": ["refund", "return", "chargeback"]},
+    {"value": "fee", "synonyms": ["fee", "charge", "service charge", "bank fee"]},
+    {"value": "interest", "synonyms": ["interest", "interest payment", "dividend"]}
+  ]
+}
