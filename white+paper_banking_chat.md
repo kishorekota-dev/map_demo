@@ -6,13 +6,13 @@
 
 ## Title
 
-**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
+**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AUTONOMOUS FULLFILLMENT WORKFLOW USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
 
 ---
 
 ## Field of the Invention
 
-The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI) and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, but not limited to, financial services, e-commerce, telecommunications, healthcare, and technical support.
+The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI), generic fulfillment workflow and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, but not limited to, financial services, e-commerce, telecommunications, healthcare, and technical support.
 
 ---
 
@@ -87,10 +87,13 @@ flowchart LR
 
     subgraph Orchestrator["AI Orchestrator"]
       CTX["Session & Context\nManagement"]
-      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
       WF["Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)"]
       PROMPTS["Prompt Construction\n(system/user prompts,\nexamples, safety)"]
       RESP["LLM Invocation &\nResponse Post-Processing"]
+    end
+
+    subgraph NLULayer["NLU Services"]
+      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
     end
 
     subgraph PolicyLayer["Policy & Governance"]
@@ -125,9 +128,13 @@ flowchart LR
     ROUTE -->|validated messages\nwith session ids| CTX
     AUTH -->|session ids,\nauth context| SESS
 
+    %% NLU invocation from Backend
+    ROUTE --> NLU_PIPE
+    NLU_PIPE -->|intent + entities| ROUTE
+
     %% Orchestrator internal flows
-    CTX --> NLU_PIPE
-    NLU_PIPE --> WF
+    ROUTE -->|message + context + intent| CTX
+    CTX --> WF
     WF -->|missing/ambiguous entities| CTX
     WF --> PROMPTS
     PROMPTS --> POLICY
@@ -158,10 +165,12 @@ flowchart TD
   U[User] --> UI2[Chat Frontend]
   UI2 --> BE2[Chat Backend]
   BE2 --> AUTH2[Authenticate & Load Session]
-  AUTH2 --> ORCH2[AI Orchestrator]
 
-  ORCH2 --> NLU2["Hybrid NLU - primary, secondary, LLM-based"]
-  NLU2 -->|intent + entities| DEC2{"Confident & entities complete?"}
+  AUTH2 --> NLU2["Hybrid NLU - primary, secondary, LLM-based"]
+  NLU2 -->|intent + entities| BE2
+  BE2 -->|message + context + intent| ORCH2[AI Orchestrator]
+
+  ORCH2 --> DEC2{"Confident & entities complete?"}
 
   DEC2 -->|No| CLAR2["Ask Clarification / Collect Entities"]
   CLAR2 --> ORCH2
@@ -309,14 +318,14 @@ A server-side component that:
 - Associates each user message with a conversation identifier (for grouping turns within a single conversation) and a session identifier (for grouping conversations by user and session).
 - Stores or retrieves conversation history and session metadata from a session store (e.g., Redis, database).
 - Implements rate limiting and abuse detection to prevent misuse.
-- Routes validated messages to the AI orchestrator.
+- Invokes one or more NLU services to perform intent detection and entity extraction using a hybrid approach (primary NLU, secondary model, LLM-based fallback).
+- Routes validated messages along with detected intent and entities to the AI orchestrator.
 - Receives responses from the AI orchestrator and returns them to the chat frontend.
 
 #### 3. AI Orchestrator
 
 A workflow engine (e.g., based on graph-based orchestration frameworks like LangGraph) that:
-- Receives user messages and session context (e.g., conversation history, user roles, preferences) from the chat backend.
-- Invokes one or more NLU components for intent detection and entity extraction.
+- Receives user messages, session context (e.g., conversation history, user roles, preferences), and detected intent with entities from the chat backend.
 - Applies decision logic based on the detected intent, confidence score, and entity availability to determine whether to:
   - Request additional clarification from the user if confidence is low or entities are missing.
   - Check authorization constraints and domain-specific business rules.
@@ -344,7 +353,7 @@ One or more NLU components that determine user intent and extract entities. In o
 - **Secondary Domain-Specific Model**: A custom machine learning model (e.g., a fine-tuned transformer or SVM) trained specifically on domain examples and edge cases to provide additional accuracy and domain awareness.
 - **LLM-Based Function Calling**: A configuration that instructs an LLM to extract intent and entities from a user message by calling a system function with appropriate parameters. This component is used when primary and secondary engines return low confidence scores or encounter novel phrasings.
 
-The AI orchestrator invokes these components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70).
+The chat backend invokes these NLU components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70), then forwards the detected intent and entities along with the user message to the AI orchestrator.
 
 #### 5. MCP Service Layer
 
@@ -433,19 +442,21 @@ The AI orchestrator maintains session context across turns, enabling multi-turn 
 
 ### Intent Detection and Workflow Selection
 
-When a new user message is received by the AI orchestrator, the system performs intent detection as follows:
+When a new user message is received by the chat backend, the system performs intent detection as follows:
 
-1. **Primary NLU Invocation**: The AI orchestrator sends the user message and session context to the primary NLU engine, which returns an intent label, a confidence score, and extracted entities (if applicable).
+1. **Primary NLU Invocation**: The chat backend sends the user message and session context to the primary NLU engine, which returns an intent label, a confidence score, and extracted entities (if applicable).
 
-2. **Confidence Threshold Check**: If the confidence score exceeds a first threshold (e.g., 0.70), the detected intent is accepted and the system proceeds to tool selection.
+2. **Confidence Threshold Check**: If the confidence score exceeds a first threshold (e.g., 0.70), the detected intent is accepted and forwarded to the AI orchestrator along with the user message.
 
-3. **Secondary NLU Invocation (if needed)**: If the confidence is between a lower threshold (e.g., 0.50) and the first threshold, the AI orchestrator invokes the secondary, domain-specific NLU model. If this returns a higher confidence, it may be used; otherwise, the system proceeds to the next step.
+3. **Secondary NLU Invocation (if needed)**: If the confidence is between a lower threshold (e.g., 0.50) and the first threshold, the chat backend invokes the secondary, domain-specific NLU model. If this returns a higher confidence, it may be used; otherwise, the system proceeds to the next step.
 
-4. **LLM-Based Function Calling (if needed)**: If both primary and secondary NLUs return low confidence (below the lower threshold), the AI orchestrator constructs a prompt instructing an LLM to extract intent and entities. The LLM is provided with tool function definitions and asked to determine which tool(s) should be invoked. The LLM's response is parsed and used as the detected intent.
+4. **LLM-Based Function Calling (if needed)**: If both primary and secondary NLUs return low confidence (below the lower threshold), the chat backend constructs a prompt instructing an LLM to extract intent and entities. The LLM is provided with tool function definitions and asked to determine which tool(s) should be invoked. The LLM's response is parsed and used as the detected intent.
 
 5. **Fallback to Clarification or Escalation**: If no NLU component yields sufficient confidence, or if the detected intent is `unknown` or `out_of_scope`, the system generates a clarification question asking the user for more information or offers escalation to a human agent.
 
-After intent detection, a workflow decision module applies business logic:
+Once intent detection is complete, the chat backend forwards the user message, session context, and detected intent with entities to the AI orchestrator for workflow execution.
+
+After receiving the detected intent from the chat backend, the AI orchestrator applies workflow decision logic:
 
 - **Missing Entities**: If the detected intent requires entities that were not extracted (e.g., account type for a balance inquiry), the system generates a follow-up question to collect the missing information.
 - **Authorization Check**: The system verifies that the user has permission to perform the action associated with the intent (e.g., checking whether the user can access a specific account).
@@ -800,10 +811,10 @@ The following claims define the scope of the invention. Independent claims are n
 **1. A system for providing task-oriented conversational services**, comprising:
 
 - a chat frontend configured to receive user messages and present chatbot responses;
-- a chat backend configured to authenticate users, manage chat sessions, and forward user messages and associated session context;
+- a chat backend configured to authenticate users, manage chat sessions, invoke at least one natural language understanding (NLU) component to determine user intent and entities, and forward user messages with detected intent and associated session context;
 - an artificial intelligence (AI) orchestrator configured to:
-  - (i) receive user messages and session context from the chat backend;
-  - (ii) determine a user intent and one or more entities using at least one natural language understanding (NLU) component;
+  - (i) receive user messages, detected intent, entities, and session context from the chat backend;
+  - (ii) validate entity completeness and request clarification from users when entities are missing or ambiguous;
   - (iii) select at least one tool corresponding to the user intent from a tool registry;
   - (iv) invoke the at least one tool via a Model Context Protocol (MCP) service layer; and
   - (v) generate a natural language response based on outputs from the at least one tool and the user message using a large language model (LLM);
@@ -814,7 +825,7 @@ wherein conversational logic executed by the AI orchestrator is decoupled from b
 
 **2. The system of claim 1**, wherein the domain-specific functions comprise at least one of: account management, order management, ticket management, profile management, subscription management, or device management.
 
-**3. The system of claim 1**, wherein the AI orchestrator is further configured to invoke a plurality of NLU components in a hybrid sequence, including:
+**3. The system of claim 1**, wherein the chat backend is further configured to invoke a plurality of NLU components in a hybrid sequence, including:
 - a first NLU engine configured to detect known intents;
 - a second, domain-specific NLU model configured to refine or supplement the detected intent; and
 - an LLM-based function-calling component configured to determine intent and entities when the first NLU engine and the second NLU model return confidence scores below a threshold.
@@ -892,8 +903,9 @@ and wherein metrics collected during operation are used to update the experiment
 
 - receiving, at a chat backend, a user message from a chat frontend together with authentication information;
 - validating the authentication information and associating the user message with a session context;
-- sending the user message and session context to an AI orchestrator;
-- determining, by the AI orchestrator, a user intent and one or more entities using at least one natural language understanding (NLU) component;
+- determining, by the chat backend, a user intent and one or more entities using at least one natural language understanding (NLU) component;
+- sending the user message, detected intent, entities, and session context to an AI orchestrator;
+- validating, by the AI orchestrator, that required entities are present and requesting clarification from the user if entities are missing or ambiguous;
 - selecting, based on the user intent, at least one tool from a plurality of tools exposed via a Model Context Protocol (MCP) service layer;
 - invoking, via the MCP service layer, the at least one tool to perform a domain-specific function using one or more backend domain services;
 - receiving, at the AI orchestrator, output data from the at least one tool;
@@ -933,7 +945,7 @@ and wherein metrics collected during operation are used to update the experiment
 - including relevant prior messages from the conversation history in the constructed prompt to provide multi-turn conversational context.
 
 **25. The method of claim 17**, wherein determining a user intent comprises:
-- invoking a first NLU engine and receiving a confidence score;
+- invoking, by the chat backend, a first NLU engine and receiving a confidence score;
 - if the confidence score is above a first threshold, accepting the detected intent;
 - if the confidence score is below the first threshold, invoking a second, domain-specific NLU model; and
 - if the second NLU model returns a low confidence score, invoking an LLM-based function-calling component to extract intent and entities.
