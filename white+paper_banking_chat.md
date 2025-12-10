@@ -152,9 +152,6 @@ flowchart LR
 ```
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
-- **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
-- **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
-- **FIG. 5** is a flow diagram illustrating error handling, circuit breaking, and human escalation for low-confidence or failed tool executions.
 
 ```mermaid
 flowchart TD
@@ -184,6 +181,8 @@ flowchart TD
   UI2 --> U
 ```
 
+- **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
+
 ```mermaid
 sequenceDiagram
   participant U as User
@@ -197,10 +196,11 @@ sequenceDiagram
   U->>UI: Enter message
   UI->>BE: POST /chat (message, token)
   BE->>BE: Validate auth & load session
-  BE->>ORCH: Forward message + context
 
-  ORCH->>NLU: Detect intent & entities
-  NLU-->>ORCH: Intent, confidence, entities
+  BE->>NLU: Detect intent & entities
+  NLU-->>BE: Intent, confidence, entities
+
+  BE->>ORCH: Forward message + context + intent
   ORCH->>ORCH: Check confidence, entities
   ORCH->>U: (via UI/BE) Clarification (if needed)
   U-->>ORCH: Additional details (via UI/BE)
@@ -218,6 +218,8 @@ sequenceDiagram
   BE-->>UI: Chatbot response
   UI-->>U: Render response
 ```
+
+- **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
 
 ```mermaid
 flowchart LR
@@ -239,6 +241,8 @@ flowchart LR
   REG4 -->|maps to| API3[Card APIs]
   CFG4 --> REG4
 ```
+
+- **FIG. 5** is a flow diagram illustrating error handling, circuit breaking, and human escalation for low-confidence or failed tool executions.
 
 ```mermaid
 flowchart TD
@@ -265,6 +269,23 @@ flowchart TD
   MSG5 --> END5
 ```
 
+- **FIG. 6** is a flow diagram illustrating the policy engine workflow for data governance, masking, and redaction of sensitive tool outputs.
+
+```mermaid
+flowchart TD
+  START6([Start]) --> INPUT6["Tool Output Data"]
+  INPUT6 --> PE6["Policy Engine Evaluation"]
+
+  PE6 --> RULES6{"Check Rules:<br/>- User Role<br/>- Data Sensitivity<br/>- LLM Provider"}
+
+  RULES6 -->|Sensitive & Restricted| MASK6["Apply Masking / Redaction"]
+  RULES6 -->|Internal / Safe| PASS6["Pass Through"]
+
+  MASK6 --> MERGE6["Construct LLM Prompt"]
+  PASS6 --> MERGE6
+
+  MERGE6 --> END6([Proceed to LLM])
+```
 ---
 
 ## Detailed Description of the Invention
