@@ -75,55 +75,60 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 ```mermaid
 flowchart LR
-  subgraph Client
-    UI["Chat Frontend (Chat UI)"]
+  %% Client
+  U[User] --> UI["Chat UI<br/>(Chat Frontend)"]
+
+  %% Backend
+  subgraph Backend["Chat Backend"]
+    AUTH["Authentication & Session<br/>Validation"]
+    SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
+    ROUTE["Message Routing<br/>& Rate Limiting"]
   end
 
-    subgraph Backend["Chat Backend"]
-      AUTH["Authentication & Session\nValidation"]
-      SESS["Session Store Access\n(conversation history,\npreferences)"]
-      ROUTE["Message Routing\n& Rate Limiting"]
+  %% NLU
+  subgraph NLULayer["NLU Services"]
+    NLU_PIPE["Hybrid NLU Pipeline<br/>(Primary NLU, Secondary Model,<br/>LLM-based extraction)"]
+  end
+
+  %% Orchestrator
+  subgraph Orchestrator["AI Orchestrator"]
+    CTX["Session & Context<br/>Management"]
+    WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>HITL, write confirmations)"]
+    PROMPTS["Prompt Construction<br/>(system/user prompts,<br/>examples, safety)"]
+    RESP["LLM Invocation &<br/>Response Post-Processing"]
+  end
+
+  %% Policy
+  subgraph PolicyLayer["Policy & Governance"]
+    POLICY["Policy Engine<br/>(data exposure,<br/>role/jurisdiction rules)"]
+  end
+
+  %% MCP
+  subgraph MCP["MCP Service Layer"]
+    REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
+    VAL["Schema Validation<br/>& Parameter Checking"]
+    MASK["Masking & Redaction<br/>(sensitive fields)"]
+    LOG["Tool Invocation Logging<br/>(audit, metrics)"]
+  end
+
+  %% Domain
+  subgraph Domain["Domain Services & Data"]
+    subgraph Services["Domain Microservices"]
+      ACCT["Account Service"]
+      TXN["Transaction Service"]
+      CARD["Card Service"]
+      OTHER["Other Domain Services<br/>(e-commerce, support, etc.)"]
     end
 
-    subgraph Orchestrator["AI Orchestrator"]
-      CTX["Session & Context\nManagement"]
-      WF["Graph-Based Workflow Engine\n(intent analysis, entity checks,\nHITL, write confirmations)"]
-      PROMPTS["Prompt Construction\n(system/user prompts,\nexamples, safety)"]
-      RESP["LLM Invocation &\nResponse Post-Processing"]
+    subgraph DataStores["Data Stores & Caches"]
+      DB[("Primary Database")]
+      SSTORE[("Session Store")]
+      AUDIT[("Audit & Observability Store")]
     end
+  end
 
-    subgraph NLULayer["NLU Services"]
-      NLU_PIPE["Hybrid NLU Pipeline\n(Primary NLU, Secondary Model,\nLLM-based extraction)"]
-    end
-
-    subgraph PolicyLayer["Policy & Governance"]
-      POLICY["Policy Engine\n(data exposure,\nrole/jurisdiction rules)"]
-    end
-
-    subgraph MCP["MCP Service Layer"]
-      REG["Tool Registry\n(names, schemas,\nmetadata, discovery)"]
-      VAL["Schema Validation\n& Parameter Checking"]
-      MASK["Masking & Redaction\n(sensitive fields)"]
-      LOG["Tool Invocation Logging\n(audit, metrics)"]
-    end
-
-    subgraph Domain["Domain Services & Data"]
-      subgraph Services["Domain Microservices"]
-        ACCT["Account Service"]
-        TXN["Transaction Service"]
-        CARD["Card Service"]
-        OTHER["Other Domain Services\n(e-commerce, support, etc.)"]
-        end
-
-      subgraph DataStores["Data Stores & Caches"]
-        DB[("Primary Database")]
-        SSTORE[("Session Store")]
-        AUDIT[("Audit & Observability Store")]
-        end
-    end
-
-    %% Client to Backend
-    UI -->|HTTPS/WebSocket\nuser messages| AUTH
+  %% Client to Backend
+  UI -->|HTTPS/WebSocket<br/>user messages| AUTH
     AUTH --> ROUTE
     ROUTE -->|validated messages\nwith session ids| CTX
     AUTH -->|session ids,\nauth context| SESS
