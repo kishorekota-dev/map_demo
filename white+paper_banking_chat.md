@@ -70,8 +70,11 @@ In another aspect, the invention provides a method of operating a task-oriented 
 ## High-Level Overview of the System Architecture
 
 - **FIG. 1** is a block diagram of a system architecture for a task-oriented chatbot using an AI orchestrator and a Model Context Protocol service layer.
-
+The following diagram provides an illustrative, end-to-end view of the disclosed architecture, showing the primary runtime components (Chat UI, Chat Backend, NLU services, AI Orchestrator, MCP service layer, domain microservices, and policy/governance) and their interactions for processing a user request, invoking controlled tools, applying masking/redaction and policy checks, and generating a validated response.
 ![FIG. 1 – System Architecture](diagrams/chatbot-architecture-fig1.png)
+
+
+The following diagram provides an illustrative, end-to-end view of the disclosed architecture, showing the primary runtime components (Chat UI, Chat Backend, NLU services, AI Orchestrator, MCP service layer, domain microservices, and policy/governance) and their interactions for processing a user request, invoking controlled tools, applying masking/redaction and policy checks, and generating a validated response.
 
 ```mermaid
 flowchart TD
@@ -137,6 +140,7 @@ flowchart TD
   OUT --> UI
   UI --> U
 ```
+
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
 
