@@ -74,23 +74,20 @@ In another aspect, the invention provides a method of operating a task-oriented 
 ![FIG. 1 – System Architecture](diagrams/chatbot-architecture-fig1.png)
 
 ```mermaid
-flowchart LR
-  %% Client
+flowchart TD
   U[User] --> UI["Chat UI<br/>(Chat Frontend)"]
 
-  %% Backend
   subgraph Backend["Chat Backend"]
     AUTH["Authentication & Session<br/>Validation"]
     SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
     ROUTE["Message Routing<br/>& Rate Limiting"]
+    OUT["Return Response<br/>to Chat UI"]
   end
 
-  %% NLU
   subgraph NLULayer["NLU Services"]
     NLU_PIPE["Hybrid NLU Pipeline<br/>(Primary NLU, Secondary Model,<br/>LLM-based extraction)"]
   end
 
-  %% Orchestrator
   subgraph Orchestrator["AI Orchestrator"]
     CTX["Session & Context<br/>Management"]
     WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>HITL, write confirmations)"]
@@ -98,69 +95,47 @@ flowchart LR
     RESP["LLM Invocation &<br/>Response Post-Processing"]
   end
 
-  %% Policy
-  subgraph PolicyLayer["Policy & Governance"]
-    POLICY["Policy Engine<br/>(data exposure,<br/>role/jurisdiction rules)"]
-  end
-
-  %% MCP
   subgraph MCP["MCP Service Layer"]
-    REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
     VAL["Schema Validation<br/>& Parameter Checking"]
+    REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
     MASK["Masking & Redaction<br/>(sensitive fields)"]
     LOG["Tool Invocation Logging<br/>(audit, metrics)"]
   end
 
-  %% Domain
   subgraph Domain["Domain Services & Data"]
-    subgraph Services["Domain Microservices"]
-      ACCT["Account Service"]
-      TXN["Transaction Service"]
-      CARD["Card Service"]
-      OTHER["Other Domain Services<br/>(e-commerce, support, etc.)"]
-    end
-
-    subgraph DataStores["Data Stores & Caches"]
-      DB[("Primary Database")]
-      SSTORE[("Session Store")]
-      AUDIT[("Audit & Observability Store")]
-    end
+    SVC["Domain Microservices<br/>(Account, Transaction, Card, etc.)"]
+    DB[("Primary Database")]
+    SSTORE[("Session Store")]
+    AUDIT[("Audit & Observability Store")]
   end
 
-  %% Client to Backend
+  subgraph PolicyLayer["Policy & Governance"]
+    POLICY["Policy Engine<br/>(data exposure,<br/>role/jurisdiction rules)"]
+  end
+
   UI -->|HTTPS/WebSocket<br/>user messages| AUTH
-    AUTH --> ROUTE
-    ROUTE -->|validated messages\nwith session ids| CTX
-    AUTH -->|session ids,\nauth context| SESS
+  AUTH --> SESS
+  AUTH --> SSTORE
+  SESS --> ROUTE
+  ROUTE --> NLU_PIPE
+  NLU_PIPE -->|intent + entities| CTX
+  CTX --> WF
 
-    %% NLU invocation from Backend
-    ROUTE --> NLU_PIPE
-    NLU_PIPE -->|intent + entities| ROUTE
+  WF -->|tool invocations<br/>with parameters| VAL
+  VAL --> REG
+  VAL --> MASK
+  VAL --> LOG
+  LOG --> AUDIT
 
-    %% Orchestrator internal flows
-    ROUTE -->|message + context + intent| CTX
-    CTX --> WF
-    WF -->|missing/ambiguous entities| CTX
-    WF --> PROMPTS
-    PROMPTS --> POLICY
-    POLICY --> PROMPTS
-    PROMPTS --> RESP
+  MASK --> SVC
+  SVC --> DB
+  DB -->|structured results| POLICY
 
-    %% Orchestrator to MCP
-    WF -->|tool invocations\nwith parameters| VAL
-    VAL --> REG
-    VAL --> MASK
-    MASK --> Services
-    Services --> MASK
-    MASK --> WF
-    VAL --> LOG
-    Services --> DB
-    SESS --> SSTORE
-    LOG --> AUDIT
-
-    %% Responses back to client
-    RESP --> ROUTE
-    ROUTE -->|chatbot responses| UI
+  POLICY --> PROMPTS
+  PROMPTS --> RESP
+  RESP --> OUT
+  OUT --> UI
+  UI --> U
 ```
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
