@@ -77,45 +77,7 @@ In another aspect, the invention provides a method of operating a task-oriented 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
 
 
-- **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
 
-<!-- 
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant UI as Chat Frontend
-  participant BE as Chat Backend
-  participant ORCH as AI Orchestrator
-  participant NLU as NLU Services
-  participant MCP as MCP Server
-  participant SVC as Domain Services
-
-  U->>UI: Enter message
-  UI->>BE: POST /chat (message, token)
-  BE->>BE: Validate auth & load session
-
-  BE->>NLU: Detect intent & entities
-  NLU-->>BE: Intent, confidence, entities
-
-  BE->>ORCH: Forward message + context + intent
-  ORCH->>ORCH: Check confidence, entities
-  ORCH->>U: (via UI/BE) Clarification (if needed)
-  U-->>ORCH: Additional details (via UI/BE)
-
-  ORCH->>ORCH: Select workflow & MCP tools
-  ORCH->>MCP: Invoke tool(s) with params
-  MCP->>SVC: Call domain API(s)
-  SVC-->>MCP: Structured results
-  MCP->>MCP: Mask/redact sensitive fields
-  MCP-->>ORCH: Tool outputs
-
-  ORCH->>ORCH: Build prompts (system + user + tools)
-  ORCH->>ORCH: Invoke LLM & post-process
-  ORCH-->>BE: Final response payload
-  BE-->>UI: Chatbot response
-  UI-->>U: Render response
-``` 
--->
 
 - **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
 
@@ -140,50 +102,7 @@ flowchart LR
   CFG4 --> REG4
 ```
 
-- **FIG. 5** is a flow diagram illustrating error handling, circuit breaking, and human escalation for low-confidence or failed tool executions.
 
-```mermaid
-flowchart TD
-  START5([Start]) --> NLU5["NLU / Intent Detection"]
-  NLU5 --> DEC5{"Low confidence or unknown?"}
-
-  DEC5 -->|Yes| CLAR5["Ask Clarification"]
-  CLAR5 --> RETRY5{"Max attempts reached?"}
-  RETRY5 -->|No| NLU5
-  RETRY5 -->|Yes| ESC5["Offer Human Escalation"]
-
-  DEC5 -->|No| TOOL5["Invoke MCP Tool"]
-  TOOL5 --> RES5{"Tool success?"}
-
-  RES5 -->|No| CB5["Update Failure Counters & Circuit Breaker"]
-  CB5 --> CBOPEN5{"Circuit open?"}
-  CBOPEN5 -->|Yes| MSG5["Return Fallback Message + Escalation"]
-  CBOPEN5 -->|No| RETRYT5["Retry with Backoff"]
-  RETRYT5 --> TOOL5
-
-  RES5 -->|Yes| RESP5["Generate LLM Response"]
-  RESP5 --> END5([Return Response to User])
-
-  MSG5 --> END5
-```
-
-- **FIG. 6** is a flow diagram illustrating the policy engine workflow for data governance, masking, and redaction of sensitive tool outputs.
-
-```mermaid
-flowchart TD
-  START6([Start]) --> INPUT6["Tool Output Data"]
-  INPUT6 --> PE6["Policy Engine Evaluation"]
-
-  PE6 --> RULES6{"Check Rules:<br/>- User Role<br/>- Data Sensitivity<br/>- LLM Provider"}
-
-  RULES6 -->|Sensitive & Restricted| MASK6["Apply Masking / Redaction"]
-  RULES6 -->|Internal / Safe| PASS6["Pass Through"]
-
-  MASK6 --> MERGE6["Construct LLM Prompt"]
-  PASS6 --> MERGE6
-
-  MERGE6 --> END6([Proceed to LLM])
-```
 ---
 
 ## Detailed Description of the Invention
