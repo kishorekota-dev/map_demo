@@ -79,6 +79,7 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 - **FIG. 3** is a sequence diagram illustrating interactions among the chat frontend, chat backend, AI orchestrator, NLU service, MCP server, and domain microservices for a sample request.
 
+<!-- 
 ```mermaid
 sequenceDiagram
   participant U as User
@@ -113,7 +114,8 @@ sequenceDiagram
   ORCH-->>BE: Final response payload
   BE-->>UI: Chatbot response
   UI-->>U: Render response
-```
+``` 
+-->
 
 - **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
 
