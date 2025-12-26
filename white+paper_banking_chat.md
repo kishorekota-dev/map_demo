@@ -6,13 +6,13 @@
 
 ## Title
 
-**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AUTONOMOUS FULLFILLMENT WORKFLOW USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
+**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AUTONOMOUS FULFILLMENT WORKFLOW USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
 
 ---
 
 ## Field of the Invention
 
-The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI), abstract fulfillment workflow and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, in this paper, financial service used as example for demostration of the invention. It is noted that these are illustrative examples and the invention is not limited to financial services.
+The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI), abstract fulfillment workflow and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, in this paper, financial service used as example for demonstration of the invention. It is noted that these are illustrative examples and the invention is not limited to financial services.
 
 ---
 
@@ -145,12 +145,12 @@ The chat backend invokes these NLU components in sequence, accepting results whe
 #### 4. AI Orchestrator
 
 A workflow engine (e.g., based on graph-based orchestration frameworks like LangGraph) that:
-- Receives user messages, manages session context (e.g., conversation history, user roles, preferences), and matches intent recieved from the chat backend to an prompt to perform fullfilment workflow.
+- Receives user messages, manages session context (e.g., conversation history, user roles, preferences), and matches intent received from the chat backend to a prompt to perform fulfillment workflow.
 - Applies decision logic based on the detected intent, confidence score, and entity availability to determine whether to:
   - Request additional clarification from the user if confidence is low or entities are missing.
   - Request additional input if needed.
   - Request explicit user confirmation for write operations such as fund transfers or account changes.
-  - Proceed to tool execution to fullfill user intent.
+  - Proceed to tool execution to fulfill user intent.
 - Selects one or more tools from the MCP registry that correspond to the detected intent.
 - Invokes the tools via the MCP service layer, optionally in parallel when independent.
 - Receives structured results from the tools.
@@ -197,7 +197,7 @@ A collection of microservices or application programming interfaces (APIs) corre
 
 These services typically expose APIs (e.g., REST, GraphQL, or gRPC) that implement the core business functions of the target domain.
 
-In a traditional enterprise, these domain servics many not be designed with AI integration in mind. This problem can be approached muliple ays, MCP service layer can adapt and normalize payloads to meet AI requirements with security RBAC controls Or additional microservices can be introduced to provide AI-friendly facades over legacy systems, which will be leverage by MCP Layer. These decisions are specific to each enterprise and its existing architecture.
+In a traditional enterprise, these domain services may not be designed with AI integration in mind. This problem can be approached multiple ways, MCP service layer can adapt and normalize payloads to meet AI requirements with security RBAC controls Or additional microservices can be introduced to provide AI-friendly facades over legacy systems, which will be leveraged by MCP Layer. These decisions are specific to each enterprise and its existing architecture.
 
 
 
