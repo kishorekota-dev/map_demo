@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 const config = require('../../config');
 const { getCheckpointer } = require('../utils/checkpointer');
 const intentMapper = require('../services/intentMapper');
+const slmDataExtractor = require('../services/poc-slm-data-extractor');
 
 /**
  * Banking Chat Workflow using LangGraph
@@ -15,6 +16,7 @@ class BankingChatWorkflow {
   constructor(mcpClient, sessionManager) {
     this.mcpClient = mcpClient;
     this.sessionManager = sessionManager;
+    this.slm = slmDataExtractor;
     
     // Initialize OpenAI
     this.llm = new ChatOpenAI({
@@ -48,6 +50,9 @@ class BankingChatWorkflow {
       conversationHistory: [],
       collectedData: {},
       requiredData: [],
+      validationResult: null,
+      invalidFields: [],
+      slmMetadata: null,
       currentStep: 'start',
       needsHumanInput: false,
       humanInputQuestion: null,
@@ -165,21 +170,65 @@ class BankingChatWorkflow {
     try {
       // Get session to check collected data
       const session = await this.sessionManager.getSession(state.sessionId);
-      
-      // Check which required data is missing
-      const missingData = state.requiredData.filter(
-        field => !session.collectedData[field]
-      );
+      const baseCollected = {
+        ...(session?.collectedData || {}),
+        ...(state.collectedData || {})
+      };
+      const requiredFields = state.requiredData?.length
+        ? state.requiredData
+        : intentMapper.getRequiredData(state.intent);
 
-      logger.info('Missing data check', {
+      // Try SLM-based extraction before prompting the human
+      let slmResult = null;
+      if (this.slm.isEnabled()) {
+        slmResult = await this.slm.extractAndValidate({
+          intent: state.intent,
+          conversationHistory: state.conversationHistory || session?.conversationHistory || [],
+          latestInput: state.question,
+          existingData: baseCollected
+        });
+      }
+
+      const collectedData = slmResult?.extractedData || baseCollected;
+      const validationResult = slmResult?.validationResult || intentMapper.validateData(state.intent, collectedData);
+      const missingData = validationResult.missing?.length
+        ? validationResult.missing
+        : requiredFields.filter(field => !collectedData[field]);
+      const invalidFields = validationResult.invalid || [];
+      const pendingFields = [...new Set([
+        ...missingData,
+        ...invalidFields
+          .map(issue => issue.field)
+          .filter(Boolean)
+      ])];
+
+      logger.info('Missing/invalid data check', {
         sessionId: state.sessionId,
-        missing: missingData
+        missing: missingData,
+        invalid: invalidFields.map(v => v.field)
       });
+
+      await this.sessionManager.updateSession(state.sessionId, {
+        collectedData,
+        requiredData: pendingFields,
+        currentStep: 'check_required_data'
+      });
+
+      await this.sessionManager.updateWorkflowState(
+        state.sessionId,
+        'check_required_data',
+        {
+          slm: { enabled: this.slm.isEnabled(), modelOutput: slmResult?.modelOutput },
+          validationResult
+        }
+      );
 
       return {
         ...state,
-        collectedData: session.collectedData,
-        requiredData: missingData,
+        collectedData,
+        requiredData: pendingFields,
+        validationResult,
+        invalidFields,
         currentStep: 'check_required_data'
       };
     } catch (error) {
@@ -202,20 +251,38 @@ class BankingChatWorkflow {
 
     try {
       // Build question for missing data
-      const missingFields = state.requiredData;
-      let question = `To help you with this request, I need some information:\n`;
-      
-      missingFields.forEach(field => {
-        const fieldName = field.replace(/_/g, ' ');
-        question += `- ${fieldName}\n`;
-      });
-      
-      question += '\nPlease provide this information.';
+      const missingFields = state.requiredData || [];
+      const invalidFields = state.validationResult?.invalid || state.invalidFields || [];
+      const requiredFields = [...new Set([
+        ...missingFields,
+        ...invalidFields
+          .map(issue => issue.field || issue)
+          .filter(Boolean)
+      ])];
+      let question = 'To help you with this request, I need some information:';
+
+      if (missingFields.length > 0) {
+        missingFields.forEach(field => {
+          const fieldName = field.replace(/_/g, ' ');
+          question += `\n- ${fieldName}`;
+        });
+      }
+
+      if (invalidFields.length > 0) {
+        question += '\n\nThese values need correction:';
+        invalidFields.forEach(issue => {
+          const fieldName = (issue.field || issue).toString().replace(/_/g, ' ');
+          const reason = issue.reason ? ` (${issue.reason})` : '';
+          question += `\n- ${fieldName}${reason}`;
+        });
+      }
+
+      question += '\n\nPlease provide this information so I can continue.';
 
       // Update session to waiting state
       await this.sessionManager.updateSession(state.sessionId, {
         status: 'waiting_human_input',
-        requiredData: missingFields,
+        requiredData: requiredFields,
         currentStep: 'request_human_input'
       });
 
@@ -227,7 +294,8 @@ class BankingChatWorkflow {
         finalResponse: {
           type: 'human_input_required',
           question,
-          requiredFields: missingFields
+          requiredFields,
+          invalidFields
         }
       };
     } catch (error) {
@@ -448,6 +516,10 @@ class BankingChatWorkflow {
    * Routing: After Data Check
    */
   routeAfterDataCheck(state) {
+    if (state.validationResult?.invalid?.length > 0) {
+      return 'need_input';
+    }
+
     if (state.requiredData.length > 0) {
       return 'need_input';
     }

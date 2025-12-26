@@ -1,6 +1,8 @@
 const BankingChatWorkflow = require('../workflows/bankingChatWorkflow');
 const { WorkflowExecution, HumanFeedback } = require('../models');
 const logger = require('../utils/logger');
+const slmDataExtractor = require('./poc-slm-data-extractor');
+const intentMapper = require('./intentMapper');
 
 /**
  * Workflow Service
@@ -44,6 +46,9 @@ class WorkflowService {
 
       // Add user message to conversation history
       await this.sessionManager.addMessage(sessionId, 'user', question);
+
+      // Refresh session so we include the latest history and collected data
+      session = await this.sessionManager.getSession(sessionId);
 
       // Create workflow execution record
       const execution = await WorkflowExecution.create({
@@ -240,38 +245,79 @@ class WorkflowService {
    * Process data collection feedback
    */
   async processDataCollection(sessionId, response, feedback) {
-    // Parse response and collect data
-    const collectedData = this.parseDataFromResponse(response, feedback.requiredFields);
-    
-    // Update session with collected data
-    for (const [field, value] of Object.entries(collectedData)) {
-      await this.sessionManager.collectData(sessionId, field, value);
+    await this.sessionManager.addMessage(
+      sessionId,
+      'user',
+      typeof response === 'string' ? response : JSON.stringify(response),
+      { source: 'human_feedback' }
+    );
+
+    const session = await this.sessionManager.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
     }
 
-    // Get updated session
-    const session = await this.sessionManager.getSession(sessionId);
-    
-    // Check if all required data is collected
-    const isComplete = await this.sessionManager.isDataCollectionComplete(sessionId);
-    
-    if (isComplete) {
-      // Resume workflow
-      const result = await this.processMessage({
+    let slmResult = null;
+    try {
+      slmResult = await slmDataExtractor.extractAndValidate({
+        intent: session.intent,
+        conversationHistory: session.conversationHistory,
+        latestInput: typeof response === 'string' ? response : JSON.stringify(response),
+        existingData: session.collectedData
+      });
+    } catch (error) {
+      logger.error('SLM extraction failed during feedback', {
+        sessionId,
+        error: error.message
+      });
+    }
+
+    const fallbackCollected = this.parseDataFromResponse(response, feedback.requiredFields);
+    const collectedData = {
+      ...session.collectedData,
+      ...(slmResult?.extractedData || {}),
+      ...(!slmResult?.slmEnabled ? fallbackCollected : {})
+    };
+
+    const validationResult = slmResult?.validationResult || intentMapper.validateData(session.intent, collectedData);
+    const requiredFields = slmResult?.missingFields ?? validationResult.missing ?? [];
+    const invalidFields = slmResult?.invalidFields ?? validationResult.invalid ?? [];
+    const pendingFields = [...new Set([
+      ...requiredFields,
+      ...invalidFields
+        .map(issue => issue.field)
+        .filter(Boolean)
+    ])];
+
+    await this.sessionManager.updateSession(sessionId, {
+      collectedData,
+      requiredData: pendingFields,
+      currentStep: 'check_required_data',
+      status: pendingFields.length ? 'waiting_human_input' : session.status
+    });
+
+    await this.sessionManager.updateWorkflowState(sessionId, 'check_required_data', {
+      validationResult,
+      slm: { enabled: slmResult?.slmEnabled, modelOutput: slmResult?.modelOutput }
+    });
+
+    const needsMore = pendingFields.length > 0 || invalidFields.length > 0;
+
+    if (!needsMore) {
+      return await this.processMessage({
         sessionId,
         intent: session.intent,
         question: session.conversationHistory[session.conversationHistory.length - 1]?.content || '',
         userId: session.userId
       });
-
-      return result;
-    } else {
-      // Still need more data
-      return {
-        type: 'human_input_required',
-        message: 'Thank you. I still need some more information.',
-        requiredFields: session.requiredData
-      };
     }
+
+    return {
+      type: 'human_input_required',
+      message: 'Thank you. I still need some more information.',
+      requiredFields: pendingFields,
+      invalidFields
+    };
   }
 
   /**

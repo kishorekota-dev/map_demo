@@ -12,7 +12,7 @@
 
 ## Field of the Invention
 
-The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI), generic fulfillment workflow and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, but not limited to, financial services, e-commerce, telecommunications, healthcare, and technical support.
+The present invention relates generally to conversational user interfaces and chatbots, and more particularly to systems and methods for implementing task-oriented chatbots using agentic artificial intelligence (AI), abstract fulfillment workflow and a standardized tool protocol such as the Model Context Protocol (MCP). The invention is applicable across domains including, in this paper, financial service used as example for demostration of the invention. It is noted that these are illustrative examples and the invention is not limited to financial services.
 
 ---
 
@@ -20,9 +20,9 @@ The present invention relates generally to conversational user interfaces and ch
 
 Chat-based interfaces are increasingly used to provide users with self-service access to products, services, and support across many industries. These are referred to as interactive virtual assistants (IVAs) or chatbots. Conventional chatbot architectures commonly rely on rigid natural language understanding (NLU) pipelines and tightly coupled integrations between front-end interfaces, back-end services, and intent-specific business logic.
 
-In typical systems, the chat frontend is directly coupled to backend APIs and domain-specific intent handlers. Adding new capabilities (for example, a new type of account inquiry in banking, or a new order status query in e-commerce) often requires simultaneous updates to multiple components, including NLU training data, intent classification models, backend service integrations, and response formatting logic. This tight coupling results in high initial implementation cost, substantial operational complexity, and slow adaptation to changing products, regulations, and customer expectations.
+Conventional chatbots also struggle with conversational flexibility. Intent libraries must be extensively pre-defined, and unexpected user phrasing or multi-intent queries frequently cause misclassification or fallback behaviors. Many systems lack robust conversational memory, forcing users to repeat information. Not to mention robotic conversation and no sentiment analysis and multiturn conversation missing context. Additionally, sensitive data (e.g., financial, medical, or personally identifiable information) must be carefully managed to avoid leakage into logs or external AI models, creating significant security and compliance challenges.
 
-Conventional chatbots also struggle with conversational flexibility. Intent libraries must be extensively pre-defined, and unexpected user phrasing or multi-intent queries frequently cause misclassification or fallback behaviors. Many systems lack robust conversational memory, forcing users to repeat information. Additionally, sensitive data (e.g., financial, medical, or personally identifiable information) must be carefully managed to avoid leakage into logs or external AI models, creating significant security and compliance challenges.
+In typical systems, the chat frontend is directly coupled to backend APIs and domain-specific intent handlers. Adding new capabilities (for example, a new type of account inquiry in banking, or a new order status query in e-commerce) often requires simultaneous updates to multiple components, including NLU training data, intent classification models, backend service integrations, and response formatting logic. This tight coupling results in high initial implementation cost, substantial operational complexity, and slow adaptation to changing products, regulations, and customer expectations.
 
 Recent advances in large language models (LLMs) and agentic AI provide new opportunities for building more flexible, context-aware chatbots. However, naïvely connecting LLMs directly to core APIs without clear boundaries and control (for example, letting an LLM construct arbitrary API calls) can introduce security, compliance, and reliability risks. There is therefore a need for an architecture that leverages agentic AI and autonomous agent capabilities while maintaining strict control over tools, data access, and execution, and that decouples conversational orchestration from domain-specific business logic.
 
@@ -36,14 +36,14 @@ In one aspect, the invention provides a system and method for implementing task-
 
 Unlike generic LLM agent patterns that allow models to construct and invoke tools in an ad hoc fashion, the disclosed system constrains all tool access through an MCP-compliant service layer with schema-based validation, masking and redaction policies, and policy-driven governance, and drives orchestration behavior from configuration rather than code. A graph-based AI orchestrator coordinates a hybrid NLU pipeline, human-in-the-loop entity completion, and controlled tool execution, enabling autonomous, domain-agnostic workflows that can be safely extended to new domains by updating configuration artifacts rather than rewriting orchestrator logic.
 
-According to one embodiment, the system includes:
+According to one embodiment, the system includes: ( core of the invention )
 
 - A chat frontend configured to capture user messages and display chatbot responses. Referred as Chat UI.
 - An API based chat backend, configured to manage authenticated user sessions, maintain conversation context, and route messages.
 - A NLU component that integrates with one or more NLU services with fallback to generative AI based intent detection.
 - An AI orchestrator configured to:
   - perform intent analysis and perform specific AI agent workflows to fulfill user requests,
-  - perform thorough validation of user input extraction, and based on defined prompts, perform data extraction and human-in-the-loop validation to seek any missing inputs.
+  - perform thorough validation of user input extraction, and based on defined prompts, perform data extraction and human-in-the-loop validation to seek any missing inputs. An SLM approach is used to define prompts for data extraction and validation.
   - autonomously execute fulfillment workflows by invoking one or more tools via an MCP-compliant interface, and
   - generate natural language responses using at least one LLM.
   - acts as a MCP client to invoke tools exposed by the MCP server.
@@ -63,7 +63,7 @@ In some embodiments, the system additionally implements observability and contro
 
 The architecture is domain-agnostic and can be applied to financial use cases (for example, account inquiries, transaction management, and card services) as well as to other domains such as e-commerce, telecommunications, and healthcare—generally, any customer-servicing workflow that can be automated via a chatbot. In one illustrative embodiment, a banking domain is used to demonstrate account inquiries, transaction management, card services, and secure operations; however, the underlying mechanisms are not limited to banking.
 
-In another aspect, the invention provides a method of operating a task-oriented chatbot comprising receiving a user query, determining an intent, selecting at least one MCP tool based on the intent, invoking the tool to perform a domain-specific function, and generating a natural language response using an LLM based on tool outputs and conversation context.
+In another aspect, the invention provides a method of operating a task-oriented chatbot comprising receiving a user query, determining an intent, selecting at least one or more MCP tool based on the intent, invoking the tool to perform a domain-specific function, and generating a natural language response using an LLM based on tool outputs and conversation context. 
 
 ---
 
@@ -130,15 +130,27 @@ A server-side component that:
 - Routes validated messages along with detected intent and entities to the AI orchestrator.
 - Receives responses from the AI orchestrator and returns them to the chat frontend.
 
-#### 3. AI Orchestrator
+
+
+#### 3. NLU Services
+
+One or more NLU components that determine user intent and extract entities. In one embodiment, a hybrid approach is used:
+
+- **Primary NLU Engine**: A hosted or on-premises NLU service (e.g., Google Dialogflow, AWS Lex, Microsoft LUIS, or open-source Rasa) trained on domain-specific intents and configured to detect a set of known intents with high confidence.
+- **Secondary Domain-Specific Model**: A custom machine learning model (e.g., a fine-tuned transformer or SVM) trained specifically on domain examples and edge cases to provide additional accuracy and domain awareness.
+- **LLM-Based Function Calling**: A configuration that instructs an LLM to extract intent and entities from a user message by calling a system function with appropriate parameters. This component is used when primary and secondary engines return low confidence scores or encounter novel phrasings.
+
+The chat backend invokes these NLU components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70), then forwards the detected intent and entities along with the user message to the AI orchestrator.
+
+#### 4. AI Orchestrator
 
 A workflow engine (e.g., based on graph-based orchestration frameworks like LangGraph) that:
-- Receives user messages, session context (e.g., conversation history, user roles, preferences), and detected intent with entities from the chat backend.
+- Receives user messages, manages session context (e.g., conversation history, user roles, preferences), and matches intent recieved from the chat backend to an prompt to perform fullfilment workflow.
 - Applies decision logic based on the detected intent, confidence score, and entity availability to determine whether to:
   - Request additional clarification from the user if confidence is low or entities are missing.
-  - Check authorization constraints and domain-specific business rules.
-  - Request explicit user confirmation for write operations.
-  - Proceed to tool execution.
+  - Request additional input if needed.
+  - Request explicit user confirmation for write operations such as fund transfers or account changes.
+  - Proceed to tool execution to fullfill user intent.
 - Selects one or more tools from the MCP registry that correspond to the detected intent.
 - Invokes the tools via the MCP service layer, optionally in parallel when independent.
 - Receives structured results from the tools.
@@ -152,16 +164,6 @@ A workflow engine (e.g., based on graph-based orchestration frameworks like Lang
   - Formatting (e.g., breaking into paragraphs, adding structured elements).
   - Inclusion of suggested next actions or follow-up options.
 - Returns the processed response to the chat backend.
-
-#### 4. NLU Services
-
-One or more NLU components that determine user intent and extract entities. In one embodiment, a hybrid approach is used:
-
-- **Primary NLU Engine**: A hosted or on-premises NLU service (e.g., Google Dialogflow, AWS Lex, Microsoft LUIS, or open-source Rasa) trained on domain-specific intents and configured to detect a set of known intents with high confidence.
-- **Secondary Domain-Specific Model**: A custom machine learning model (e.g., a fine-tuned transformer or SVM) trained specifically on domain examples and edge cases to provide additional accuracy and domain awareness.
-- **LLM-Based Function Calling**: A configuration that instructs an LLM to extract intent and entities from a user message by calling a system function with appropriate parameters. This component is used when primary and secondary engines return low confidence scores or encounter novel phrasings.
-
-The chat backend invokes these NLU components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70), then forwards the detected intent and entities along with the user message to the AI orchestrator.
 
 #### 5. MCP Service Layer
 
@@ -193,36 +195,17 @@ A collection of microservices or application programming interfaces (APIs) corre
 - Profile service: retrieve or update customer profile, preferences, and consent.
 - Compliance service: check KYC status, detect suspicious transactions, enforce sanctions screening.
 
-**E-Commerce Domain**:
-- Product catalog service: search products, retrieve product details.
-- Order service: retrieve order status, modify orders, retrieve order history.
-- Shipping service: retrieve tracking information, estimate delivery.
-- Return service: initiate returns, retrieve return status.
-- Inventory service: check stock availability.
-
 These services typically expose APIs (e.g., REST, GraphQL, or gRPC) that implement the core business functions of the target domain.
+
+In a traditional enterprise, these domain servics many not be designed with AI integration in mind. This problem can be approached muliple ays, MCP service layer can adapt and normalize payloads to meet AI requirements with security RBAC controls Or additional microservices can be introduced to provide AI-friendly facades over legacy systems, which will be leverage by MCP Layer. These decisions are specific to each enterprise and its existing architecture.
+
+
 
 #### 7. Data Stores and Caches
 
 - **Primary Database**: A relational database (e.g., PostgreSQL) or other persistent store containing domain data (accounts, orders, tickets, etc.), user profiles, and configuration. The chat backend may utilize a dedicated database to store user sessions, conversation history, and metadata. Similarly, the AI Orchestrator may utilize a database or cache for maintaining conversational memory. The specific choice of database technologies is implementation-dependent and adaptable to enterprise standards.
 - **Session Store**: An in-memory cache (e.g., Redis) for storing session data, conversation history, and frequently accessed data to improve performance.
 - **Audit and Observability Store**: A document database or log store (e.g., MongoDB, Elasticsearch) for immutable audit logs, observability metrics, and historical records.
-
----
-
-### Domain-Agnostic Design with Illustrative Banking Embodiment
-
-The architecture is designed to be domain-neutral. Each target domain is represented by a set of tools exposed via the MCP service layer and a corresponding set of domain-specific microservices. The same orchestration pattern applies across domains:
-
-| Domain | Example Tools | Example Services | Example Use Case |
-|--------|---------------|------------------|-----------------|
-| **Financial Services** | `get_accounts`, `get_balance`, `transfer`, `block_card` | Account, Transaction, Card, Compliance | "What's my checking account balance?" |
-| **E-Commerce** | `search_products`, `get_order_status`, `create_return` | Product Catalog, Order, Shipping, Return | "Where's my order?" |
-| **Technical Support** | `create_ticket`, `search_kb`, `get_ticket_status` | Ticketing, Knowledge Base, Escalation | "How do I reset my password?" |
-| **Healthcare** | `schedule_appointment`, `get_prescription`, `retrieve_lab_results` | Appointment, Pharmacy, Lab | "Can I schedule a doctor's appointment?" |
-| **Telecommunications** | `check_bill`, `upgrade_plan`, `report_outage` | Billing, Plan Management, Network | "What is my current bill?" |
-
-In the illustrative financial services embodiment, tools such as retrieving account information, retrieving transactions, executing transfers, and managing cards are used to demonstrate account inquiries, transaction management, card services, and secure operations. However, the underlying mechanisms—intent detection, tool selection, parameter validation, response generation—are domain-agnostic and apply equally to any domain.
 
 ---
 
@@ -631,83 +614,45 @@ The following claims define the scope of the invention. Independent claims are n
 
 wherein conversational logic executed by the AI orchestrator is decoupled from business logic implemented by the backend domain services.
 
-**2. The system of claim 1**, wherein the domain-specific functions comprise at least one of: account management, order management, ticket management, profile management, subscription management, or device management.
-
-**3. The system of claim 1**, wherein the chat backend is further configured to invoke a plurality of NLU components in a hybrid sequence, including:
+**2. The system of claim 1**, wherein the chat backend is further configured to invoke a plurality of NLU components in a hybrid sequence, including:
 - a first NLU engine configured to detect known intents;
 - a second, domain-specific NLU model configured to refine or supplement the detected intent; and
 - an LLM-based function-calling component configured to determine intent and entities when the first NLU engine and the second NLU model return confidence scores below a threshold.
 
-**4. The system of claim 1**, wherein the tool registry exposed by the MCP service layer comprises a plurality of tools each described by:
+**3. The system of claim 1**, wherein the tool registry exposed by the MCP service layer comprises a plurality of tools each described by:
 - a name,
 - a textual description, and
 - a JSON schema defining required and optional input parameters,
 
 and wherein the MCP service layer is configured to reject tool invocations that fail schema validation.
 
-**5. The system of claim 1**, wherein the MCP service layer is configured to apply masking or redaction policies to sensitive fields in tool outputs prior to providing the outputs to the AI orchestrator for inclusion in prompts to the LLM.
+**4. The system of claim 1**, wherein the MCP service layer is configured to apply masking or redaction policies to sensitive fields in tool outputs prior to providing the outputs to the AI orchestrator for inclusion in prompts to the LLM.
 
-**6. The system of claim 1**, wherein the AI orchestrator is implemented using a graph-based workflow engine defining:
+**5. The system of claim 1**, wherein the AI orchestrator is implemented using a graph-based workflow engine defining:
 - a plurality of nodes including at least an intent analysis node, a tool execution node, and a response generation node, and
 - a plurality of edges defining execution order between the plurality of nodes.
 
-**7. The system of claim 1**, wherein the chat backend is further configured to:
+**6. The system of claim 1**, wherein the chat backend is further configured to:
 - associate each user message with a conversation identifier and a session identifier, and
 - store conversation history in a session store accessible by the AI orchestrator to provide multi-turn conversational context.
 
-**8. The system of claim 1**, further comprising a logging subsystem configured to record, for each processed user message, at least one of:
-- a detected intent,
-- a confidence score,
-- tools invoked,
-- latencies for NLU, tool execution, and LLM calls, and
-- a correlation identifier linking logs across services.
-
-**9. The system of claim 1**, wherein the AI orchestrator is further configured to:
+**7. The system of claim 1**, wherein the AI orchestrator is further configured to:
 - determine that a selected intent corresponds to a write operation that modifies state in at least one backend domain service, and
 - in response, generate a confirmation message and require explicit user confirmation before invoking the at least one tool associated with the write operation.
 
-**10. The system of claim 1**, wherein the AI orchestrator is further configured to escalate a conversation to a human agent upon detecting at least one of:
+**8. The system of claim 1**, wherein the AI orchestrator is further configured to escalate a conversation to a human agent upon detecting at least one of:
 - a sequence of low-confidence intents exceeding a predetermined count,
 - repeated tool failures,
 - a user request for escalation, or
 - a compliance-sensitive intent (e.g., fraud dispute or complaint).
 
-**11. The system of claim 1**, wherein the backend domain services comprise a financial services domain, and wherein the domain-specific functions include at least one of:
-- retrieving financial account information,
-- retrieving transaction history,
-- executing fund transfers, or
-- managing payment cards.
+**9. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code.
 
-**12. The system of claim 11**, wherein the MCP service layer exposes tools configured to:
-- retrieve financial accounts,
-- retrieve financial transactions,
-- execute fund transfers, and
-- block or replace payment cards,
+**10. The system of claim 1**, further comprising a policy engine configured to:
+- classify fields in tool outputs according to sensitivity levels; and
+- determine, prior to construction of a prompt for the large language model, one or more transformations to be applied to the tool outputs, the transformations including at least one of masking, redaction, tokenization, or omission of sensitive fields.
 
-and wherein outputs from such tools are masked to reveal only partial account or card numbers to the LLM.
-
-**13. The system of claim 1**, wherein the backend domain services comprise an e-commerce domain, and wherein the domain-specific functions include at least one of:
-- searching products,
-- retrieving product details,
-- checking order status,
-- modifying orders, or
-- initiating returns.
-
-**14. The system of claim 1**, wherein the backend domain services comprise a support or ticketing domain, and wherein the domain-specific functions include at least one of:
-- creating support tickets,
-- retrieving ticket status,
-- searching a knowledge base, or
-- escalating to human agents.
-
-**15. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code.
-
-**16. The system of claim 1**, wherein the AI orchestrator is further configured to:
-- maintain multiple prompt templates associated with a given intent, and
-- select among the multiple prompt templates according to an experiment configuration for A/B testing based on user identifiers or sessions,
-
-and wherein metrics collected during operation are used to update the experiment configuration.
-
-**17. A computer-implemented method for providing task-oriented conversational services**, comprising:
+**11. A computer-implemented method for providing task-oriented conversational services**, comprising:
 
 - receiving, at a chat backend, a user message from a chat frontend together with authentication information;
 - validating the authentication information and associating the user message with a session context;
@@ -721,91 +666,41 @@ and wherein metrics collected during operation are used to update the experiment
 - invoking a large language model using the constructed prompt to generate a natural language response; and
 - returning the natural language response to the chat frontend for display to the user.
 
-**18. The method of claim 17**, further comprising masking or redacting, prior to constructing the prompt, one or more sensitive fields in the output data according to domain-specific policies to prevent exposure of full account numbers, full card numbers, or government identifiers to the large language model.
+**12. The method of claim 11**, further comprising masking or redacting, prior to constructing the prompt, one or more sensitive fields in the output data according to domain-specific policies to prevent exposure of full account numbers, full card numbers, or government identifiers to the large language model.
 
-**19. The method of claim 17**, further comprising:
+**13. The method of claim 11**, further comprising:
 - determining that a confidence score associated with the user intent is below a threshold, and
 - in response, transmitting a clarification question to the chat frontend requesting additional information from the user.
 
-**20. The method of claim 17**, wherein selecting the at least one tool comprises:
+**14. The method of claim 11**, wherein selecting the at least one tool comprises:
 - consulting a configuration mapping from intent labels to sets of tools, and
 - determining a subset of tools based on available entities and authorization data associated with the session context.
 
-**21. The method of claim 17**, further comprising, in response to detecting that the user intent corresponds to a write operation:
+**15. The method of claim 11**, further comprising, in response to detecting that the user intent corresponds to a write operation:
 - generating a confirmation message describing the operation and its impact;
 - transmitting the confirmation message to the user; and
 - proceeding to invoke the at least one tool only upon receiving an explicit confirmation input from the user.
 
-**22. The method of claim 17**, further comprising logging, for each invocation of the at least one tool:
-- the tool name,
-- invocation time,
-- latency,
-- result status, and
-- a correlation identifier linking the invocation with the user message.
-
-**23. The method of claim 17**, further comprising:
+**16. The method of claim 11**, further comprising:
 - detecting repeated failures or timeouts when invoking the at least one tool,
 - opening a circuit breaker condition in which further invocations of one or more affected backend domain services are temporarily suspended, and
 - providing the user with a fallback message or routing to a human agent.
 
-**24. The method of claim 17**, further comprising:
+**17. The method of claim 11**, further comprising:
 - maintaining conversation history in a session store,
 - including relevant prior messages from the conversation history in the constructed prompt to provide multi-turn conversational context.
 
-**25. The method of claim 17**, wherein determining a user intent comprises:
+**18. The method of claim 11**, wherein determining a user intent comprises:
 - invoking, by the chat backend, a first NLU engine and receiving a confidence score;
 - if the confidence score is above a first threshold, accepting the detected intent;
 - if the confidence score is below the first threshold, invoking a second, domain-specific NLU model; and
 - if the second NLU model returns a low confidence score, invoking an LLM-based function-calling component to extract intent and entities.
 
-**26. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of any of claims 17–25.
-
-**27. The method of claim 17**, wherein the domain-specific function is a financial services function, and the method further comprises:
-- retrieving financial account information,
-- retrieving transaction history,
-- executing fund transfers, or
-- managing payment cards.
-
-**28. The method of claim 17**, wherein the domain-specific function is an e-commerce function, and the method further comprises:
-- searching for products,
-- checking order status,
-- modifying orders, or
-- initiating returns.
-
-**29. The method of claim 17**, wherein the domain-specific function is a support or ticketing function, and the method further comprises:
-- creating support tickets,
-- retrieving ticket status,
-- searching a knowledge base, or
-- escalating to human agents.
-
-**30. The system of claim 1**, wherein the AI orchestrator further implements a workflow engine comprising:
-- a state graph defining a plurality of states representing workflow stages (e.g., intent detection, tool selection, tool execution, response generation),
-- transitions between states triggered by events or conditions, and
-- checkpoint mechanisms enabling the workflow to resume from saved states if interrupted.
-
-**31. The system of claim 1**, wherein the AI orchestrator is further configured to:
-- determine, based on a schema associated with the selected intent, that one or more required entities are missing or ambiguous;
-- generate at least one clarification message requesting the missing or disambiguating information from the user; and
-- update a session context with user responses and resume tool selection and invocation once all required entities are present and valid.
-
-**32. The system of claim 1**, further comprising a policy engine configured to:
-- classify fields in tool outputs according to sensitivity levels; and
-- determine, prior to construction of a prompt for the large language model, one or more transformations to be applied to the tool outputs, the transformations including at least one of masking, redaction, tokenization, or omission of sensitive fields.
-
-**33. The system of claim 1**, wherein the MCP service layer is further configured to:
-- provide, responsive to a discovery request from the AI orchestrator, a registry of tools that are currently enabled for a given user or session context, including respective input schemas and sensitivity metadata; and
-- hide or disable tools based on feature flags, user roles, or jurisdictional constraints,
-
-and wherein the AI orchestrator limits tool selection to tools indicated as enabled in the registry.
-
-**34. The method of claim 17**, further comprising:
-- determining, based on an entity specification associated with the user intent, that one or more required entities are missing or ambiguous;
-- transmitting at least one clarification question to the chat frontend requesting the missing or disambiguating information; and
-- upon receiving user responses, updating the session context and proceeding with tool selection and invocation when the entity specification is satisfied.
-
-**35. The method of claim 17**, further comprising:
+**19. The method of claim 11**, further comprising:
 - evaluating, by a policy engine, one or more rules over the output data from the at least one tool and over metadata associated with a target large language model; and
 - in response to the evaluation, applying at least one of masking, redaction, tokenization, or omission to sensitive fields in the output data before including the output data in the constructed prompt.
+
+**20. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of claim 11.
 
 ---
 

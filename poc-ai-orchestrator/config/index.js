@@ -41,6 +41,21 @@ module.exports = {
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 2000
   },
 
+  // Local/Custom SLM Configuration (OpenAI-compatible endpoint)
+  slm: {
+    enabled: process.env.SLM_ENABLED !== 'false',
+    baseUrl: process.env.SLM_BASE_URL || null,
+    apiKey: process.env.SLM_API_KEY || process.env.OPENAI_API_KEY || 'not-required',
+    model: process.env.SLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4',
+    temperature: process.env.SLM_TEMPERATURE !== undefined
+      ? parseFloat(process.env.SLM_TEMPERATURE)
+      : (parseFloat(process.env.OPENAI_TEMPERATURE) || 0),
+    maxTokens: process.env.SLM_MAX_TOKENS !== undefined
+      ? parseInt(process.env.SLM_MAX_TOKENS)
+      : (parseInt(process.env.OPENAI_MAX_TOKENS) || 2000),
+    jsonMode: process.env.SLM_JSON_MODE === 'true'
+  },
+
   // MCP Service Configuration
   mcp: {
     // HTTP-based MCP (legacy/fallback)
