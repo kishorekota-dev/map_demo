@@ -3,6 +3,7 @@ const serviceRegistry = require('../services/serviceRegistry');
 const loadBalancer = require('../services/loadBalancer');
 const circuitBreaker = require('../services/circuitBreaker');
 const logger = require('../utils/logger');
+const { recordProxyMetrics } = require('../routes/metrics');
 
 /**
  * Create proxy middleware for routing requests to microservices
@@ -182,8 +183,8 @@ const getFallbackUrl = (serviceName) => {
  * @param {number} responseTime - Response time in milliseconds
  */
 const recordMetrics = (service, method, statusCode, responseTime) => {
-  // TODO: Implement actual metrics collection
-  // This could integrate with Prometheus, StatsD, or other monitoring systems
+  recordProxyMetrics(service, method, statusCode, responseTime);
+
   logger.debug('Recording metrics', {
     service,
     method,

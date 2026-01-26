@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import authService from '@/services/authService';
 import { 
   ChatResponse, 
   AvailableIntent, 
@@ -38,6 +39,11 @@ class ApiService {
       (config) => {
         config.headers['X-Session-ID'] = this.sessionId;
         config.headers['X-Request-ID'] = uuidv4();
+
+        const accessToken = authService.getAccessToken();
+        if (accessToken) {
+          config.headers['Authorization'] = `Bearer ${accessToken}`;
+        }
         
         console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
@@ -84,12 +90,22 @@ class ApiService {
     this.sessionId = sessionId;
   }
 
+  private getUserProfile() {
+    return authService.getUserProfile();
+  }
+
+  private getUserId(): string {
+    return this.getUserProfile()?.userId || 'manual-user';
+  }
+
   // Initialize a session with the backend
   private async initializeSession(): Promise<void> {
     try {
+      const userProfile = this.getUserProfile();
+
       const response = await this.client.post('/sessions', {
-        userId: 'frontend-user', // TODO: replace with actual user identification
-        userData: {},
+        userId: this.getUserId(),
+        userData: userProfile || {},
         metadata: {
           userAgent: navigator.userAgent,
           timestamp: new Date().toISOString()

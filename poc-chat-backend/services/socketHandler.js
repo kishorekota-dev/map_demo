@@ -1,4 +1,6 @@
 const logger = require('./logger');
+const jwt = require('jsonwebtoken');
+const axios = require('axios');
 
 class SocketHandler {
     constructor(io, chatService, agentOrchestrator, sessionManager) {
@@ -163,16 +165,27 @@ class SocketHandler {
                 return;
             }
 
-            // TODO: Implement actual authentication logic
-            // For now, accept any valid-looking token or credentials
             let authResult = { authenticated: false, userId: null };
 
             if (data.token) {
-                // JWT token validation would go here
-                authResult = { authenticated: true, userId: data.userId || 'anonymous' };
+                try {
+                    const decoded = jwt.verify(
+                        data.token,
+                        process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+                    );
+
+                    authResult = {
+                        authenticated: true,
+                        userId: decoded.userId || decoded.id || data.userId || 'anonymous'
+                    };
+                } catch (error) {
+                    authResult = { authenticated: false, userId: null };
+                }
             } else if (data.credentials) {
-                // Credential validation would go here
-                authResult = { authenticated: true, userId: data.credentials.userId };
+                const validation = await this.validateUserCredentials(data.credentials);
+                if (validation.valid) {
+                    authResult = { authenticated: true, userId: validation.userId };
+                }
             }
 
             if (authResult.authenticated) {
@@ -203,6 +216,42 @@ class SocketHandler {
                 data: Object.keys(data)
             });
             socket.emit('authenticationError', { error: 'Authentication error' });
+        }
+    }
+
+    async validateUserCredentials(credentials) {
+        if (!credentials?.username || !credentials?.password) {
+            return { valid: false };
+        }
+
+        const bankingServiceUrl = process.env.BANKING_SERVICE_URL || 'http://localhost:3005';
+        const authUrl = `${bankingServiceUrl}/api/v1/auth/login`;
+
+        try {
+            const response = await axios.post(
+                authUrl,
+                {
+                    username: credentials.username,
+                    password: credentials.password
+                },
+                {
+                    timeout: 10000,
+                    headers: { 'Content-Type': 'application/json' }
+                }
+            );
+
+            const user = response.data?.data?.user;
+
+            return {
+                valid: true,
+                userId: user?.userId || user?.id || credentials.userId
+            };
+        } catch (error) {
+            logger.warn('Credential validation failed', {
+                error: error.response?.data || error.message
+            });
+
+            return { valid: false };
         }
     }
 

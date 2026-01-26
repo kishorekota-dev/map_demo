@@ -246,6 +246,27 @@ class TransactionRepository {
     const result = await db.query(query);
     return result.rows.map(row => row.category);
   }
+
+  // Get total spent for a specific day (completed debits)
+  async getDailySpent(accountId, date = new Date()) {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const query = `
+      SELECT COALESCE(SUM(ABS(amount)), 0) as total
+      FROM transactions
+      WHERE account_id = $1
+        AND amount < 0
+        AND status = 'completed'
+        AND created_at BETWEEN $2 AND $3
+    `;
+
+    const result = await db.query(query, [accountId, startOfDay, endOfDay]);
+    return parseFloat(result.rows[0]?.total || 0);
+  }
 }
 
 module.exports = new TransactionRepository();

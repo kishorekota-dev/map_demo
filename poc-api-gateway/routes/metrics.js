@@ -22,6 +22,38 @@ const metrics = {
 };
 
 /**
+ * Record metrics from proxy layer
+ */
+const recordProxyMetrics = (service, method, statusCode, responseTime) => {
+  metrics.requests.total++;
+  if (statusCode >= 200 && statusCode < 400) {
+    metrics.requests.success++;
+  } else {
+    metrics.requests.errors++;
+  }
+
+  const statusGroup = `${Math.floor(statusCode / 100)}xx`;
+  metrics.requests.by_status[statusGroup] = (metrics.requests.by_status[statusGroup] || 0) + 1;
+
+  const normalizedService = service || 'unknown';
+  if (!metrics.requests.by_service[normalizedService]) {
+    metrics.requests.by_service[normalizedService] = { total: 0, success: 0, errors: 0 };
+  }
+  metrics.requests.by_service[normalizedService].total++;
+  if (statusCode >= 200 && statusCode < 400) {
+    metrics.requests.by_service[normalizedService].success++;
+  } else {
+    metrics.requests.by_service[normalizedService].errors++;
+  }
+
+  metrics.response_times.total += responseTime;
+  metrics.response_times.count++;
+  metrics.response_times.average = metrics.response_times.total / metrics.response_times.count;
+  metrics.response_times.min = Math.min(metrics.response_times.min, responseTime);
+  metrics.response_times.max = Math.max(metrics.response_times.max, responseTime);
+};
+
+/**
  * Middleware to track metrics
  */
 const trackMetrics = (req, res, next) => {
@@ -175,3 +207,4 @@ function formatBytes(bytes) {
 
 module.exports = router;
 module.exports.trackMetrics = trackMetrics;
+module.exports.recordProxyMetrics = recordProxyMetrics;

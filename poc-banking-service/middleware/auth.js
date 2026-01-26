@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { AccountRepository } = require('../database/repositories');
 
 /**
  * JWT Authentication Middleware
@@ -53,7 +54,8 @@ const authenticateToken = (req, res, next) => {
 
     // Add user info to request object
     req.user = {
-      id: decoded.id,
+      id: decoded.id || decoded.userId,
+      userId: decoded.userId || decoded.id,
       email: decoded.email,
       role: decoded.role,
       permissions: decoded.permissions || []
@@ -157,41 +159,69 @@ const requirePermissions = (permissions) => {
  * Account ownership verification middleware
  * Ensures users can only access their own accounts
  */
-const verifyAccountOwnership = (req, res, next) => {
+const verifyAccountOwnership = async (req, res, next) => {
   const accountId = req.params.accountId || req.body.accountId;
-  const userId = req.user.id;
+  const userId = req.user.userId || req.user.id;
 
   // Admin users can access any account
   if (req.user.role === 'admin') {
     return next();
   }
 
-  // TODO: Implement actual database check
-  // For now, we'll use a simple ID matching logic
-  // In production, this should query the database to verify ownership
-  
-  logger.info('Verifying account ownership', {
-    userId: userId,
-    accountId: accountId,
-    path: req.path
-  });
-
-  // Placeholder logic - replace with actual database query
-  if (accountId && !accountId.startsWith(userId.toString())) {
-    logger.warn('Account ownership verification failed', {
+  try {
+    logger.info('Verifying account ownership', {
       userId: userId,
       accountId: accountId,
       path: req.path
     });
 
-    return res.status(403).json({
-      error: 'Access forbidden',
-      message: 'You can only access your own accounts',
-      code: 'ACCOUNT_ACCESS_DENIED'
+    if (!accountId) {
+      return res.status(400).json({
+        error: 'Account ID required',
+        message: 'Account ID is missing from request',
+        code: 'ACCOUNT_ID_REQUIRED'
+      });
+    }
+
+    const account = await AccountRepository.findById(accountId);
+
+    if (!account) {
+      return res.status(404).json({
+        error: 'Account not found',
+        message: 'Account does not exist',
+        code: 'ACCOUNT_NOT_FOUND'
+      });
+    }
+
+    if (account.user_id !== userId) {
+      logger.warn('Account ownership verification failed', {
+        userId: userId,
+        accountId: accountId,
+        path: req.path
+      });
+
+      return res.status(403).json({
+        error: 'Access forbidden',
+        message: 'You can only access your own accounts',
+        code: 'ACCOUNT_ACCESS_DENIED'
+      });
+    }
+
+    next();
+  } catch (error) {
+    logger.error('Account ownership verification error', {
+      error: error.message,
+      userId: userId,
+      accountId: accountId,
+      path: req.path
+    });
+
+    res.status(500).json({
+      error: 'Ownership verification error',
+      message: 'Unable to verify account ownership',
+      code: 'ACCOUNT_OWNERSHIP_ERROR'
     });
   }
-
-  next();
 };
 
 module.exports = {

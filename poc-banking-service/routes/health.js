@@ -55,11 +55,23 @@ router.get('/', async (req, res) => {
  */
 router.get('/ready', async (req, res) => {
   try {
-    // TODO: Check if service is ready to accept requests
-    // Example: Check database connectivity, required services availability
-    
+    const dbHealth = await db.healthCheck();
+
+    if (dbHealth.status !== 'healthy') {
+      return res.status(503).json({
+        status: 'not ready',
+        dependencies: {
+          database: dbHealth.status
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(200).json({
       status: 'ready',
+      dependencies: {
+        database: dbHealth.status
+      },
       timestamp: new Date().toISOString()
     });
   } catch (error) {

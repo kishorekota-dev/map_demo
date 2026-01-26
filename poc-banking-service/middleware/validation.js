@@ -1,5 +1,6 @@
 const Joi = require('joi');
 const logger = require('../utils/logger');
+const { AccountRepository, TransactionRepository } = require('../database/repositories');
 
 /**
  * Generic validation middleware factory
@@ -188,18 +189,28 @@ const businessValidators = {
    */
   validateSufficientFunds: async (req, res, next) => {
     try {
-      const { fromAccountId, amount } = req.body;
-      
-      // TODO: Implement actual balance check with database
-      // For now, we'll simulate the check
-      const mockBalance = 5000; // This should come from database
-      
-      if (amount > mockBalance) {
+      const { fromAccountId, accountId, amount } = req.body;
+      const targetAccountId = fromAccountId || accountId;
+
+      if (!targetAccountId) {
+        return res.status(400).json({
+          error: 'Account ID required',
+          message: 'Account ID is required for balance validation',
+          code: 'ACCOUNT_ID_REQUIRED'
+        });
+      }
+
+      const hasFunds = await AccountRepository.hasSufficientFunds(targetAccountId, amount);
+
+      if (!hasFunds) {
+        const balances = await AccountRepository.getBalance(targetAccountId);
+        const availableBalance = balances?.available_balance ?? 0;
+
         return res.status(400).json({
           error: 'Insufficient funds',
           message: 'Account balance is insufficient for this transaction',
           code: 'INSUFFICIENT_FUNDS',
-          available: mockBalance,
+          available: availableBalance,
           requested: amount
         });
       }
@@ -226,13 +237,30 @@ const businessValidators = {
    */
   validateDailyLimits: async (req, res, next) => {
     try {
-      const { amount } = req.body;
-      const userId = req.user.id;
-      
-      // TODO: Implement actual daily limit check with database
-      const dailySpent = 0; // This should come from database
-      const dailyLimit = 10000; // This should come from user settings
-      
+      const { fromAccountId, accountId, amount } = req.body;
+      const targetAccountId = fromAccountId || accountId;
+
+      if (!targetAccountId) {
+        return res.status(400).json({
+          error: 'Account ID required',
+          message: 'Account ID is required for daily limit validation',
+          code: 'ACCOUNT_ID_REQUIRED'
+        });
+      }
+
+      const account = await AccountRepository.findById(targetAccountId);
+
+      if (!account) {
+        return res.status(404).json({
+          error: 'Account not found',
+          message: 'Account does not exist',
+          code: 'ACCOUNT_NOT_FOUND'
+        });
+      }
+
+      const dailyLimit = parseFloat(account.daily_transaction_limit || 10000);
+      const dailySpent = await TransactionRepository.getDailySpent(targetAccountId, new Date());
+
       if (dailySpent + amount > dailyLimit) {
         return res.status(400).json({
           error: 'Daily limit exceeded',

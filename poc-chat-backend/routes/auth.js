@@ -1,7 +1,46 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const logger = require('../services/logger');
+
+const BANKING_SERVICE_URL = process.env.BANKING_SERVICE_URL || 'http://localhost:3005';
+const BANKING_AUTH_URL = `${BANKING_SERVICE_URL}/api/v1/auth/login`;
+const ALLOW_INSECURE_AUTH = process.env.ALLOW_INSECURE_AUTH === 'true' || process.env.NODE_ENV !== 'production';
+
+const validateUserCredentials = async (credentials) => {
+    if (!credentials?.username || !credentials?.password) {
+        return { valid: false, reason: 'missing_credentials' };
+    }
+
+    try {
+        const response = await axios.post(
+            BANKING_AUTH_URL,
+            {
+                username: credentials.username,
+                password: credentials.password
+            },
+            {
+                timeout: 10000,
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
+
+        const user = response.data?.data?.user;
+
+        return {
+            valid: true,
+            userId: user?.userId || user?.id,
+            user
+        };
+    } catch (error) {
+        return {
+            valid: false,
+            reason: 'invalid_credentials',
+            error: error.response?.data || error.message
+        };
+    }
+};
 
 /**
  * @route POST /auth/token
@@ -20,16 +59,21 @@ router.post('/token', async (req, res) => {
             });
         }
 
-        // TODO: Implement actual credential validation
-        // For demo purposes, accept any user ID
-        let isValidUser = true;
-        
+        let isValidUser = false;
+        let resolvedUserId = userId;
+
         if (credentials) {
-            // Here you would validate against your user database
-            // isValidUser = await validateUserCredentials(credentials);
-            logger.auth('credential_validation_attempted', userId, { 
+            logger.auth('credential_validation_attempted', userId || 'unknown', {
                 credentialType: typeof credentials
             });
+
+            const validation = await validateUserCredentials(credentials);
+            isValidUser = validation.valid;
+            if (validation.userId) {
+                resolvedUserId = validation.userId;
+            }
+        } else if (userId && ALLOW_INSECURE_AUTH) {
+            isValidUser = true;
         }
 
         if (!isValidUser) {
@@ -40,9 +84,16 @@ router.post('/token', async (req, res) => {
             });
         }
 
+        if (!resolvedUserId) {
+            return res.status(400).json({
+                error: 'User ID required',
+                timestamp: new Date().toISOString()
+            });
+        }
+
         // Generate JWT token for WebSocket authentication
         const tokenPayload = {
-            userId,
+            userId: resolvedUserId,
             type: 'websocket_auth',
             issued: new Date().toISOString(),
             sessionData: sessionData || {}
@@ -58,7 +109,7 @@ router.post('/token', async (req, res) => {
             }
         );
 
-        logger.auth('token_generated', userId, {
+        logger.auth('token_generated', resolvedUserId, {
             tokenType: 'websocket_auth',
             expiresIn: process.env.JWT_EXPIRY || '24h'
         });
@@ -66,7 +117,7 @@ router.post('/token', async (req, res) => {
         res.status(200).json({
             success: true,
             token,
-            userId,
+            userId: resolvedUserId,
             expiresIn: process.env.JWT_EXPIRY || '24h',
             tokenType: 'Bearer',
             timestamp: new Date().toISOString()
