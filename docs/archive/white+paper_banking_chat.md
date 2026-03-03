@@ -206,40 +206,15 @@ flowchart LR
 
 ### System Overview
 
-In one embodiment, the system comprises:
+In one embodiment, the system relies on several foundational components (Sections 1-3, 6-7) that support the core orchestration and security layers (Sections 4-5). The core invention focuses on the interplay between the AI Orchestrator and the MCP Service Layer, while other components may be implemented using industry-standard patterns.
 
-#### 1. Chat Frontend
+#### 1. Supportive Interface and Logic Layers (Information Only)
 
-A user interface (web, mobile, or other client) presenting a chat interface that:
-- Accepts user input in the form of text messages or other modalities (e.g., voice, images).
-- Renders messages in a conversational thread, distinguishing between user and assistant messages.
-- Communicates with the chat backend over secure channels (e.g., HTTPS, WebSocket).
-- Maintains session authentication tokens (e.g., JWT) in secure storage (e.g., secure cookies, local storage with appropriate protections).
+- **Chat Frontend:** A standard user interface (web, mobile, or voice) presenting a chat interface, rendering messages, and securely maintaining session authentications.
+- **Chat Backend:** A server-side component to manage state. It receives messages, validates authentication, associates messages with a conversation identifier, retrieves session data, enforces rate limits, and routes validated messages to the NLU pipeline. 
+- **NLU Services:** One or more Natural Language Understanding components to determine intent. As an optional implementation, a hybrid approach could be utilized (e.g., combining a primary rule-based NLU, a secondary domain-model, and an LLM-based function-calling fallback for low-confidence queries).
 
-#### 2. Chat Backend
-
-A server-side component that:
-- Receives incoming messages from the chat frontend and validates authentication tokens.
-- Associates each user message with a conversation identifier (for grouping turns within a single conversation) and a session identifier (for grouping conversations by user and session).
-- Stores or retrieves conversation history and session metadata from a session store (e.g., Redis, database).
-- Implements rate limiting and abuse detection to prevent misuse.
-- Invokes one or more NLU services to perform intent detection and entity extraction using a hybrid approach (primary NLU, secondary model, LLM-based fallback).
-- Routes validated messages along with detected intent and entities to the AI orchestrator.
-- Receives responses from the AI orchestrator and returns them to the chat frontend.
-
-
-
-#### 3. NLU Services
-
-One or more NLU components that determine user intent and extract entities. In one embodiment, a hybrid approach is used:
-
-- **Primary NLU Engine**: A hosted or on-premises NLU service (e.g., Google Dialogflow, AWS Lex, Microsoft LUIS, or open-source Rasa) trained on domain-specific intents and configured to detect a set of known intents with high confidence.
-- **Secondary Domain-Specific Model**: A custom machine learning model (e.g., a fine-tuned transformer or SVM) trained specifically on domain examples and edge cases to provide additional accuracy and domain awareness.
-- **LLM-Based Function Calling**: A configuration that instructs an LLM to extract intent and entities from a user message by calling a system function with appropriate parameters. This component is used when primary and secondary engines return low confidence scores or encounter novel phrasings.
-
-The chat backend invokes these NLU components in sequence, accepting results when confidence exceeds a threshold (e.g., 0.70), then forwards the detected intent and entities along with the user message to the AI orchestrator.
-
-#### 4. AI Orchestrator
+#### 2. Core Orchestration: AI Orchestrator
 
 A workflow engine (e.g., based on graph-based orchestration frameworks like LangGraph) that:
 - Receives user messages, manages session context (e.g., conversation history, user roles, preferences), and matches intent received from the chat backend to a prompt to perform fulfillment workflow.
@@ -282,76 +257,28 @@ A protocol-compliant tool server (implementing the Model Context Protocol specif
 - MCP Service Layer apply additional policy checks based on user role, and data sensitivity before allowing tool invocation or data exposure. This enforces governance and compliance requirements to ensure account data is only accessed by authorized users and that sensitive data is protected.
 - The MCP service layer also normalizes and adjusts payloads to meet data requirements for agentic AI processing, including applying necessary transformations, tokenization, and data minimization before passing data to the AI orchestrator. These adaptations may be required on a case-by-case basis, particularly when integrating with legacy enterprise systems that are not AI-ready or that lack clear, machine-interpretable API specifications.
 
-#### 6. Domain Services Layer
+#### 4. Domain Services Layer & Data Stores (Information Only)
 
-A collection of microservices or application programming interfaces (APIs) corresponding to the target domain. Each domain service implements business logic specific to a domain and communicates with underlying data stores. Examples across domains include:
-
-**Financial Services Domain**:
-- Account service: retrieve account metadata, list accounts, retrieve balances.
-- Transaction service: retrieve transaction history, retrieve transaction details.
-- Transfer service: execute fund transfers, schedule payments, manage recipients.
-- Card service: retrieve card details, block or unblock cards, order replacements, activate cards.
-- Profile service: retrieve or update customer profile, preferences, and consent.
-- Compliance service: check KYC status, detect suspicious transactions, enforce sanctions screening.
-
-These services typically expose APIs (e.g., REST, GraphQL, or gRPC) that implement the core business functions of the target domain.
-
-In a traditional enterprise, these domain services may not be designed with AI integration in mind. This problem can be approached multiple ways, MCP service layer can adapt and normalize payloads to meet AI requirements with security RBAC controls Or additional microservices can be introduced to provide AI-friendly facades over legacy systems, which will be leveraged by MCP Layer. These decisions are specific to each enterprise and its existing architecture.
-
-
-
-#### 7. Data Stores and Caches
-
-- **Primary Database**: A relational database (e.g., PostgreSQL) or other persistent store containing domain data (accounts, orders, tickets, etc.), user profiles, and configuration. The chat backend may utilize a dedicated database to store user sessions, conversation history, and metadata. Similarly, the AI Orchestrator may utilize a database or cache for maintaining conversational memory. The specific choice of database technologies is implementation-dependent and adaptable to enterprise standards.
-- **Session Store**: An in-memory cache (e.g., Redis) for storing session data, conversation history, and frequently accessed data to improve performance.
-- **Audit and Observability Store**: A document database or log store (e.g., MongoDB, Elasticsearch) for immutable audit logs, observability metrics, and historical records.
+Microservices or legacy application programming interfaces (APIs) handle the target domain. For example, in a Financial Services embodiment, these might include account retrieval, transaction histories, fund transfers, and compliance checking. These services interact with standard primary databases, session caches (e.g., Redis), and audit storage. If enterprise services are not AI-ready, the MCP Service Layer adapts and normalizes payloads upstream.
 
 ---
 
-### Authentication and Session Management
+### Authentication and Session Management (Standard Implementations)
 
-In one embodiment, users authenticate via a secure endpoint (e.g., `POST /api/auth/login`) using credentials (e.g., username and password) and, optionally, multi-factor authentication (MFA) via one-time passwords or biometric verification.
-
-Upon successful authentication, the system issues a short-lived JWT (JSON Web Token) containing claims such as:
-- User identifier (unique within the system).
-- User roles and permissions.
-- Token expiration time (e.g., 15–60 minutes).
-- Session identifier.
-
-The JWT is transmitted to the chat frontend and stored securely (e.g., in a secure cookie or local storage).
-
-For each incoming chat message, the chat backend extracts and validates the JWT, verifying its signature and expiration. Upon validation, the backend:
-- Extracts the user identifier and roles from the JWT.
-- Associates the message with a conversation identifier (grouping turns within a single conversation) and a session identifier (grouping conversations by user and session).
-- Retrieves or creates session data in the session store, including conversation history, user preferences, and other metadata.
-- Forwards the message and context to the AI orchestrator.
-
-The AI orchestrator maintains session context across turns, enabling multi-turn conversations where the bot remembers prior messages, decisions, and user preferences.
+As an optional configuration utilizing industry standards, users authenticate via secure endpoints receiving short-lived JWTs (JSON Web Tokens) encoding roles and session identifiers. The Chat Backend consistently validates these headers, tying stateless messages into conversational context vectors for the orchestrator.
 
 ---
 
-### Intent Detection and Workflow Selection
+### Intent Detection and Workflow Selection (Exemplary Flow)
 
-When a new user message is received by the chat backend, the system performs intent detection as follows:
+When a new user message is received, standard NLU pipelines decode the user's intent. To maximize reliability, this can be implemented as a tiered system: calling a primary ML/NLU engine first, falling back to a domain-specific model for mid-confidence scores, and finally utilizing an LLM specifically engineered for function-calling to parse the unstructured request as a last resort. 
 
-1. **Primary NLU Invocation**: The chat backend sends the user message and session context to the primary NLU engine, which returns an intent label, a confidence score, and extracted entities (if applicable).
+Once intent detection is complete, the detected intent with entities is forwarded to the AI orchestrator for workflow execution. After receiving the detected intent from the chat backend, the AI orchestrator applies abstract workflow decision logic:
 
-2. **Confidence Threshold Check**: If the confidence score exceeds a first threshold (e.g., 0.70), the detected intent is accepted and forwarded to the AI orchestrator along with the user message.
-
-3. **Secondary NLU Invocation (if needed)**: If the confidence is between a lower threshold (e.g., 0.50) and the first threshold, the chat backend invokes the secondary, domain-specific NLU model. If this returns a higher confidence, it may be used; otherwise, the system proceeds to the next step.
-
-4. **LLM-Based Function Calling (if needed)**: If both primary and secondary NLUs return low confidence (below the lower threshold), the chat backend constructs a prompt instructing an LLM to extract intent and entities. The LLM is provided with tool function definitions and asked to determine which tool(s) should be invoked. The LLM's response is parsed and used as the detected intent.
-
-5. **Fallback to Clarification or Escalation**: If no NLU component yields sufficient confidence, or if the detected intent is `unknown` or `out_of_scope`, the system generates a clarification question asking the user for more information or offers escalation to a human agent.
-
-Once intent detection is complete, the chat backend forwards the user message, session context, and detected intent with entities to the AI orchestrator for workflow execution.
-
-After receiving the detected intent from the chat backend, the AI orchestrator applies workflow decision logic:
-
-- **Missing Entities**: If the detected intent requires entities that were not extracted (e.g., account type for a balance inquiry), the system generates a follow-up question to collect the missing information.
-- **Authorization Check**: The system verifies that the user has permission to perform the action associated with the intent (e.g., checking whether the user can access a specific account).
-- **Write vs. Read Operations**: If the intent corresponds to a write operation (e.g., transferring funds, blocking a card, or updating a profile), the system generates a confirmation message and waits for explicit user confirmation before proceeding.
-- **Tool Selection**: Based on the intent and extracted entities, the system selects one or more tools from the MCP registry that should be invoked to satisfy the user's request.
+- **Missing Entities**: If the detected intent requires entities that were not extracted (e.g., account type for a balance inquiry), the system autonomously generates a human-in-the-loop follow-up question.
+- **Authorization Check**: The system verifies that the user has permission to perform the action associated with the intent.
+- **Write vs. Read Operations**: If the intent corresponds to a write operation (e.g., transferring funds), the system generates a confirmation message and waits for explicit user confirmation.
+- **Tool Selection**: Based on the intent and extracted entities, the system maps the conversational requirement to the specific MCP tool configuration.
 
 ### Human-in-the-Loop Entity Completion and Validation
 
