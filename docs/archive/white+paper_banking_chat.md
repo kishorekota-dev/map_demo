@@ -83,6 +83,7 @@ flowchart TD
 
   subgraph Backend["Chat Backend"]
     AUTH["Authentication & Session<br/>Validation"]
+    SSTORE[("Session Store")]
     SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
     ROUTE["Message Routing<br/>& Orchestrator Invocation"]
     OUT["Return Response<br/>to Chat UI"]
@@ -111,7 +112,6 @@ flowchart TD
   subgraph Domain["Domain Services & Data"]
     SVC["Domain Microservices<br/>(Account, Transaction, Card, etc.)"]
     DB[("Primary Database")]
-    SSTORE[("Session Store")]
     AUDIT[("Audit & Observability Store")]
   end
 
