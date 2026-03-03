@@ -12,7 +12,7 @@
 
 ## Abstract
 
-A system and method for implementing task-oriented chatbots by decoupling the conversational interface, natural language understanding (NLU), and domain-specific microservices using an agentic AI orchestrator and a Model Context Protocol (MCP) service layer. The system utilizes a chat frontend for capturing user inputs, an established NLU pipeline combined with generative AI fallback for intent detection securely managed by a chat backend, and an AI orchestrator that maps detected intents to abstract fulfillment workflows. The AI orchestrator autonomously determines missing entities, triggers human-in-the-loop interactions for clarification, and invokes authorized operations via the MCP service layer. The MCP layer acts as a policy-enforcing tool registry, providing standardized access to backend APIs while ensuring parameter schema validation and data redaction. This architecture minimizes domain-specific coupling, enhances security and conversational flexibility, and enables rapid expansion of chatbot capabilities through configuration updates.
+A system and method for implementing task-oriented chatbots by decoupling the conversational interface, natural language understanding (NLU), and domain-specific microservices using an agentic AI orchestrator and a Model Context Protocol (MCP) service layer. The system utilizes a chat frontend for capturing user inputs, an established NLU pipeline combined with generative AI fallback for intent detection securely managed by a chat backend, and an AI orchestrator that maps detected intents to abstract fulfillment workflows. The architecture introduces a dual-layer policy enforcement framework encompassing: (1) a Data Policy Engine embedded within the MCP layer that provides centralized schema validation, data obfuscation, and role-based access before sensitive output reaches the reasoning engine, and (2) an AI Safety Policy Engine situated at the AI orchestrator layer that acts as a cognitive firewall to filter prompt injections, halt toxic or hallucinatory responses, and enforce domain governance. This unified isolation pattern maximizes enterprise security, ensures stringent data obfuscation, and minimizes integration friction, enabling rapid scaling of conversational capabilities via dynamic tool registries and configuration updates.
 
 ---
 
@@ -96,12 +96,14 @@ flowchart TD
     CTX["Session & Context<br/>Management"]
     WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>HITL, write confirmations)"]
     PROMPTS["Prompt Construction<br/>(system/user prompts,<br/>examples, safety)"]
+    POLICY_AI["AI Safety Policy Engine<br/>(Prompt Safety, Toxicity,<br/>Hallucination Guards)"]
     RESP["LLM Invocation &<br/>Response Post-Processing"]
   end
 
   subgraph MCP["MCP Service Layer"]
     VAL["Schema Validation<br/>& Parameter Checking"]
     REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
+    POLICY_MCP["Data Policy Engine<br/>(RBAC, API Data Rules)"]
     MASK["Masking & Redaction<br/>(sensitive fields)"]
     LOG["Tool Invocation Logging<br/>(audit, metrics)"]
   end
@@ -111,10 +113,6 @@ flowchart TD
     DB[("Primary Database")]
     SSTORE[("Session Store")]
     AUDIT[("Audit & Observability Store")]
-  end
-
-  subgraph PolicyLayer["Policy & Governance"]
-    POLICY["Policy Engine<br/>(data exposure,<br/>role/jurisdiction rules)"]
   end
 
   UI -->|HTTPS/WebSocket<br/>user messages| AUTH
@@ -127,17 +125,19 @@ flowchart TD
 
   WF -->|tool invocations<br/>with parameters| VAL
   VAL --> REG
-  VAL --> MASK
   VAL --> LOG
   LOG --> AUDIT
 
-  MASK --> SVC
+  REG --> SVC
   SVC --> DB
-  DB -->|structured results| POLICY
+  DB -->|raw results| POLICY_MCP
+  POLICY_MCP -->|trigger obfuscation| MASK
+  MASK -->|structured & safe results| PROMPTS
 
-  POLICY --> PROMPTS
-  PROMPTS --> RESP
-  RESP --> OUT
+  PROMPTS -->|validate inputs| POLICY_AI
+  POLICY_AI -->|safe prompt| RESP
+  RESP -->|validate outputs| POLICY_AI
+  POLICY_AI -->|cleared output| OUT
   OUT --> UI
   UI --> U
 ```
@@ -150,6 +150,7 @@ sequenceDiagram
     participant User
     participant ChatBackend as Chat Backend & NLU
     participant Orchestrator as AI Orchestrator
+    participant MCPPly as Data Policy Engine (MCP)
     participant MCP as MCP Service Layer
     participant Domain as Domain Services
     
@@ -158,13 +159,17 @@ sequenceDiagram
     ChatBackend->>Orchestrator: Forward Intent + Entities + Context
     Orchestrator->>Orchestrator: Match Workflow & Extract Parameters
     Orchestrator->>MCP: Invoke Tool Request (MCP Exec)
-    MCP->>MCP: Validate Schema & Policies
+    MCP->>MCP: Validate Schema
     MCP->>Domain: Execute Business Logic
-    Domain-->>MCP: Raw Domain Data
-    MCP->>MCP: Apply Data Redaction & Masking
-    MCP-->>Orchestrator: Safe Tool Results
-    Orchestrator->>Orchestrator: Generate Prompts & Call LLM
-    Orchestrator-->>ChatBackend: Final Natural Language Response
+    Domain-->>MCPPly: Raw Domain Data
+    MCPPly->>MCPPly: Apply Data Redaction, RBAC & Masking
+    MCPPly-->>Orchestrator: Safe Tool Results
+    Orchestrator->>Orchestrator: Generate Prompts
+    Orchestrator->>Orchestrator: AI Safety Policy: Validate Prompt Injection
+    Orchestrator->>LLM: Call Large Language Model
+    LLM-->>Orchestrator: Draft Natural Language Response
+    Orchestrator->>Orchestrator: AI Safety Policy: Guardrails (Toxicity, Hallucination)
+    Orchestrator-->>ChatBackend: Approved Natural Language Response
     ChatBackend-->>User: Display Output
 ```
 
@@ -250,9 +255,10 @@ A workflow engine (e.g., based on graph-based orchestration frameworks like Lang
   - A system prompt defining the assistant's role, domain, safety constraints, and behavioral guidelines.
   - A user prompt containing the latest user message, detected intent and confidence, relevant context (e.g., user preferences, prior actions in the conversation), and tool outputs.
   - Optional few-shot examples demonstrating desired response format or reasoning.
+- **AI Safety Policy Engine Validation:** Scans the constructed prompt for injection vectors and, upon receiving the LLM's raw output, filters for hallucination mapping (verifying factual correctness against tool data), toxicity, and brand alignment.
 - Invokes at least one LLM (e.g., GPT-4, Claude, or similar) to generate a natural language response based on the constructed prompts.
-- Applies post-processing to the LLM output, including:
-  - Validation of response content (e.g., ensuring no sensitive data is inadvertently exposed).
+- Applies post-processing via the AI Safety Policy Engine to the LLM output, including:
+  - Validation of response content (e.g., ensuring no hallucinated URLs or conflicting domain instructions are present).
   - Formatting (e.g., breaking into paragraphs, adding structured elements).
   - Inclusion of suggested next actions or follow-up options.
 - Returns the processed response to the chat backend.
@@ -269,7 +275,8 @@ A protocol-compliant tool server (implementing the Model Context Protocol specif
 - Validates incoming tool invocation requests from the AI orchestrator against the declared schema, rejecting calls with invalid or missing parameters before invoking backend services.
 - Upon validation, invokes the corresponding backend domain service or data source with the validated parameters.
 - Receives results from the backend service.
-- Applies masking, redaction, or filtering policies to the results (e.g., hiding full account numbers or sensitive fields) according to configuration.
+- **Data Policy Engine Enforcement:** Centralizes structural governance by embedding a Data Policy Engine directly within the MCP Service Layer. This intercepts both incoming requests (to authorize based on strict Roles-Based Access Controls) and outgoing data (to perform data obfuscation, sanitization, and PII filtration at the output layer level).
+- Applies masking, redaction, or filtering policies via the embedded Data Policy Engine to the outbound results (e.g., obfuscating full account numbers or masking sensitive salary fields) according to enterprise configuration before the data ever reaches the AI orchestrator or network transport layer.
 - Returns the processed results to the AI orchestrator via the MCP protocol.
 - Logs all tool invocations, parameters, and results for audit, observability, and continuous improvement.
 - MCP Service Layer apply additional policy checks based on user role, and data sensitivity before allowing tool invocation or data exposure. This enforces governance and compliance requirements to ensure account data is only accessed by authorized users and that sensitive data is protected.
@@ -411,9 +418,15 @@ Before including tool output in a prompt to the LLM, the system applies masking 
 - Full addresses and government identifiers (e.g., SSNs, tax IDs) are omitted from LLM prompts.
 - Salaries, detailed financial data, and other sensitive attributes are redacted according to configuration.
 
-#### Prompt Injection Security and LLM Defenses
+#### Prompt Injection Security and Dual-Layer Defenses
 
-To prevent prompt injection attacks, particularly during LLM-based intent fallback and workflow execution, user inputs are strictly parameterized and isolated from system directives. System instructions explicitly bound the LLM's authority, instructing it to ignore commands embedded in user constraints that attempt to bypass tool schemas, alter established workflows, or leak system configurations. Furthermore, input sanitization routines strip executable code and overly long strings prior to processing.
+To ensure complete systemic safety, the architecture defends against both semantic attacks and data breaches through a two-tiered policy enforcement framework:
+
+1. **AI Safety Policy Engine (Orchestrator Layer):** 
+   Operating at the cognitve boundaries of the LLM, this engine governs behavioral safety. Before prompt construction, it sanitizes user inputs (stripping structural evasion characters and long strings). Enforced system instructions strictly bound the agent's authority to prevent prompt-injection attacks. After the LLM drafts a response, this engine executes a post-generation validation pass to check for hallucinated information (e.g., comparing numbers in the output against the verified tool data), detect toxic language, and enforce brand tone alignment before the message reaches the external network.
+
+2. **Data Policy Engine (MCP Layer):** 
+   Operating deep within the secure application backend, this engine acts as an absolute structural boundary. Even if the AI Orchestrator were completely compromised via a novel injection attack, the Data Policy Engine prevents the AI from extracting arbitrary data. It strictly evaluates incoming parameters against JSON schemas, verifies user RBAC permissions before permitting an API invocation, and mathematically strips or tokenizes all PII from the outgoing JSON response payload.
 
 #### Tokenization
 
@@ -751,9 +764,9 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 
 **9. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code.
 
-**10. The system of claim 1**, further comprising a policy engine configured to:
-- classify fields in tool outputs according to sensitivity levels; and
-- determine, prior to construction of a prompt for the large language model, one or more transformations to be applied to the tool outputs, the transformations including at least one of masking, redaction, tokenization, or omission of sensitive fields.
+**10. The system of claim 1**, further comprising a dual-layer policy enforcement framework including:
+- a Data Policy Engine operating within the MCP service layer configured to intercept tool outputs, verify roles-based access controls, and apply data transformations prior to transmission, the transformations including masking, redaction, and tokenization of sensitive fields; and
+- an AI Safety Policy Engine operating in conjunction with the AI orchestrator configured to validate cognitive interactions by performing prompt injection analysis on user inputs and filtering generated responses for toxic content, tone misalignment, and factual hallucinations based on tool-provided data.
 
 **11. A computer-implemented method for providing task-oriented conversational services**, comprising:
 
@@ -799,9 +812,9 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - if the confidence score is below the first threshold, invoking a second, domain-specific NLU model; and
 - if the second NLU model returns a low confidence score, invoking an LLM-based function-calling component to extract intent and entities.
 
-**19. The method of claim 11**, further comprising:
-- evaluating, by a policy engine, one or more rules over the output data from the at least one tool and over metadata associated with a target large language model; and
-- in response to the evaluation, applying at least one of masking, redaction, tokenization, or omission to sensitive fields in the output data before including the output data in the constructed prompt.
+**19. The method of claim 11**, further comprising executing a dual validation protocol during conversational services by:
+- evaluating, by a data policy engine, data sensitivity rules and user access roles prior to releasing tool outputs to the artificial intelligence orchestrator and redacting determined sensitive fields; and
+- evaluating, by a safety policy engine, bounding and factual constraints against drafted language responses prior to returning the response to a user to mitigate injected logic commands and prevent factual hallucinations.
 
 **20. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of claim 11.
 
