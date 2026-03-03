@@ -6,7 +6,13 @@
 
 ## Title
 
-**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS USING AUTONOMOUS FULFILLMENT WORKFLOW USING AGENTIC ARTIFICIAL INTELLIGENCE AND MODEL CONTEXT PROTOCOL**
+**SYSTEMS AND METHODS FOR IMPLEMENTING TASK-ORIENTED CHATBOTS WITH AUTONOMOUS FULFILLMENT WORKFLOWS USING AGENTIC AI AND MODEL CONTEXT PROTOCOL**
+
+---
+
+## Abstract
+
+A system and method for implementing task-oriented chatbots by decoupling the conversational interface, natural language understanding (NLU), and domain-specific microservices using an agentic AI orchestrator and a Model Context Protocol (MCP) service layer. The system utilizes a chat frontend for capturing user inputs, an established NLU pipeline combined with generative AI fallback for intent detection securely managed by a chat backend, and an AI orchestrator that maps detected intents to abstract fulfillment workflows. The AI orchestrator autonomously determines missing entities, triggers human-in-the-loop interactions for clarification, and invokes authorized operations via the MCP service layer. The MCP layer acts as a policy-enforcing tool registry, providing standardized access to backend APIs while ensuring parameter schema validation and data redaction. This architecture minimizes domain-specific coupling, enhances security and conversational flexibility, and enables rapid expansion of chatbot capabilities through configuration updates.
 
 ---
 
@@ -42,7 +48,7 @@ According to one embodiment, the system includes: ( core of the invention )
 - An API based chat backend, configured to manage authenticated user sessions, maintain conversation context, and route messages.
 - A NLU component that integrates with one or more NLU services with fallback to generative AI based intent detection.
 - An AI orchestrator configured to:
-  - perform intent analysis and perform specific AI agent workflows to fulfill user requests,
+  - receive detected intent and entities from the chat backend, and manage specific AI agent workflows to fulfill user requests,
   - perform thorough validation of user input extraction, and based on defined prompts, perform data extraction and human-in-the-loop validation to seek any missing inputs. An SLM approach is used to define prompts for data extraction and validation.
   - autonomously execute fulfillment workflows by invoking one or more tools via an MCP-compliant interface, and
   - generate natural language responses using at least one LLM.
@@ -76,14 +82,37 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant ChatBackend as Chat Backend & NLU
+    participant Orchestrator as AI Orchestrator
+    participant MCP as MCP Service Layer
+    participant Domain as Domain Services
+    
+    User->>ChatBackend: Message ("What's my balance?")
+    ChatBackend->>ChatBackend: Authenticate & Detect Intent
+    ChatBackend->>Orchestrator: Forward Intent + Entities + Context
+    Orchestrator->>Orchestrator: Match Workflow & Extract Parameters
+    Orchestrator->>MCP: Invoke Tool Request (MCP Exec)
+    MCP->>MCP: Validate Schema & Policies
+    MCP->>Domain: Execute Business Logic
+    Domain-->>MCP: Raw Domain Data
+    MCP->>MCP: Apply Data Redaction & Masking
+    MCP-->>Orchestrator: Safe Tool Results
+    Orchestrator->>Orchestrator: Generate Prompts & Call LLM
+    Orchestrator-->>ChatBackend: Final Natural Language Response
+    ChatBackend-->>User: Display Output
+```
 
 
 
-- **FIG. 4** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
+
+- **FIG. 3** is a schematic diagram of an MCP tool registry and its relationship to underlying domain service APIs.
 
 ```mermaid
 flowchart LR
-  REG4["MCP Tool Registry"] --- CFG4["Config Store - schemas, metadata, feature flags"]
+  REG3["MCP Tool Registry"] --- CFG3["Config Store - schemas, metadata, feature flags"]
 
   subgraph REGISTRY["MCP Registry View"]
     T1["Tool: get_accounts<br/>name; JSON schema; sensitivity tags; enabled=true"]
@@ -93,13 +122,13 @@ flowchart LR
     T3["Tool: block_card<br/>name; JSON schema; jurisdiction rules; featureFlag=enable_block_card"]
   end
 
-  ORCH4[AI Orchestrator] -->|tool discovery| REG4
-  REG4 --> ORCH4
+  ORCH3[AI Orchestrator] -->|tool discovery| REG3
+  REG3 --> ORCH3
 
-  REG4 -->|maps to| API1[Account APIs]
-  REG4 -->|maps to| API2[Payment APIs]
-  REG4 -->|maps to| API3[Card APIs]
-  CFG4 --> REG4
+  REG3 -->|maps to| API1[Account APIs]
+  REG3 -->|maps to| API2[Payment APIs]
+  REG3 -->|maps to| API3[Card APIs]
+  CFG3 --> REG3
 ```
 
 
@@ -296,6 +325,13 @@ The MCP service layer receives each tool invocation request and:
 - Applies masking or redaction policies to sensitive fields in the response (e.g., replacing full account numbers with the last four digits, omitting full addresses or government identifiers).
 - Returns the processed result to the AI orchestrator.
 
+### Error Handling, Circuit Breakers, and Fallbacks
+
+To ensure robustness, the system implements comprehensive error handling and safety mechanisms around API invocations:
+- **Circuit Breakers:** If the MCP layer detects repeated failures or timeouts when invoking a specific backend domain service, a circuit breaker trip occurs. Further tool invocations to that backend are immediately rejected (fail-fast) to prevent cascading system failures and give the backend time to recover.
+- **Graceful Fallbacks:** In the event of a circuit breaker trip or other backend unavailability, the AI orchestrator is notified via structured error codes. The Orchestrator leverages these semantic codes to formulate a graceful fallback message ("Our balance system is temporarily unavailable...") or selectively fall back to alternative data sources.
+- **Human Escalation:** When repetitive low-confidence errors occur in a single session—whether due to NLU confusion, repeated tool failures, or prompt safety violations—the system automatically halts the autonomous execution loop and escalates the conversation context to a human agent queue.
+
 Tool invocations are logged with all relevant metadata (tool name, parameters, latency, result status, correlation ID) for audit, observability, and continuous improvement.
 
 ---
@@ -311,6 +347,10 @@ Before including tool output in a prompt to the LLM, the system applies masking 
 - Full card numbers are masked similarly.
 - Full addresses and government identifiers (e.g., SSNs, tax IDs) are omitted from LLM prompts.
 - Salaries, detailed financial data, and other sensitive attributes are redacted according to configuration.
+
+#### Prompt Injection Security and LLM Defenses
+
+To prevent prompt injection attacks, particularly during LLM-based intent fallback and workflow execution, user inputs are strictly parameterized and isolated from system directives. System instructions explicitly bound the LLM's authority, instructing it to ignore commands embedded in user constraints that attempt to bypass tool schemas, alter established workflows, or leak system configurations. Furthermore, input sanitization routines strip executable code and overly long strings prior to processing.
 
 #### Tokenization
 
@@ -701,12 +741,6 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - in response to the evaluation, applying at least one of masking, redaction, tokenization, or omission to sensitive fields in the output data before including the output data in the constructed prompt.
 
 **20. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of claim 11.
-
----
-
-## Abstract
-
-A system and method for implementing task-oriented chatbots using agentic artificial intelligence and the Model Context Protocol. The system decouples conversational logic (frontend, AI orchestrator, NLU) from domain-specific business logic (backend services) through a standardized tool interface layer. An AI orchestrator determines user intent, selects tools via MCP, invokes backend services, and generates natural language responses using an LLM. The architecture is domain-agnostic and applicable across financial services, e-commerce, support, healthcare, and other domains. Extensive observability, error handling, and multi-turn conversation support ensure robust, scalable, and maintainable conversational experiences.
 
 ---
 
