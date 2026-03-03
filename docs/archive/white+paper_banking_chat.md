@@ -84,7 +84,7 @@ flowchart TD
   subgraph Backend["Chat Backend"]
     AUTH["Authentication & Session<br/>Validation"]
     SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
-    ROUTE["Message Routing<br/>& Rate Limiting"]
+    ROUTE["Message Routing<br/>& Orchestrator Invocation"]
     OUT["Return Response<br/>to Chat UI"]
   end
 
@@ -120,7 +120,8 @@ flowchart TD
   AUTH --> SSTORE
   SESS --> ROUTE
   ROUTE --> NLU_PIPE
-  NLU_PIPE -->|intent + entities| CTX
+  NLU_PIPE -->|intent + entities| ROUTE
+  ROUTE -->|invoke with state| CTX
   CTX --> WF
 
   WF -->|tool invocations<br/>with parameters| VAL
@@ -211,7 +212,7 @@ In one embodiment, the system relies on several foundational components (Section
 #### 1. Supportive Interface and Logic Layers (Information Only)
 
 - **Chat Frontend:** A standard user interface (web, mobile, or voice) presenting a chat interface, rendering messages, and securely maintaining session authentications.
-- **Chat Backend:** A server-side component to manage state. It receives messages, validates authentication, associates messages with a conversation identifier, retrieves session data, enforces rate limits, and routes validated messages to the NLU pipeline. 
+- **Chat Backend:** A server-side component to manage state. It receives messages, validates authentication, associates messages with a conversation identifier, retrieves session data, enforces rate limits, routes validated messages to the NLU pipeline, and ultimately invokes the AI Orchestrator providing the full state context. 
 - **NLU Services:** One or more Natural Language Understanding components to determine intent. As an optional implementation, a hybrid approach could be utilized (e.g., combining a primary rule-based NLU, a secondary domain-model, and an LLM-based function-calling fallback for low-confidence queries).
 
 #### 2. Core Orchestration: AI Orchestrator
