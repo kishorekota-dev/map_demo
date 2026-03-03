@@ -77,7 +77,70 @@ In another aspect, the invention provides a method of operating a task-oriented 
 
 - **FIG. 1** is a block diagram of a system architecture for a task-oriented chatbot using an AI orchestrator and a Model Context Protocol service layer.
 
-![FIG. 1 – System Architecture](diagrams/chatbot-architecture-fig1.png)
+```mermaid
+flowchart TD
+  U[User] --> UI["Chat UI<br/>(Chat Frontend)"]
+
+  subgraph Backend["Chat Backend"]
+    AUTH["Authentication & Session<br/>Validation"]
+    SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
+    ROUTE["Message Routing<br/>& Rate Limiting"]
+    OUT["Return Response<br/>to Chat UI"]
+  end
+
+  subgraph NLULayer["NLU Services"]
+    NLU_PIPE["Hybrid NLU Pipeline<br/>(Primary NLU, Secondary Model,<br/>LLM-based extraction)"]
+  end
+
+  subgraph Orchestrator["AI Orchestrator"]
+    CTX["Session & Context<br/>Management"]
+    WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>HITL, write confirmations)"]
+    PROMPTS["Prompt Construction<br/>(system/user prompts,<br/>examples, safety)"]
+    RESP["LLM Invocation &<br/>Response Post-Processing"]
+  end
+
+  subgraph MCP["MCP Service Layer"]
+    VAL["Schema Validation<br/>& Parameter Checking"]
+    REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
+    MASK["Masking & Redaction<br/>(sensitive fields)"]
+    LOG["Tool Invocation Logging<br/>(audit, metrics)"]
+  end
+
+  subgraph Domain["Domain Services & Data"]
+    SVC["Domain Microservices<br/>(Account, Transaction, Card, etc.)"]
+    DB[("Primary Database")]
+    SSTORE[("Session Store")]
+    AUDIT[("Audit & Observability Store")]
+  end
+
+  subgraph PolicyLayer["Policy & Governance"]
+    POLICY["Policy Engine<br/>(data exposure,<br/>role/jurisdiction rules)"]
+  end
+
+  UI -->|HTTPS/WebSocket<br/>user messages| AUTH
+  AUTH --> SESS
+  AUTH --> SSTORE
+  SESS --> ROUTE
+  ROUTE --> NLU_PIPE
+  NLU_PIPE -->|intent + entities| CTX
+  CTX --> WF
+
+  WF -->|tool invocations<br/>with parameters| VAL
+  VAL --> REG
+  VAL --> MASK
+  VAL --> LOG
+  LOG --> AUDIT
+
+  MASK --> SVC
+  SVC --> DB
+  DB -->|structured results| POLICY
+
+  POLICY --> PROMPTS
+  PROMPTS --> RESP
+  RESP --> OUT
+  OUT --> UI
+  UI --> U
+```
 
 
 - **FIG. 2** is a flow diagram illustrating a method for processing a user request using intent detection, tool execution via MCP, and LLM-based response generation.
