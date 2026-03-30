@@ -4,6 +4,7 @@
  */
 
 const axios = require('axios');
+const natural = require('natural');
 const NodeCache = require('node-cache');
 const logger = require('../utils/logger');
 const config = require('../config/config');
@@ -21,6 +22,8 @@ class NLUService {
     this.dialogflowService = dialogflowService;
     this.bankingNLU = bankingNLU;
     this.contexts = new Map();
+    this.tokenizer = new natural.WordTokenizer();
+    this.sentimentAnalyzer = new natural.SentimentAnalyzer('English', natural.PorterStemmer, 'afinn');
     
     this.initializeIntents();
     logger.info('NLU Service initialized');
@@ -309,10 +312,65 @@ class NLUService {
   }
 
   /**
+   * Provide NLP-compatible processing for legacy callers.
+   */
+  processTextAnalysis(message) {
+    const normalizedMessage = message.toLowerCase();
+    const tokens = this.tokenizer.tokenize(normalizedMessage);
+    const filteredTokens = tokens.filter((token) => (
+      token.length > 2 &&
+      /^[a-z0-9]+$/.test(token) &&
+      !natural.stopwords.includes(token)
+    ));
+
+    const keywordCounts = filteredTokens.reduce((counts, token) => {
+      counts[token] = (counts[token] || 0) + 1;
+      return counts;
+    }, {});
+
+    const keywords = Object.entries(keywordCounts)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, 5)
+      .map(([keyword]) => keyword);
+
+    const sentimentScore = tokens.length > 0 ? this.sentimentAnalyzer.getSentiment(tokens) : 0;
+    const sentiment = {
+      label: sentimentScore > 0.1 ? 'positive' : sentimentScore < -0.1 ? 'negative' : 'neutral',
+      score: Number(sentimentScore.toFixed(3))
+    };
+
+    const combinedEntities = [
+      ...this.extractBasicEntities(message),
+      ...this.bankingNLU.extractBankingEntities(message).map((entity) => ({
+        ...entity,
+        source: entity.source || 'banking'
+      }))
+    ];
+
+    const uniqueEntities = Array.from(new Map(
+      combinedEntities.map((entity) => [`${entity.entity}:${entity.value}`, entity])
+    ).values());
+
+    return {
+      sentiment,
+      entities: uniqueEntities,
+      keywords
+    };
+  }
+
+  /**
    * Enhance intent with NLP analysis
    */
   async enhanceWithNLP(message) {
     try {
+      if (
+        !config.services.nlp ||
+        config.services.nlp === `http://localhost:${config.port}` ||
+        config.services.nlp === `http://127.0.0.1:${config.port}`
+      ) {
+        return this.processTextAnalysis(message);
+      }
+
       const response = await axios.post(`${config.services.nlp}/api/nlp/process`, {
         text: message
       }, { timeout: 5000 });

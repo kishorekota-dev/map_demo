@@ -13,9 +13,10 @@ const slmDataExtractor = require('../services/poc-slm-data-extractor');
  * Uses LangGraph checkpointer for state persistence across invocations
  */
 class BankingChatWorkflow {
-  constructor(mcpClient, sessionManager) {
+  constructor(mcpClient, sessionManager, policyEngine) {
     this.mcpClient = mcpClient;
     this.sessionManager = sessionManager;
+    this.policyEngine = policyEngine;
     this.slm = slmDataExtractor;
     
     // Initialize OpenAI
@@ -57,6 +58,10 @@ class BankingChatWorkflow {
       needsHumanInput: false,
       humanInputQuestion: null,
       toolResults: {},
+      pendingTools: [],
+      policyDecision: null,
+      policyTrace: [],
+      confirmationGranted: false,
       finalResponse: null,
       error: null
     };
@@ -73,6 +78,7 @@ class BankingChatWorkflow {
     workflow.addNode('execute_tools', this.executeTools.bind(this));
     workflow.addNode('generate_response', this.generateResponse.bind(this));
     workflow.addNode('request_confirmation', this.requestConfirmation.bind(this));
+    workflow.addNode('handle_policy', this.handlePolicy.bind(this));
     workflow.addNode('handle_error', this.handleError.bind(this));
 
     // Define edges (workflow flow)
@@ -103,6 +109,7 @@ class BankingChatWorkflow {
       'execute_tools',
       this.routeAfterTools.bind(this),
       {
+        'policy': 'handle_policy',
         'confirmation': 'request_confirmation',
         'generate': 'generate_response',
         'error': 'handle_error'
@@ -110,6 +117,7 @@ class BankingChatWorkflow {
     );
 
     workflow.addEdge('request_confirmation', END);
+    workflow.addEdge('handle_policy', END);
     workflow.addEdge('generate_response', END);
     workflow.addEdge('handle_error', END);
 
@@ -319,6 +327,46 @@ class BankingChatWorkflow {
 
     try {
       const tools = intentMapper.getToolsForIntent(state.intent);
+      const policyDecision = this.policyEngine.evaluateToolExecution({
+        intent: state.intent,
+        tools,
+        state
+      });
+      const policyTrace = policyDecision.audit
+        ? [...(state.policyTrace || []), policyDecision.audit]
+        : state.policyTrace || [];
+
+      if (policyDecision.action === 'block') {
+        await this.sessionManager.updateWorkflowState(state.sessionId, 'policy_pre_tool', {
+          policy: policyDecision.audit
+        });
+
+        return {
+          ...state,
+          pendingTools: tools,
+          policyDecision,
+          policyTrace,
+          currentStep: 'policy_pre_tool',
+          finalResponse: {
+            type: 'policy_blocked',
+            stage: policyDecision.stage,
+            code: policyDecision.code,
+            message: policyDecision.message,
+            policy: policyDecision.audit
+          }
+        };
+      }
+
+      if (policyDecision.action === 'require_confirmation') {
+        return {
+          ...state,
+          pendingTools: tools,
+          policyDecision,
+          policyTrace,
+          currentStep: 'policy_pre_tool'
+        };
+      }
+
       const toolResults = {};
 
       // Execute each tool using Enhanced MCP Client
@@ -353,12 +401,18 @@ class BankingChatWorkflow {
       await this.sessionManager.updateWorkflowState(
         state.sessionId,
         'execute_tools',
-        { toolResults }
+        {
+          toolResults,
+          policy: policyDecision.audit
+        }
       );
 
       return {
         ...state,
         toolResults,
+        pendingTools: tools,
+        policyTrace,
+        policyDecision: null,
         currentStep: 'execute_tools'
       };
     } catch (error) {
@@ -383,11 +437,12 @@ class BankingChatWorkflow {
     try {
       // Build context from collected data and tool results
       // Include userId for authenticated context
+      const sanitizedToolResults = this.policyEngine.sanitizeStructuredData(state.toolResults);
       const context = {
         question: state.question,
         userId: state.userId,
         ...state.collectedData,
-        ...state.toolResults
+        ...sanitizedToolResults
       };
 
       // Build messages
@@ -409,14 +464,36 @@ class BankingChatWorkflow {
 
       // Generate response using LLM
       const response = await this.llm.invoke(messages);
-      const finalResponse = response.content;
+      const responsePolicy = this.policyEngine.evaluateResponse({
+        intent: state.intent,
+        response: response.content,
+        toolResults: sanitizedToolResults
+      });
+      const policyTrace = responsePolicy.audit
+        ? [...(state.policyTrace || []), responsePolicy.audit]
+        : state.policyTrace || [];
+      const finalResponse = responsePolicy.action === 'block'
+        ? responsePolicy.message
+        : responsePolicy.response;
+
+      await this.sessionManager.updateWorkflowState(
+        state.sessionId,
+        'generate_response',
+        {
+          policy: responsePolicy.audit
+        }
+      );
 
       // Save response to session
       await this.sessionManager.addMessage(
         state.sessionId,
         'assistant',
         finalResponse,
-        { intent: state.intent, toolResults: state.toolResults }
+        {
+          intent: state.intent,
+          toolResults: sanitizedToolResults,
+          policy: responsePolicy.audit
+        }
       );
 
       logger.info('Response generated', {
@@ -427,10 +504,13 @@ class BankingChatWorkflow {
 
       return {
         ...state,
+        toolResults: sanitizedToolResults,
+        policyTrace,
         finalResponse: {
           type: 'complete',
           response: finalResponse,
-          intent: state.intent
+          intent: state.intent,
+          policy: responsePolicy.audit
         },
         currentStep: 'generate_response'
       };
@@ -453,7 +533,12 @@ class BankingChatWorkflow {
     });
 
     try {
-      const question = this.buildConfirmationQuestion(state);
+      const question = state.policyDecision?.question || this.buildConfirmationQuestion(state);
+      const details = {
+        ...state.collectedData,
+        tools: state.pendingTools?.length ? state.pendingTools : intentMapper.getToolsForIntent(state.intent),
+        policy: state.policyDecision?.audit || null
+      };
 
       await this.sessionManager.updateSession(state.sessionId, {
         status: 'waiting_human_input',
@@ -468,7 +553,7 @@ class BankingChatWorkflow {
           type: 'confirmation_required',
           question,
           action: state.intent,
-          details: state.collectedData
+          details
         }
       };
     } catch (error) {
@@ -505,6 +590,31 @@ class BankingChatWorkflow {
   }
 
   /**
+   * Node: Handle Policy Outcome
+   */
+  async handlePolicy(state) {
+    logger.warn('Workflow: Policy decision applied', {
+      sessionId: state.sessionId,
+      stage: state.policyDecision?.stage,
+      code: state.policyDecision?.code
+    });
+
+    await this.sessionManager.updateSession(state.sessionId, {
+      status: 'active',
+      currentStep: state.currentStep || 'handle_policy'
+    });
+
+    await this.sessionManager.updateWorkflowState(state.sessionId, state.currentStep || 'handle_policy', {
+      policy: state.policyDecision?.audit || null
+    });
+
+    return {
+      ...state,
+      currentStep: state.currentStep || 'handle_policy'
+    };
+  }
+
+  /**
    * Routing: After Intent Analysis
    */
   routeAfterIntent(state) {
@@ -537,8 +647,12 @@ class BankingChatWorkflow {
    */
   routeAfterTools(state) {
     if (state.error) return 'error';
+
+    if (state.policyDecision?.action === 'block') {
+      return 'policy';
+    }
     
-    if (intentMapper.needsConfirmation(state.intent)) {
+    if (state.policyDecision?.action === 'require_confirmation') {
       return 'confirmation';
     }
     

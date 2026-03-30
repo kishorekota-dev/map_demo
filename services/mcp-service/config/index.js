@@ -53,7 +53,7 @@ module.exports = {
       timeout: parseInt(process.env.SERVICE_TIMEOUT) || 5000
     },
     nlp: {
-      url: process.env.NLP_SERVICE_URL || 'http://localhost:3002',
+      url: process.env.NLP_SERVICE_URL || process.env.NLU_SERVICE_URL || 'http://localhost:3003',
       timeout: parseInt(process.env.SERVICE_TIMEOUT) || 5000
     },
     nlu: {

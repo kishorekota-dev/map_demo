@@ -60,7 +60,7 @@ module.exports = {
 
   // Service discovery
   services: {
-    nlp: process.env.NLP_SERVICE_URL || 'http://localhost:3002',
+    nlp: process.env.NLP_SERVICE_URL || process.env.NLU_SERVICE_URL || 'http://localhost:3003',
     banking: process.env.BANKING_SERVICE_URL || 'http://localhost:3001',
     mcp: process.env.MCP_SERVICE_URL || 'http://localhost:3004'
   }

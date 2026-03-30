@@ -1,86 +1,91 @@
 version: '3.8'
 
 services:
-  # ============================================================================
-  # Infrastructure Services
-  # ============================================================================
-  
-  api-gateway:
-    build:
-      context: ./poc-api-gateway
-      dockerfile: Dockerfile
-    container_name: chat-banking-api-gateway
-    ports:
-      - "3001:3001"
+  postgres:
+    image: postgres:15-alpine
     environment:
-      - NODE_ENV=production
-      - PORT=3001
-      - LOG_LEVEL=info
-      - BANKING_SERVICE_URL=http://banking-service:3005
-      - NLP_SERVICE_URL=http://nlp-service:3002
-      - NLU_SERVICE_URL=http://nlu-service:3003
-      - MCP_SERVICE_URL=http://mcp-service:3004
-      - CHAT_BACKEND_URL=http://chat-backend:3006
-    networks:
-      - chat-banking-network
+      POSTGRES_DB: poc_banking
+      POSTGRES_USER: poc_user
+      POSTGRES_PASSWORD: poc_password
+      POSTGRES_MULTIPLE_DATABASES: poc_banking,poc_chat,ai_orchestrator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../scripts/init-multiple-databases.sh:/docker-entrypoint-initdb.d/01-init-multiple-databases.sh:ro
+      - ../scripts/init-ai-orchestrator-db.sql:/docker-entrypoint-initdb.d/02-init-ai-orchestrator-db.sql:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD-SHELL", "pg_isready -U poc_user -d poc_banking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
-    depends_on:
-      - nlp-service
-      - nlu-service
-      - mcp-service
-      - banking-service
-      - chat-backend
 
-  # ============================================================================
-  # Processing Services
-  # ============================================================================
-  
-  nlp-service:
-    build:
-      context: ./poc-nlp-service
-      dockerfile: Dockerfile
-    container_name: chat-banking-nlp-service
+  redis:
+    image: redis:7-alpine
     ports:
-      - "3002:3002"
-    environment:
-      - NODE_ENV=production
-      - PORT=3002
-      - LOG_LEVEL=info
-    networks:
-      - chat-banking-network
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   nlu-service:
     build:
-      context: ./poc-nlu-service
-      dockerfile: Dockerfile
-    container_name: chat-banking-nlu-service
+      context: ../services/nlu-service
+    environment:
+      NODE_ENV: production
+      NLU_SERVICE_PORT: 3003
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001,http://localhost:8081
+      BANKING_SERVICE_URL: http://banking-service:3005
+      NLP_SERVICE_URL: http://nlu-service:3003
+      MCP_SERVICE_URL: http://mcp-service:3004
+      DIALOGFLOW_ENABLED: ${DIALOGFLOW_ENABLED:-false}
+      DIALOGFLOW_PROJECT_ID: ${DIALOGFLOW_PROJECT_ID:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/dialogflow-key.json
     ports:
       - "3003:3003"
-    environment:
-      - NODE_ENV=production
-      - PORT=3003
-      - LOG_LEVEL=info
-      - DIALOGFLOW_PROJECT_ID=${DIALOGFLOW_PROJECT_ID}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/dialogflow-key.json
     volumes:
-      - ./credentials:/app/credentials:ro
-    networks:
-      - chat-banking-network
+      - ../services/nlu-service/credentials:/app/credentials:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  banking-service:
+    build:
+      context: ../services/banking-service
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: poc_banking
+      DB_USER: poc_user
+      DB_PASSWORD: poc_password
+      DATABASE_URL: postgresql://poc_user:poc_password@postgres:5432/poc_banking
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:8081
+      NLU_SERVICE_URL: http://nlu-service:3003
+      NLP_SERVICE_URL: http://nlu-service:3003
+      MCP_SERVICE_URL: http://mcp-service:3004
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3005/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -89,216 +94,183 @@ services:
 
   mcp-service:
     build:
-      context: ./poc-mcp-service
-      dockerfile: Dockerfile
-    container_name: chat-banking-mcp-service
+      context: ../services/mcp-service
+    environment:
+      NODE_ENV: production
+      MCP_SERVICE_PORT: 3004
+      BANKING_SERVICE_URL: http://banking-service:3005
+      NLP_SERVICE_URL: http://nlu-service:3003
+      NLU_SERVICE_URL: http://nlu-service:3003
     ports:
       - "3004:3004"
-    environment:
-      - NODE_ENV=production
-      - PORT=3004
-      - LOG_LEVEL=info
-    networks:
-      - chat-banking-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-
-  # ============================================================================
-  # Domain Services
-  # ============================================================================
-  
-  banking-service:
-    build:
-      context: ./poc-banking-service
-      dockerfile: Dockerfile
-    container_name: chat-banking-banking-service
-    ports:
-      - "3005:3005"
-    environment:
-      - NODE_ENV=production
-      - PORT=3005
-      - LOG_LEVEL=info
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/banking}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-    networks:
-      - chat-banking-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
     depends_on:
-      - postgres
-      - redis
+      banking-service:
+        condition: service_healthy
+      nlu-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3004/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
 
   ai-orchestrator:
     build:
-      context: ./poc-ai-orchestrator
-      dockerfile: Dockerfile
-    container_name: chat-banking-ai-orchestrator
+      context: ../services/ai-orchestrator
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ai_orchestrator
+      DB_USER: poc_user
+      DB_PASSWORD: poc_password
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
+      MCP_SERVICE_URL: http://mcp-service:3004/api/tools
+      BANKING_SERVICE_URL: http://banking-service:3005
+      NLU_SERVICE_URL: http://nlu-service:3003
+      CHAT_BACKEND_URL: http://chat-backend:3006
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
     ports:
       - "3007:3007"
-    environment:
-      - NODE_ENV=production
-      - PORT=3007
-      - LOG_LEVEL=info
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=ai_orchestrator
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=gpt-4
-      - MCP_SERVICE_URL=http://mcp-service:3004/api/tools
-      - SESSION_TTL=86400
-      - WORKFLOW_MAX_STEPS=20
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8081
-    networks:
-      - chat-banking-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mcp-service:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3007/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    depends_on:
-      - postgres
-      - mcp-service
 
   chat-backend:
     build:
-      context: ./poc-chat-backend
-      dockerfile: Dockerfile
-    container_name: chat-banking-chat-backend
+      context: ../services/chat-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
+      API_GATEWAY_URL: http://api-gateway:3001
+      BANKING_SERVICE_URL: http://banking-service:3005
+      NLP_SERVICE_URL: http://nlu-service:3003
+      NLU_SERVICE_URL: http://nlu-service:3003
+      MCP_SERVICE_URL: http://mcp-service:3004
+      AI_ORCHESTRATOR_URL: http://ai-orchestrator:3007
+      REDIS_URL: redis://redis:6379
+      AGENT_FALLBACK_ENABLED: "true"
     ports:
       - "3006:3006"
-    environment:
-      - NODE_ENV=production
-      - PORT=3006
-      - LOG_LEVEL=info
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8081
-      - API_GATEWAY_URL=http://api-gateway:3001
-      - BANKING_SERVICE_URL=http://banking-service:3005
-      - NLP_SERVICE_URL=http://nlp-service:3002
-      - NLU_SERVICE_URL=http://nlu-service:3003
-      - MCP_SERVICE_URL=http://mcp-service:3004
-      - AI_ORCHESTRATOR_URL=http://ai-orchestrator:3007
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-    networks:
-      - chat-banking-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      banking-service:
+        condition: service_healthy
+      nlu-service:
+        condition: service_healthy
+      mcp-service:
+        condition: service_healthy
+      ai-orchestrator:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3006/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    depends_on:
-      - redis
-      - nlp-service
-      - nlu-service
-      - mcp-service
-      - banking-service
-      - ai-orchestrator
 
-  # ============================================================================
-  # Frontend Services
-  # ============================================================================
-  
+  api-gateway:
+    build:
+      context: ../services/api-gateway
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
+      BANKING_SERVICE_URL: http://banking-service:3005
+      NLP_SERVICE_URL: http://nlu-service:3003
+      NLU_SERVICE_URL: http://nlu-service:3003
+      MCP_SERVICE_URL: http://mcp-service:3004
+      CHAT_BACKEND_URL: http://chat-backend:3006
+    ports:
+      - "3001:3001"
+    depends_on:
+      banking-service:
+        condition: service_healthy
+      nlu-service:
+        condition: service_healthy
+      mcp-service:
+        condition: service_healthy
+      chat-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
   agent-ui:
     build:
-      context: ./poc-agent-ui
-      dockerfile: Dockerfile
-    container_name: chat-banking-agent-ui
+      context: ../services/agent-ui
+    environment:
+      NODE_ENV: production
+      PORT: 8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_GATEWAY_URL: http://api-gateway:3001
+      CHAT_BACKEND_URL: http://chat-backend:3006
+      CORS_ORIGIN: http://localhost:8081,http://localhost:3000
     ports:
       - "8081:8081"
-    environment:
-      - NODE_ENV=production
-      - PORT=8081
-      - API_GATEWAY_URL=http://api-gateway:3001
-      - CHAT_BACKEND_URL=http://chat-backend:3006
-    networks:
-      - chat-banking-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-gateway:
+        condition: service_healthy
+      chat-backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8081/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../services/frontend
+      target: production
+      args:
+        VITE_API_BASE_URL: http://localhost:3001/api
+        VITE_BANKING_SERVICE_URL: http://localhost:3005/api/v1
+        VITE_APP_NAME: POC Banking Chat
+        VITE_APP_VERSION: 2.0.0
+    ports:
+      - "3000:3000"
     depends_on:
-      - api-gateway
-      - chat-backend
-
-  # ============================================================================
-  # Database Services
-  # ============================================================================
-  
-  postgres:
-    image: postgres:15-alpine
-    container_name: chat-banking-postgres
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_DB=banking
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./scripts/init-ai-orchestrator-db.sql:/docker-entrypoint-initdb.d/02-init-ai-orchestrator.sql
-    networks:
-      - chat-banking-network
+      api-gateway:
+        condition: service_healthy
+      banking-service:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: chat-banking-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    networks:
-      - chat-banking-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-# ============================================================================
-# Networks
-# ============================================================================
-
-networks:
-  chat-banking-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-
-# ============================================================================
-# Volumes
-# ============================================================================
 
 volumes:
-  postgres-data:
-    driver: local
-  redis-data:
-    driver: local
+  postgres_data:
+  redis_data:
+

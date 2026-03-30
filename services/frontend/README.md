@@ -1,6 +1,6 @@
-# Chatbot POC - React Frontend
+# Enterprise Conversational Platform - Frontend
 
-A modern React TypeScript frontend for the Chatbot POC with Intent Detection, built using Atomic Design principles.
+A runtime-configurable React TypeScript frontend for the enterprise conversational platform, built using Atomic Design principles.
 
 ## 🚀 Features
 
@@ -52,7 +52,7 @@ src/
 
 1. Navigate to the frontend directory:
    ```bash
-   cd poc-frontend
+   cd services/frontend
    ```
 
 2. Install dependencies:
@@ -68,9 +68,15 @@ src/
 4. Update environment variables:
    ```env
    VITE_API_BASE_URL=http://localhost:3001/api
-   VITE_APP_NAME=Chatbot POC
+   VITE_BANKING_SERVICE_URL=http://localhost:3005/api/v1
+   VITE_AUTH_API_BASE_URL=http://localhost:3005/api/v1
+   VITE_APP_NAME=Enterprise Conversational Platform
+   VITE_APP_TAGLINE=Configurable AI assistants for secure enterprise workflows
    VITE_APP_VERSION=1.0.0
    ```
+
+5. Optional runtime branding:
+   Place a `runtime-config.json` file in `public/` or mount it at `/runtime-config.json` in production to override branding and endpoints without rebuilding the app.
 
 ### Development
 
@@ -79,7 +85,7 @@ Start the development server:
 npm run dev
 ```
 
-The application will be available at `http://localhost:3002`
+The application will be available at `http://localhost:3000`
 
 ### Building
 
@@ -90,7 +96,7 @@ npm run build
 
 Preview production build:
 ```bash
-npm run preview
+npm run start
 ```
 
 ## 🧪 Testing
@@ -154,9 +160,9 @@ Complex UI sections:
 
 The frontend communicates with the Express backend through:
 
-- **Base URL**: `http://localhost:3001/api`
-- **Authentication**: Session-based with JWT tokens
-- **Real-time**: HTTP polling (WebSocket ready)
+- **Base URL**: `http://localhost:3001/api` when the API gateway is running
+- **Authentication**: Direct login against the banking service at `http://localhost:3005/api/v1`
+- **Real-time**: Chat and session REST APIs are proxied by the gateway to the chat backend
 
 ### Key Services
 
@@ -171,9 +177,13 @@ The frontend communicates with the Express backend through:
 Production environment variables:
 ```env
 VITE_API_BASE_URL=https://api.yourbackend.com/api
-VITE_APP_NAME=Chatbot POC
+VITE_BANKING_SERVICE_URL=https://banking.yourbackend.com/api/v1
+VITE_AUTH_API_BASE_URL=https://identity.yourbackend.com/api/v1
+VITE_APP_NAME=Enterprise Conversational Platform
 VITE_APP_VERSION=1.0.0
 ```
+
+For enterprise deployments, prefer a generated `runtime-config.json` over build-time branding variables. See the root-level `deployment-scripts/` directory and `docs/guides/productization.md`.
 
 ### Build Commands
 
@@ -181,9 +191,11 @@ VITE_APP_VERSION=1.0.0
 # Production build
 npm run build
 
-# Deploy to static hosting
-npm run deploy
+# Serve the production build locally
+npm run start
 ```
+
+If you are running the lightweight Docker stack in `docker/docker-compose.local.yml`, the frontend container is wired directly to `http://localhost:3006/api` instead of the API gateway.
 
 ## 🤝 Contributing
 

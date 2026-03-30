@@ -12,7 +12,7 @@
 
 ## Abstract
 
-A system and method for implementing task-oriented chatbots by decoupling the conversational interface, natural language understanding (NLU), and domain-specific microservices using an agentic AI orchestrator and a Model Context Protocol (MCP) service layer. The system utilizes a chat frontend for capturing user inputs, an established NLU pipeline combined with generative AI fallback for intent detection securely managed by a chat backend, and an AI orchestrator that maps detected intents to abstract fulfillment workflows. The architecture introduces a dual-layer policy enforcement framework encompassing: (1) a Data Policy Engine embedded within the MCP layer that provides centralized schema validation, data obfuscation, and role-based access before sensitive output reaches the reasoning engine, and (2) an AI Safety Policy Engine situated at the AI orchestrator layer that acts as a cognitive firewall to filter prompt injections, halt toxic or hallucinatory responses, and enforce domain governance. This unified isolation pattern maximizes enterprise security, ensures stringent data obfuscation, and minimizes integration friction, enabling rapid scaling of conversational capabilities via dynamic tool registries and configuration updates.
+A system and method for implementing task-oriented chatbots by decoupling the conversational interface, natural language understanding (NLU), tool-access layer, and domain-specific microservices using an agentic AI orchestrator and a Model Context Protocol (MCP) service layer. The system utilizes a chat frontend for capturing user inputs, an NLU pipeline for intent detection, and a graph-based AI orchestrator that maps detected intents to abstract fulfillment workflows. The orchestrator executes checkpointed workflow state, supports human-in-the-loop data completion, and evaluates stage-specific policy checkpoints including ingress screening of user requests, pre-tool confirmation or blocking of sensitive operations, and post-generation sanitization of model responses. In some embodiments, tool access is mediated through a hybrid MCP client that uses native MCP protocol discovery and execution when available and falls back to an HTTP execution channel while preserving a common tool registry abstraction. These mechanisms improve enterprise governance, resumability, and integration portability while enabling domain-agnostic conversational automation through configuration-driven workflow definitions.
 
 ---
 
@@ -38,9 +38,9 @@ Many existing LLM-based agent frameworks provide generic "tools" or function-cal
 
 ## Summary of the Invention
 
-In one aspect, the invention provides a system and method for implementing task-oriented chatbots using an agentic AI orchestrator together with a standardized tool interface layer, such as a Model Context Protocol (MCP) server, to access domain services. The architecture decouples the chat frontend, AI orchestration, NLU, and domain microservices through well-defined interfaces, thereby reducing integration complexity, improving maintainability, and enabling rapid introduction of new conversational capabilities.
+In one aspect, the invention provides a system and method for implementing task-oriented chatbots using an agentic AI orchestrator together with a standardized tool interface layer, such as a Model Context Protocol (MCP) server, to access domain services. The architecture decouples the chat frontend, AI orchestration, NLU, tool access, and domain microservices through well-defined interfaces, thereby reducing integration complexity, improving maintainability, and enabling rapid introduction of new conversational capabilities.
 
-Unlike generic LLM agent patterns that allow models to construct and invoke tools in an ad hoc fashion, the disclosed system constrains all tool access through an MCP-compliant service layer with schema-based validation, masking and redaction policies, and policy-driven governance, and drives orchestration behavior from configuration rather than code. A graph-based AI orchestrator coordinates a hybrid NLU pipeline, human-in-the-loop entity completion, and controlled tool execution, enabling autonomous, domain-agnostic workflows that can be safely extended to new domains by updating configuration artifacts rather than rewriting orchestrator logic.
+Unlike generic LLM agent patterns that allow models to construct and invoke tools in an ad hoc fashion, the disclosed system constrains tool access through an MCP-compliant service layer or equivalent standardized tool interface, drives orchestration behavior from configuration rather than code, and evaluates policy as an explicit part of the workflow rather than as an afterthought around prompt construction. A graph-based AI orchestrator coordinates a hybrid NLU pipeline, human-in-the-loop entity completion, checkpointed state persistence, and controlled tool execution, enabling autonomous, domain-agnostic workflows that can be safely extended to new domains by updating configuration artifacts rather than rewriting orchestrator logic. In certain embodiments, the orchestrator interacts with the tool layer using a hybrid transport arrangement that prefers native MCP discovery and invocation but degrades to HTTP execution while preserving logical tool identity, schema enforcement, and audit semantics.
 
 According to one embodiment, the system includes: ( core of the invention )
 
@@ -50,9 +50,11 @@ According to one embodiment, the system includes: ( core of the invention )
 - An AI orchestrator configured to:
   - receive detected intent and entities from the chat backend, and manage specific AI agent workflows to fulfill user requests,
   - perform thorough validation of user input extraction, and based on defined prompts, perform data extraction and human-in-the-loop validation to seek any missing inputs. An SLM approach is used to define prompts for data extraction and validation.
+  - evaluate policy checkpoints at multiple workflow stages including request ingress, pre-tool execution, and response post-processing, wherein policy outcomes include allowing, blocking, requiring explicit confirmation, or transforming content,
+  - persist checkpointed workflow state and resume execution after human feedback without repeating previously completed steps,
   - autonomously execute fulfillment workflows by invoking one or more tools via an MCP-compliant interface, and
   - generate natural language responses using at least one LLM.
-  - acts as a MCP client to invoke tools exposed by the MCP server.
+  - acts as a MCP client to invoke tools exposed by the MCP server, optionally through a hybrid transport supporting native MCP execution and fallback HTTP execution.
 - An MCP service layer exposing a plurality of tools corresponding to domain-specific operations (for example, account operations, order management, ticket management, or profile management), with schema-based parameter validation.
 - One or more backend domain services providing the underlying business functions, typically implemented as microservices communicating with domain data stores.
 
@@ -60,12 +62,12 @@ In operation, a user message is received at the chat frontend (Chat UI) and forw
 
 The chat backend is responsible for managing the session, identifying if a new session is established, and managing new intent vs existing intent response. The chat backend handles the management of chat sessions along with detecting a new intent vs responding to an existing intent follow-up questions. The chat backend also responsible for integrating with the NLU services to perform intent detection and then passes the user message with derived intent to the AI orchestrator.
 
-The AI orchestrator then uses the user messages and intent details to trigger a predefined and generic agentic workflow to fulfill user requests. This involves selecting the predefined prompt to fulfill the request, which can be a simple mapping between intent and prompt. Defining well-written prompts is a key aspect of the system function. Prompts define all the required inputs and utilize LLM-based function calling to fetch data needed via MCP-based tool calling. Based on the detected intent and extracted entities, the AI orchestrator selects one or more MCP tools to execute. The tools are invoked via the MCP service layer, which validates parameters and invokes the corresponding domain microservices. A key aspect of autonomous execution is to define workflows with processing predefined prompts, and key capabilities include data extraction from user input, identifying missing inputs, and performing human-in-the-loop validation to obtain any missing inputs from the user before proceeding with tool execution. All of these are implemented in a generic manner, decoupled from domain-specific logic so that new capabilities can be added rapidly by defining new prompts and mapping them to existing or new tools. This key capability is the crux of the invention to enable autonomous execution of user requests in a generic manner with domain-agnostic design.
+The AI orchestrator then uses the user messages and intent details to trigger a predefined and generic agentic workflow to fulfill user requests. This involves selecting the predefined prompt to fulfill the request, which can be a simple mapping between intent and prompt. Defining well-written prompts is a key aspect of the system function. Prompts define all the required inputs and utilize LLM-based function calling to fetch data needed via MCP-based tool calling. Based on the detected intent and extracted entities, the AI orchestrator selects one or more MCP tools to execute. The tools are invoked via the MCP service layer, which validates parameters and invokes the corresponding domain microservices. A key aspect of autonomous execution is to define workflows with processing predefined prompts, and key capabilities include data extraction from user input, identifying missing inputs, performing human-in-the-loop validation to obtain any missing inputs from the user before proceeding with tool execution, and recording workflow checkpoints that enable resumption after the user supplies requested information. Policy checkpoints may be evaluated before workflow continuation, before sensitive tool invocation, and after draft response generation, with each checkpoint producing an auditable decision trace. All of these are implemented in a generic manner, decoupled from domain-specific logic so that new capabilities can be added rapidly by defining new prompts and mapping them to existing or new tools. This key capability is the crux of the invention to enable autonomous execution of user requests in a generic manner with domain-agnostic design.
 
 
 The microservices return structured data that may be masked or redacted to avoid exposing sensitive information to the LLM. The AI orchestrator then constructs prompts including system instructions, safety constraints, contextual data, and user messages, and invokes the LLM to generate a natural language response that is returned to the user.
 
-In some embodiments, the system additionally implements observability and control features, including structured logging of tool calls with correlation identifiers, monitoring of intent accuracy and action success rates, circuit breakers, and fallback behaviors to human agents upon repeated errors or low-confidence conditions.
+In some embodiments, the system additionally implements observability and control features, including structured logging of tool calls with correlation identifiers, monitoring of intent accuracy and action success rates, circuit breakers, fallback behaviors to human agents upon repeated errors or low-confidence conditions, and policy audit traces that record stage identifiers, decision codes, and transformation actions applied during workflow execution.
 
 The architecture is domain-agnostic and can be applied to financial use cases (for example, account inquiries, transaction management, and card services) as well as to other domains such as e-commerce, telecommunications, and healthcare—generally, any customer-servicing workflow that can be automated via a chatbot. In one illustrative embodiment, a banking domain is used to demonstrate account inquiries, transaction management, card services, and secure operations; however, the underlying mechanisms are not limited to banking.
 
@@ -95,9 +97,9 @@ flowchart TD
 
   subgraph Orchestrator["AI Orchestrator"]
     CTX["Session & Context<br/>Management"]
-    WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>HITL, write confirmations)"]
+    WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>policy checkpoints, HITL,<br/>confirmations, checkpoint resume)"]
     PROMPTS["Prompt Construction<br/>(system/user prompts,<br/>examples, safety)"]
-    POLICY_AI["AI Safety Policy Engine<br/>(Prompt Safety, Toxicity,<br/>Hallucination Guards)"]
+    POLICY_AI["AI Safety Policy Engine<br/>(Ingress Screening,<br/>Pre-Tool Gating,<br/>Response Sanitization)"]
     RESP["LLM Invocation &<br/>Response Post-Processing"]
   end
 
@@ -124,7 +126,7 @@ flowchart TD
   ROUTE -->|invoke with state| CTX
   CTX --> WF
 
-  WF -->|tool invocations<br/>with parameters| VAL
+  WF -->|tool invocations<br/>via MCP or fallback transport| VAL
   VAL --> REG
   VAL --> LOG
   LOG --> AUDIT
@@ -158,18 +160,19 @@ sequenceDiagram
     User->>ChatBackend: Message ("What's my balance?")
     ChatBackend->>ChatBackend: Authenticate & Detect Intent
     ChatBackend->>Orchestrator: Forward Intent + Entities + Context
-    Orchestrator->>Orchestrator: Match Workflow & Extract Parameters
-    Orchestrator->>MCP: Invoke Tool Request (MCP Exec)
+    Orchestrator->>Orchestrator: Match Workflow, Restore Checkpoint & Extract Parameters
+    Orchestrator->>Orchestrator: Policy Checkpoint: Ingress / Pre-Tool
+    Orchestrator->>MCP: Invoke Tool Request (MCP Exec or HTTP Fallback)
     MCP->>MCP: Validate Schema
     MCP->>Domain: Execute Business Logic
     Domain-->>MCPPly: Raw Domain Data
     MCPPly->>MCPPly: Apply Data Redaction, RBAC & Masking
     MCPPly-->>Orchestrator: Safe Tool Results
     Orchestrator->>Orchestrator: Generate Prompts
-    Orchestrator->>Orchestrator: AI Safety Policy: Validate Prompt Injection
+    Orchestrator->>Orchestrator: Policy Checkpoint: Prompt Injection / Tool Governance
     Orchestrator->>LLM: Call Large Language Model
     LLM-->>Orchestrator: Draft Natural Language Response
-    Orchestrator->>Orchestrator: AI Safety Policy: Guardrails (Toxicity, Hallucination)
+    Orchestrator->>Orchestrator: Policy Checkpoint: Redaction / Leakage Filtering
     Orchestrator-->>ChatBackend: Approved Natural Language Response
     ChatBackend-->>User: Display Output
 ```
@@ -224,6 +227,8 @@ A workflow engine (e.g., based on graph-based orchestration frameworks like Lang
   - Request additional input if needed.
   - Request explicit user confirmation for write operations such as fund transfers or account changes.
   - Proceed to tool execution to fulfill user intent.
+- Evaluates stage-specific policy checkpoints that may allow execution, require user confirmation, block execution, or transform data before downstream use.
+- Persists workflow state using checkpoint records associated with a session identifier such that workflow execution can resume after human feedback or transient interruption.
 - Selects one or more tools from the MCP registry that correspond to the detected intent.
 - Invokes the tools via the MCP service layer, optionally in parallel when independent.
 - Receives structured results from the tools.
@@ -231,10 +236,11 @@ A workflow engine (e.g., based on graph-based orchestration frameworks like Lang
   - A system prompt defining the assistant's role, domain, safety constraints, and behavioral guidelines.
   - A user prompt containing the latest user message, detected intent and confidence, relevant context (e.g., user preferences, prior actions in the conversation), and tool outputs.
   - Optional few-shot examples demonstrating desired response format or reasoning.
-- **AI Safety Policy Engine Validation:** Scans the constructed prompt for injection vectors and, upon receiving the LLM's raw output, filters for hallucination mapping (verifying factual correctness against tool data), toxicity, and brand alignment.
+- **AI Safety Policy Engine Validation:** Evaluates ingress-stage prompt injection vectors, pre-tool governance conditions, and post-generation leakage or redaction requirements, and records decision codes as part of workflow state.
 - Invokes at least one LLM (e.g., GPT-4, Claude, or similar) to generate a natural language response based on the constructed prompts.
 - Applies post-processing via the AI Safety Policy Engine to the LLM output, including:
   - Validation of response content (e.g., ensuring no hallucinated URLs or conflicting domain instructions are present).
+  - Redaction or masking of sensitive values such as account identifiers, card numbers, or bearer tokens.
   - Formatting (e.g., breaking into paragraphs, adding structured elements).
   - Inclusion of suggested next actions or follow-up options.
 - Returns the processed response to the chat backend.
@@ -291,6 +297,10 @@ If one or more entities are missing or ambiguous, the AI orchestrator generates 
 
 In some embodiments, the system further applies domain-specific validation rules before tool invocation. These rules can include checking that an amount is within daily transaction limits, that an account is active, and that the user’s role permits the requested operation. If validation fails, the AI orchestrator explains the reason to the user and may offer alternative actions rather than attempting the tool call.
 
+### Checkpointed Workflow Resumption
+
+In one embodiment, each workflow execution is associated with a persistent conversation or session identifier and a checkpoint record. When the workflow pauses to request clarification, missing entities, or confirmation, the current node, collected entities, policy decisions, and pending tool selections are persisted. Upon receiving subsequent human feedback, the AI orchestrator restores the workflow state from the checkpoint and resumes execution from the next permitted stage rather than recomputing the entire plan. This allows deterministic continuation of long-running or multi-turn fulfillment workflows while preserving auditability of previously evaluated policy checkpoints.
+
 ---
 
 ### MCP Tool Selection and Execution
@@ -323,6 +333,10 @@ The MCP service layer receives each tool invocation request and:
 - Applies masking or redaction policies to sensitive fields in the response (e.g., replacing full account numbers with the last four digits, omitting full addresses or government identifiers).
 - Returns the processed result to the AI orchestrator.
 
+### Hybrid MCP Transport and Discovery
+
+In one embodiment, the AI orchestrator communicates with the tool layer through a hybrid MCP client abstraction. The abstraction first attempts standardized MCP protocol discovery and execution so that tools can be dynamically enumerated together with their schemas and metadata. If the standardized protocol transport is unavailable, partially implemented, or incompatible with a target environment, the abstraction falls back to an HTTP execution channel while preserving the same logical tool names, schema semantics, and audit identifiers. This allows the orchestration layer to remain transport-agnostic while still benefiting from dynamic tool discovery when available.
+
 ### Error Handling, Circuit Breakers, and Fallbacks
 
 To ensure robustness, the system implements comprehensive error handling and safety mechanisms around API invocations:
@@ -346,15 +360,15 @@ Before including tool output in a prompt to the LLM, the system applies masking 
 - Full addresses and government identifiers (e.g., SSNs, tax IDs) are omitted from LLM prompts.
 - Salaries, detailed financial data, and other sensitive attributes are redacted according to configuration.
 
-#### Prompt Injection Security and Dual-Layer Defenses
+#### Stage-Aware Policy Enforcement and Complementary Data Defenses
 
-To ensure complete systemic safety, the architecture defends against both semantic attacks and data breaches through a two-tiered policy enforcement framework:
+To ensure complete systemic safety, the architecture defends against both semantic attacks and data breaches through policy enforcement performed at multiple workflow stages and, in some embodiments, through a complementary data-governance layer in the MCP tier:
 
 1. **AI Safety Policy Engine (Orchestrator Layer):** 
-   Operating at the cognitve boundaries of the LLM, this engine governs behavioral safety. Before prompt construction, it sanitizes user inputs (stripping structural evasion characters and long strings). Enforced system instructions strictly bound the agent's authority to prevent prompt-injection attacks. After the LLM drafts a response, this engine executes a post-generation validation pass to check for hallucinated information (e.g., comparing numbers in the output against the verified tool data), detect toxic language, and enforce brand tone alignment before the message reaches the external network.
+  Operating at the cognitive boundaries of the workflow, this engine governs behavioral safety. At an ingress stage it screens user requests for prompt-injection patterns, oversized or malformed content, and authentication preconditions. At a pre-tool stage it evaluates whether a contemplated operation should proceed, be blocked, or require explicit user confirmation based on operation type, transaction characteristics, or policy thresholds. After the LLM drafts a response, this engine executes a post-generation validation pass to redact sensitive values, suppress internal-instruction leakage, and enforce configured response constraints before the message reaches the external network. In some embodiments, each evaluation returns a structured decision object comprising a stage identifier, a decision type, a reason code, and optional transformation instructions.
 
 2. **Data Policy Engine (MCP Layer):** 
-   Operating deep within the secure application backend, this engine acts as an absolute structural boundary. Even if the AI Orchestrator were completely compromised via a novel injection attack, the Data Policy Engine prevents the AI from extracting arbitrary data. It strictly evaluates incoming parameters against JSON schemas, verifies user RBAC permissions before permitting an API invocation, and mathematically strips or tokenizes all PII from the outgoing JSON response payload.
+  Operating deep within the secure application backend in certain embodiments, this engine acts as an additional structural boundary. Even if the AI Orchestrator were compromised via a novel injection attack, the Data Policy Engine prevents the AI from extracting arbitrary data. It strictly evaluates incoming parameters against JSON schemas, verifies user RBAC permissions before permitting an API invocation, and strips, masks, or tokenizes regulated fields in the outgoing JSON response payload.
 
 #### Tokenization
 
@@ -384,9 +398,9 @@ The policy engine evaluates rules expressed over attributes such as:
 - Data field sensitivity classifications (for example, public, internal, confidential, regulated).
 - Target LLM provider (for example, internal model vs. external hosted provider) and its allowed data handling profile.
 
-Tools and backend services annotate output fields with sensitivity metadata or schema tags. Before constructing an LLM prompt, the AI orchestrator submits a policy evaluation request that includes the tool outputs and intended target model. The policy engine returns transformation requirements specifying which fields must be masked, redacted, tokenized, or omitted entirely. The AI orchestrator or MCP service layer then applies these transformations to the tool outputs before they are embedded into prompts.
+Tools and backend services annotate output fields with sensitivity metadata or schema tags. Before constructing an LLM prompt, before invoking a sensitive tool, or before releasing a generated response, the AI orchestrator submits a policy evaluation request that includes the current workflow stage, tool outputs or pending tool identifiers, and intended target model. The policy engine returns a decision object specifying whether execution is allowed, blocked, requires explicit confirmation, or requires transformation of data. Transformation requirements may specify which fields must be masked, redacted, tokenized, truncated, or omitted entirely. The AI orchestrator or MCP service layer then applies these transformations before downstream execution continues.
 
-The same policy mechanism can be used to determine which tools appear as available to a given user or session at runtime. For example, a `block_card` tool may be disabled for users in certain jurisdictions, or enabled only for users with a particular authorization claim. The AI orchestrator receives the set of permitted tools based on policy evaluation and constrains its tool-selection and planning logic accordingly.
+The same policy mechanism can be used to determine which tools appear as available to a given user or session at runtime. For example, a `block_card` tool may be disabled for users in certain jurisdictions, or enabled only for users with a particular authorization claim. The AI orchestrator receives the set of permitted tools based on policy evaluation and constrains its tool-selection and planning logic accordingly. In some embodiments, each policy decision is persisted in workflow state as an auditable policy trace, thereby allowing later review of why a tool was blocked, why confirmation was required, or what transformations were applied to a response.
 
 ---
 
@@ -649,11 +663,14 @@ The following claims define the scope of the invention. Independent claims are n
 - a chat backend configured to authenticate users, manage chat sessions, invoke at least one natural language understanding (NLU) component to determine user intent and entities, and forward user messages with detected intent and associated session context;
 - an artificial intelligence (AI) orchestrator configured to:
   - (i) receive user messages, detected intent, entities, and session context from the chat backend;
-  - (ii) validate entity completeness and request clarification from users when entities are missing or ambiguous;
-  - (iii) select at least one tool corresponding to the user intent from a tool registry;
-  - (iv) invoke the at least one tool via a Model Context Protocol (MCP) service layer; and
-  - (v) generate a natural language response based on outputs from the at least one tool and the user message using a large language model (LLM);
-- an MCP service layer configured to expose the at least one tool to the AI orchestrator via a standardized protocol, validate input parameters against a schema, and invoke one or more backend domain services; and
+  - (ii) select, from a tool registry, at least one logical tool corresponding to the user intent and store an identifier of the at least one logical tool in workflow state;
+  - (iii) evaluate a first policy checkpoint at an ingress stage for the user message and a second policy checkpoint at a pre-tool stage for the at least one logical tool, each policy checkpoint returning a structured decision selected from allow, require_confirmation, block, and transform;
+  - (iv) in response to the structured decision requiring confirmation or additional user input, persist a workflow checkpoint comprising at least the workflow state, the identifier of the at least one logical tool, and the structured decision;
+  - (v) upon receiving the confirmation or additional user input, restore the workflow checkpoint and resume execution without recomputing previously completed workflow stages;
+  - (vi) invoke the at least one logical tool via a Model Context Protocol (MCP) service layer;
+  - (vii) evaluate a third policy checkpoint at a response stage for outputs produced by the at least one logical tool; and
+  - (viii) generate a natural language response based on outputs that satisfy the third policy checkpoint using a large language model (LLM);
+- an MCP service layer configured to expose the at least one logical tool to the AI orchestrator via a standardized protocol, preserve a logical tool identity independent of transport selection, validate input parameters against a schema, and invoke one or more backend domain services; and
 - a plurality of backend domain services configured to perform domain-specific functions,
 
 wherein conversational logic executed by the AI orchestrator is decoupled from business logic implemented by the backend domain services.
@@ -673,8 +690,9 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 **4. The system of claim 1**, wherein the MCP service layer is configured to apply masking or redaction policies to sensitive fields in tool outputs prior to providing the outputs to the AI orchestrator for inclusion in prompts to the LLM.
 
 **5. The system of claim 1**, wherein the AI orchestrator is implemented using a graph-based workflow engine defining:
-- a plurality of nodes including at least an intent analysis node, a tool execution node, and a response generation node, and
-- a plurality of edges defining execution order between the plurality of nodes.
+- a plurality of nodes including at least an intent analysis node, a policy evaluation node, a tool execution node, a human-feedback node, and a response generation node,
+- a plurality of edges defining execution order between the plurality of nodes, and
+- a checkpoint mechanism configured to persist pending tool identifiers, policy decisions, and collected entities and to resume execution after a human-feedback event without re-planning previously completed stages.
 
 **6. The system of claim 1**, wherein the chat backend is further configured to:
 - associate each user message with a conversation identifier and a session identifier, and
@@ -690,11 +708,9 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - a user request for escalation, or
 - a compliance-sensitive intent (e.g., fraud dispute or complaint).
 
-**9. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code.
+**9. The system of claim 1**, wherein the MCP service layer is further configured to support a tool discovery operation through which the AI orchestrator requests and receives a list of currently available tools and their respective input schemas, enabling dynamic adaptation of workflows without modifying AI orchestrator code, and wherein the AI orchestrator is further configured to access the MCP service layer through a hybrid transport abstraction that prefers native MCP protocol execution and falls back to an HTTP execution channel while preserving the same logical tool name, parameter schema semantics, and correlation metadata across transports.
 
-**10. The system of claim 1**, further comprising a dual-layer policy enforcement framework including:
-- a Data Policy Engine operating within the MCP service layer configured to intercept tool outputs, verify roles-based access controls, and apply data transformations prior to transmission, the transformations including masking, redaction, and tokenization of sensitive fields; and
-- an AI Safety Policy Engine operating in conjunction with the AI orchestrator configured to validate cognitive interactions by performing prompt injection analysis on user inputs and filtering generated responses for toxic content, tone misalignment, and factual hallucinations based on tool-provided data.
+**10. The system of claim 1**, wherein each policy checkpoint returns an audit record comprising a stage identifier, a decision code, and optional transformation instructions, and wherein the audit record is stored as workflow-state metadata associated with the session.
 
 **11. A computer-implemented method for providing task-oriented conversational services**, comprising:
 
@@ -702,11 +718,14 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - validating the authentication information and associating the user message with a session context;
 - determining, by the chat backend, a user intent and one or more entities using at least one natural language understanding (NLU) component;
 - sending the user message, detected intent, entities, and session context to an AI orchestrator;
-- validating, by the AI orchestrator, that required entities are present and requesting clarification from the user if entities are missing or ambiguous;
-- selecting, based on the user intent, at least one tool from a plurality of tools exposed via a Model Context Protocol (MCP) service layer;
-- invoking, via the MCP service layer, the at least one tool to perform a domain-specific function using one or more backend domain services;
-- receiving, at the AI orchestrator, output data from the at least one tool;
-- constructing a prompt including at least the user message, the output data, and one or more safety instructions;
+- selecting, based on the user intent, at least one logical tool from a plurality of tools exposed via a Model Context Protocol (MCP) service layer and storing an identifier of the at least one logical tool in workflow state;
+- evaluating, by the AI orchestrator, an ingress-stage policy checkpoint for the user message and a pre-tool policy checkpoint for the at least one logical tool, each policy checkpoint returning a structured decision selected from allow, require_confirmation, block, and transform;
+- in response to the structured decision requiring confirmation or additional user input, persisting a workflow checkpoint comprising at least the workflow state, the identifier of the at least one logical tool, and the structured decision;
+- upon receiving the confirmation or additional user input, restoring the workflow checkpoint and resuming execution without recomputing previously completed workflow stages;
+- invoking, via the MCP service layer, the at least one logical tool to perform a domain-specific function using one or more backend domain services;
+- receiving, at the AI orchestrator, output data from the at least one logical tool;
+- evaluating a response-stage policy checkpoint for the output data or for a draft response derived from the output data;
+- constructing a prompt including at least the user message, output data that satisfies the response-stage policy checkpoint, and one or more safety instructions;
 - invoking a large language model using the constructed prompt to generate a natural language response; and
 - returning the natural language response to the chat frontend for display to the user.
 
@@ -731,8 +750,9 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - providing the user with a fallback message or routing to a human agent.
 
 **17. The method of claim 11**, further comprising:
-- maintaining conversation history in a session store,
-- including relevant prior messages from the conversation history in the constructed prompt to provide multi-turn conversational context.
+- maintaining conversation history, workflow checkpoints, pending tool identifiers, and policy decisions in a session store,
+- including relevant prior messages from the conversation history in the constructed prompt to provide multi-turn conversational context, and
+- resuming workflow execution from a stored checkpoint after receiving user feedback to a clarification request or confirmation request without re-executing previously completed workflow stages.
 
 **18. The method of claim 11**, wherein determining a user intent comprises:
 - invoking, by the chat backend, a first NLU engine and receiving a confidence score;
@@ -740,9 +760,11 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 - if the confidence score is below the first threshold, invoking a second, domain-specific NLU model; and
 - if the second NLU model returns a low confidence score, invoking an LLM-based function-calling component to extract intent and entities.
 
-**19. The method of claim 11**, further comprising executing a dual validation protocol during conversational services by:
-- evaluating, by a data policy engine, data sensitivity rules and user access roles prior to releasing tool outputs to the artificial intelligence orchestrator and redacting determined sensitive fields; and
-- evaluating, by a safety policy engine, bounding and factual constraints against drafted language responses prior to returning the response to a user to mitigate injected logic commands and prevent factual hallucinations.
+**19. The method of claim 11**, further comprising executing staged policy enforcement during conversational services by:
+- evaluating, by a policy engine, a user request at an ingress stage to detect prompt-injection patterns or authentication preconditions;
+- evaluating, by the policy engine, a pending tool invocation at a pre-tool stage to determine whether to allow execution, require explicit confirmation, or block the invocation based on operation attributes or policy thresholds;
+- evaluating, by the policy engine, drafted language responses at a response stage to redact sensitive values or suppress internal-instruction leakage prior to returning the response to a user; and
+- recording at least one policy decision and at least one pending tool identifier as workflow-state metadata associated with the session.
 
 **20. A non-transitory computer-readable medium** storing instructions that, when executed by one or more processors of an AI orchestration system in communication with a chat backend, an MCP service layer, and a plurality of domain microservices, cause the AI orchestration system to perform the method of claim 11.
 
@@ -751,10 +773,10 @@ and wherein the MCP service layer is configured to reject tool invocations that 
 ## Document Information
 
 **Title:** Systems and Methods for Chatbots Using Agentic AI and Model Context Protocol  
-**Version:** 1.0 (Patent Specification Format)  
+**Version:** 1.1 (Patent Specification Format)  
 **Format:** Markdown  
 **Prepared by:** Innovation Team  
-**Date:** December 5, 2025
+**Date:** March 30, 2026
 
 ---
 

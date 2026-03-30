@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import { getRuntimeConfig } from '@/config/runtimeConfig';
 import authService from '@/services/authService';
 import { 
   ChatResponse, 
@@ -16,7 +17,7 @@ class ApiService {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+    this.baseURL = getRuntimeConfig().apiBaseUrl.replace(/\/$/, '');
     this.sessionId = this.generateSessionId(); // temporary until we create a real session
     
     this.client = axios.create({

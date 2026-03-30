@@ -99,7 +99,7 @@ DEBUG=* npm run dev:banking
 pg_isready -h localhost -p 5432
 
 # Start PostgreSQL (Docker)
-docker-compose -f docker/docker-compose.yml up -d postgres
+docker compose -f docker/docker-compose.local.yml up -d postgres
 
 # Start PostgreSQL (system)
 sudo systemctl start postgresql
@@ -181,8 +181,8 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \
 # Check chat-backend is running
 curl http://localhost:3006/health
 
-# Check WebSocket URL in frontend
-grep VITE_WS_URL services/frontend/.env
+# Check frontend API target
+grep VITE_API_BASE_URL services/frontend/.env*
 
 # Test WebSocket connection
 wscat -c ws://localhost:3006

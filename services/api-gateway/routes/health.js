@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
+const defaultNlpServiceUrl = process.env.NLP_SERVICE_URL || process.env.NLU_SERVICE_URL || 'http://localhost:3003';
+
 const services = {
   'chat-backend': process.env.CHAT_BACKEND_URL || 'http://localhost:3006',
   'banking': process.env.BANKING_SERVICE_URL || 'http://localhost:3005',
-  'nlp': process.env.NLP_SERVICE_URL || 'http://localhost:3002',
+  'nlp': defaultNlpServiceUrl,
   'nlu': process.env.NLU_SERVICE_URL || 'http://localhost:3003',
   'mcp': process.env.MCP_SERVICE_URL || 'http://localhost:3004'
 };

@@ -49,17 +49,21 @@
     "db:reset": "npm run db:reset -w services/banking-service",
 
     "//-- DOCKER --//": "",
-    "docker:up": "docker-compose -f docker/docker-compose.yml up -d",
-    "docker:down": "docker-compose -f docker/docker-compose.yml down",
-    "docker:logs": "docker-compose -f docker/docker-compose.yml logs -f",
-    "docker:build": "docker-compose -f docker/docker-compose.yml build",
-    "docker:full": "docker-compose -f docker/docker-compose.full.yml up -d",
+    "docker:up": "docker compose -f docker/docker-compose.local.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.local.yml down",
+    "docker:logs": "docker compose -f docker/docker-compose.local.yml logs -f",
+    "docker:build": "docker compose -f docker/docker-compose.local.yml build",
+    "docker:full": "docker compose -f docker/docker-compose-full-stack.yml up -d --build",
+
+    "//-- PRODUCTIZATION --//": "",
+    "product:generate": "node deployment-scripts/generate-enterprise-assets.mjs",
+    "product:validate": "node deployment-scripts/generate-enterprise-assets.mjs --validate-only",
 
     "//-- UTILITIES --//": "",
     "lint": "eslint . --ext .js,.ts,.tsx",
     "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "validate": "./scripts/validate-env.sh",
+    "validate": "bash ./scripts/validate-env.sh",
     "postinstall": "npm run validate || true"
   },
   "devDependencies": {

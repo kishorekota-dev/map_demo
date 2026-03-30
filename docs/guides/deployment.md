@@ -11,27 +11,46 @@ This guide covers deploying the POC Banking Chat application.
 | Kubernetes | Large Scale Production | High |
 | PM2 | Simple Production | Low |
 
+## Enterprise Packaging Workflow
+
+Before promoting a deployment to an enterprise environment, generate a tenant-specific runtime package:
+
+```bash
+npm run product:validate
+npm run product:generate
+```
+
+This produces:
+
+- a generated enterprise environment file
+- a frontend runtime-config payload for branding and endpoints
+- a deployment summary for the target tenant
+
+Mount the generated frontend runtime config as `/runtime-config.json` in the frontend container or static hosting root. This lets you change branding and API endpoints per enterprise without rebuilding the frontend artifact.
+
 ## Docker Compose Deployment
 
 ### Quick Start
 
 ```bash
-# Start all services
-docker-compose -f docker/docker-compose.yml up -d
+# Start the local Docker stack
+docker compose -f docker/docker-compose.local.yml up -d --build
 
 # View logs
-docker-compose -f docker/docker-compose.yml logs -f
+docker compose -f docker/docker-compose.local.yml logs -f
 
 # Stop services
-docker-compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.local.yml down
 ```
 
 ### Full Stack Deployment
 
 ```bash
 # Build and start with all dependencies
-docker-compose -f docker/docker-compose.full.yml up -d --build
+docker compose -f docker/docker-compose-full-stack.yml up -d --build
 ```
+
+The local compose file is optimized for faster iteration and runs the customer frontend directly against the chat backend. The full-stack compose file adds the API gateway, AI orchestrator, and agent UI.
 
 ### Environment Configuration
 
@@ -124,6 +143,7 @@ export NODE_ENV=production
 cd services/api-gateway && node server.js &
 cd services/banking-service && node server.js &
 cd services/chat-backend && node server.js &
+cd services/frontend && npm run build && npm run start &
 # ... etc
 ```
 
@@ -227,7 +247,7 @@ LOG_LEVEL=info
 ### Centralized Logging with Docker
 
 ```yaml
-# docker-compose.yml
+# docker/docker-compose.local.yml
 services:
   banking-service:
     logging:

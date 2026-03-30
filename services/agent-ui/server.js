@@ -25,7 +25,7 @@ require('dotenv').config({ path: '.env.development' });
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 3007;
+const PORT = process.env.PORT || 8081;
 
 // Redis client for sessions
 const redisClient = redis.createClient({
@@ -57,7 +57,7 @@ app.use(helmet({
 
 app.use(compression());
 app.use(cors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3007'],
+    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:8081'],
     credentials: true
 }));
 

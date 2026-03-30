@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
+const NLUController = require('./controllers/nlu.controller');
 const nluRoutes = require('./routes/nlu.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
@@ -65,6 +66,8 @@ class NLUService {
 
   setupRoutes() {
     this.app.use('/api/nlu', nluRoutes);
+    this.app.use('/api/nlp', nluRoutes);
+    this.app.post('/api/process', NLUController.processLegacyNlp);
     
     // Service info endpoint
     this.app.get('/api', (req, res) => {
@@ -75,6 +78,7 @@ class NLUService {
         endpoints: {
           health: '/health',
           nlu: '/api/nlu',
+          nlpCompatibility: '/api/process',
           intents: '/api/nlu/intents',
           entities: '/api/nlu/entities',
           dialogflow: '/api/nlu/dialogflow',
@@ -84,6 +88,7 @@ class NLUService {
         capabilities: [
           'Intent Detection',
           'Entity Extraction',
+          'Legacy NLP compatibility',
           'Context Management',
           'DialogFlow Integration',
           'Banking Domain Understanding',

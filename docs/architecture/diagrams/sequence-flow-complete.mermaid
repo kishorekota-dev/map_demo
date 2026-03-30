@@ -4,33 +4,32 @@ title: POC Banking Chat - AI-Enhanced Communication Sequence Flow
 sequenceDiagram
     autonumber
     participant Customer as Customer Browser
-    participant PocFrontend as poc-frontend<br/>(Port: 3000)
+    participant Frontend as frontend<br/>(Port: 3000)
     participant PocGateway as poc-api-gateway<br/>(Port: 3001)
     participant PocChat as poc-chat-backend<br/>(Port: 3006)
-    participant PocNLP as poc-nlp-service<br/>(Port: 3002)
-    participant PocNLU as poc-nlu-service<br/>(Port: 3003)
-    participant PocAI as poc-ai-service<br/>(Port: 3008)
+    participant PocNLU as poc-nlu-service<br/>(Port: 3003, NLP compatibility)
+    participant PocAI as ai-orchestrator<br/>(Port: 3007)
     participant PocMCP as poc-mcp-service<br/>(Port: 3004)
     participant PocBanking as poc-banking-service<br/>(Port: 3005)
     participant OpenAI as OpenAI API<br/>(GPT-4/3.5)
     participant OpenAIEmbed as OpenAI Embeddings<br/>(text-embedding-ada-002)
     participant DialogFlow as DialogFlow API
     participant Agent as Agent Browser
-    participant PocAgentUI as poc-agent-ui<br/>(Port: 3007)
+    participant PocAgentUI as poc-agent-ui<br/>(Port: 8081)
     participant Redis as Redis Cache
     participant VectorDB as Vector Database
     participant PostgreSQL as PostgreSQL DB
 
     %% Customer Initiates Chat
     rect rgb(240, 248, 255)
-    note over Customer, PocFrontend: Customer Chat Initiation
-    Customer->>PocFrontend: Open chat interface
-    PocFrontend->>PocGateway: GET /api/auth/session
+    note over Customer, Frontend: Customer Chat Initiation
+    Customer->>Frontend: Open chat interface
+    Frontend->>PocGateway: GET /api/auth/session
     PocGateway->>PocBanking: Validate customer session
     PocBanking->>PostgreSQL: Query customer data
     PostgreSQL-->>PocBanking: Customer details
     PocBanking-->>PocGateway: Session validated
-    PocGateway-->>PocFrontend: Session token
+    PocGateway-->>Frontend: Session token
     end
 
     %% WebSocket Connection
@@ -44,10 +43,9 @@ sequenceDiagram
 
     %% AI-Enhanced Message Processing Flow
     rect rgb(248, 255, 248)
-    note over Customer, OpenAI: AI-Enhanced Natural Language Processing
+    note over Customer, OpenAI: AI-Enhanced Natural Language Understanding
     Customer->>PocChat: "What's my account balance?"
-    PocChat->>PocNLP: Process message text
-    PocNLP->>PocNLU: Extract intent & entities
+    PocChat->>PocNLU: Process message text
     PocNLU->>DialogFlow: NLU analysis
     DialogFlow-->>PocNLU: Intent: check_balance
     
@@ -60,8 +58,7 @@ sequenceDiagram
     PocAI->>Redis: Get conversation history
     Redis-->>PocAI: Previous messages
     PocAI-->>PocNLU: Enhanced intent with context
-    PocNLU-->>PocNLP: Structured intent + context
-    PocNLP-->>PocChat: Intent: check_balance, entities: {account_type: checking}, context: enhanced
+    PocNLU-->>PocChat: Intent: check_balance, entities: {account_type: checking}, context: enhanced
     end
 
     %% Tool Calling via MCP with AI Orchestration
@@ -94,8 +91,7 @@ sequenceDiagram
     rect rgb(255, 245, 238)
     note over Customer, OpenAI: Complex AI Query Processing
     Customer->>PocChat: "Can you help me understand why my credit score dropped and suggest ways to improve it?"
-    PocChat->>PocNLP: Process complex query
-    PocNLP->>PocNLU: Extract multiple intents
+    PocChat->>PocNLU: Process complex query
     PocNLU->>PocAI: Complex intent analysis
     
     %% Multi-step AI reasoning
@@ -126,8 +122,8 @@ sequenceDiagram
     rect rgb(255, 240, 240)
     note over Customer, PocAgentUI: AI-Assisted Agent Escalation
     Customer->>PocChat: "I need to dispute a fraudulent charge immediately"
-    PocChat->>PocNLP: Analyze urgency and sentiment
-    PocNLP->>PocAI: Assess escalation necessity
+    PocChat->>PocNLU: Analyze urgency and sentiment
+    PocNLU->>PocAI: Assess escalation necessity
     PocAI->>OpenAI: Evaluate urgency and complexity
     OpenAI-->>PocAI: High urgency: fraud dispute requires human agent
     PocAI-->>PocChat: Intent: dispute_charge (escalation_required: true, urgency: high, reason: fraud)

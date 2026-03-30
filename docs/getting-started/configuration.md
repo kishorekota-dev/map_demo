@@ -73,6 +73,7 @@ JWT_SECRET=$(openssl rand -hex 64)
 |----------|-------------|---------|
 | `API_GATEWAY_URL` | API Gateway URL | `http://localhost:3001` |
 | `CHAT_BACKEND_URL` | Chat service URL | `http://localhost:3006` |
+| `NLP_SERVICE_URL` | Legacy NLP-compatible endpoint hosted by NLU | `http://localhost:3003` |
 | `BANKING_SERVICE_URL` | Banking API URL | `http://localhost:3005` |
 | `NLU_SERVICE_URL` | NLU service URL | `http://localhost:3003` |
 | `MCP_SERVICE_URL` | MCP service URL | `http://localhost:3004` |
@@ -134,7 +135,6 @@ Each service can have its own `.env` file with service-specific settings.
 
 ```env
 VITE_API_BASE_URL=http://localhost:3001/api
-VITE_WS_URL=ws://localhost:3006
 VITE_BANKING_SERVICE_URL=http://localhost:3005/api/v1
 ```
 
@@ -160,11 +160,12 @@ MCP_SERVICE_URL=http://localhost:3004
 ## Docker Configuration
 
 When using Docker, environment variables are set in:
-- `docker/docker-compose.yml` - inline `environment` section
+- `docker/docker-compose.local.yml` - local developer stack
+- `docker/docker-compose-full-stack.yml` - full monorepo stack
 - `.env` file in project root - referenced with `${VARIABLE}`
 
 ```yaml
-# docker-compose.yml
+# docker-compose.local.yml
 services:
   banking-service:
     environment:

@@ -1,0 +1,31 @@
+{
+  "tenantId": "acme-bank",
+  "organizationName": "Acme Bank",
+  "productName": "Acme Assist",
+  "tagline": "Secure AI assistants for customer and employee journeys",
+  "supportEmail": "support@acme.example",
+  "deployment": {
+    "mode": "kubernetes",
+    "ingressBaseUrl": "https://assistant.acme.example"
+  },
+  "identity": {
+    "provider": "oidc",
+    "issuerUrl": "https://login.acme.example",
+    "audience": "acme-assistant-web"
+  },
+  "services": {
+    "apiBaseUrl": "https://assistant.acme.example/api",
+    "authBaseUrl": "https://assistant.acme.example/auth",
+    "chatBackendUrl": "https://assistant.acme.example",
+    "nluServiceUrl": "http://nlu-service:3003",
+    "mcpServiceUrl": "http://mcp-service:3004",
+    "bankingServiceUrl": "http://banking-service:3005/api/v1",
+    "aiOrchestratorUrl": "http://ai-orchestrator:3007"
+  },
+  "features": {
+    "allowTokenAuth": false,
+    "agentConsole": true,
+    "auditLogging": true,
+    "knowledgeConnectors": true
+  }
+}

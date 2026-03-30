@@ -1,0 +1,18 @@
+flowchart LR
+  REG3["MCP Tool Registry"] --- CFG3["Config Store - schemas, metadata, feature flags"]
+
+  subgraph REGISTRY["MCP Registry View"]
+    T1["Tool: get_accounts<br/>name; JSON schema; sensitivity tags; enabled=true"]
+
+    T2["Tool: transfer_funds<br/>name; JSON schema; sensitivity tags; operation=write; requiresConfirmation=true"]
+
+    T3["Tool: block_card<br/>name; JSON schema; jurisdiction rules; featureFlag=enable_block_card"]
+  end
+
+  ORCH3[AI Orchestrator] -->|tool discovery| REG3
+  REG3 --> ORCH3
+
+  REG3 -->|maps to| API1[Account APIs]
+  REG3 -->|maps to| API2[Payment APIs]
+  REG3 -->|maps to| API3[Card APIs]
+  CFG3 --> REG3

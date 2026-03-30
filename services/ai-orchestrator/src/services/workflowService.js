@@ -3,6 +3,7 @@ const { WorkflowExecution, HumanFeedback } = require('../models');
 const logger = require('../utils/logger');
 const slmDataExtractor = require('./poc-slm-data-extractor');
 const intentMapper = require('./intentMapper');
+const PolicyEngine = require('./policyEngine');
 
 /**
  * Workflow Service
@@ -13,9 +14,10 @@ class WorkflowService {
   constructor(mcpClient, sessionManager) {
     this.mcpClient = mcpClient;
     this.sessionManager = sessionManager;
-    this.workflow = new BankingChatWorkflow(mcpClient, sessionManager);
+    this.policyEngine = new PolicyEngine();
+    this.workflow = new BankingChatWorkflow(mcpClient, sessionManager, this.policyEngine);
     
-    logger.info('Workflow Service initialized with Enhanced MCP Client');
+    logger.info('Workflow Service initialized with Enhanced MCP Client and Policy Engine');
   }
 
   /**
@@ -60,6 +62,42 @@ class WorkflowService {
         startedAt: new Date()
       });
 
+      const ingressPolicy = this.policyEngine.evaluateIngress({
+        sessionId,
+        userId,
+        intent,
+        question,
+        metadata
+      });
+
+      await this.sessionManager.updateWorkflowState(sessionId, 'policy_ingress', {
+        policy: ingressPolicy.audit
+      });
+
+      if (ingressPolicy.action === 'block') {
+        const finalResponse = this.buildPolicyResponse(ingressPolicy);
+
+        await this.sessionManager.updateSession(sessionId, {
+          currentStep: 'policy_ingress',
+          status: 'active'
+        });
+
+        await execution.update({
+          status: 'cancelled',
+          output: finalResponse,
+          currentNode: 'policy_ingress',
+          executionPath: ['policy_ingress'],
+          completedAt: new Date()
+        });
+
+        return {
+          executionId,
+          ...finalResponse,
+          needsHumanInput: false,
+          currentStep: 'policy_ingress'
+        };
+      }
+
       // Build workflow input with authenticated user context
       const workflowInput = {
         sessionId,
@@ -68,15 +106,23 @@ class WorkflowService {
         question,
         conversationHistory: session.conversationHistory,
         collectedData: session.collectedData,
-        requiredData: session.requiredData || []
+        requiredData: session.requiredData || [],
+        policyTrace: ingressPolicy.audit ? [ingressPolicy.audit] : [],
+        confirmationGranted: false
       };
 
       // Execute workflow
       const result = await this.workflow.execute(workflowInput);
 
       // Update execution record
+      const executionStatus = result.error
+        ? 'failed'
+        : result.finalResponse?.type === 'policy_blocked'
+          ? 'cancelled'
+          : 'completed';
+
       await execution.update({
-        status: result.error ? 'failed' : 'completed',
+        status: executionStatus,
         output: result.finalResponse,
         currentNode: result.currentStep,
         executionPath: this.extractExecutionPath(result),
@@ -200,32 +246,87 @@ class WorkflowService {
    * Process confirmation feedback
    */
   async processConfirmation(sessionId, confirmed, feedback) {
-    if (confirmed === true || confirmed === 'yes') {
-      // User confirmed - execute the action
+    const normalizedConfirmation = typeof confirmed === 'string'
+      ? confirmed.trim().toLowerCase()
+      : confirmed;
+
+    if (normalizedConfirmation === true || normalizedConfirmation === 'yes') {
       const session = await this.sessionManager.getSession(sessionId);
+      const latestUserMessage = this.getLatestUserMessage(session);
+      const tools = feedback.context.tools?.length
+        ? feedback.context.tools
+        : intentMapper.getToolsForIntent(session.intent);
+
+      const policyDecision = this.policyEngine.evaluateToolExecution({
+        intent: session.intent,
+        tools,
+        state: {
+          sessionId,
+          userId: session.userId,
+          collectedData: session.collectedData,
+          confirmationGranted: true
+        }
+      });
+
+      await this.sessionManager.updateWorkflowState(sessionId, 'policy_pre_tool', {
+        policy: policyDecision.audit
+      });
+
+      if (policyDecision.action === 'block') {
+        await this.sessionManager.updateSession(sessionId, {
+          status: 'active',
+          currentStep: 'policy_pre_tool'
+        });
+
+        return {
+          currentStep: 'policy_pre_tool',
+          ...this.buildPolicyResponse(policyDecision)
+        };
+      }
       
-      // Resume workflow with confirmation
-      const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Execute tools with confirmed data
-      const tools = feedback.context.tools || [];
       const toolResults = {};
       
       for (const tool of tools) {
+        const parameters = this.workflow.buildToolParameters(tool, {
+          sessionId,
+          userId: session.userId,
+          collectedData: session.collectedData
+        });
+
         const result = await this.mcpClient.executeToolWithRetry(
           tool,
-          session.collectedData,
+          parameters,
           sessionId
         );
         toolResults[tool] = result;
       }
 
-      // Generate final response
+      await this.sessionManager.updateWorkflowState(sessionId, 'execute_tools', {
+        toolResults,
+        policy: policyDecision.audit
+      });
+
+      const generationResult = await this.workflow.generateResponse({
+        sessionId,
+        userId: session.userId,
+        intent: session.intent,
+        question: latestUserMessage,
+        conversationHistory: session.conversationHistory,
+        collectedData: session.collectedData,
+        toolResults,
+        policyTrace: [policyDecision.audit]
+      });
+
+      await this.sessionManager.updateSession(sessionId, {
+        status: 'active',
+        currentStep: generationResult.currentStep
+      });
+
       return {
-        type: 'complete',
-        message: 'Action completed successfully',
         confirmed: true,
-        toolResults
+        currentStep: generationResult.currentStep,
+        needsHumanInput: false,
+        ...generationResult.finalResponse
       };
     } else {
       // User cancelled
@@ -358,6 +459,29 @@ class WorkflowService {
     }
     
     return path;
+  }
+
+  buildPolicyResponse(policyDecision) {
+    return {
+      type: 'policy_blocked',
+      currentStep: `policy_${policyDecision.stage}`,
+      stage: policyDecision.stage,
+      code: policyDecision.code,
+      message: policyDecision.message,
+      policy: policyDecision.audit
+    };
+  }
+
+  getLatestUserMessage(session) {
+    const history = session?.conversationHistory || [];
+
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      if (history[index].role === 'user') {
+        return history[index].content;
+      }
+    }
+
+    return '';
   }
 
   /**

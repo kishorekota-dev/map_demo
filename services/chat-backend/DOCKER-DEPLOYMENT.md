@@ -94,7 +94,7 @@ REDIS_PASSWORD=secure-redis-password
 
 # Optional - Microservices (update if needed)
 BANKING_SERVICE_URL=http://banking-service:3005
-NLP_SERVICE_URL=http://nlp-service:3002
+NLP_SERVICE_URL=http://nlu-service:3003
 NLU_SERVICE_URL=http://nlu-service:3003
 MCP_SERVICE_URL=http://mcp-service:3004
 ```

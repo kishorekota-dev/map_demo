@@ -1,6 +1,6 @@
-# POC Banking Chat Services
+# Enterprise Conversational Platform Services
 
-This directory contains all microservices for the Chat Banking application.
+This directory contains the platform services plus the banking accelerator used by the current reference implementation.
 
 ## Services
 

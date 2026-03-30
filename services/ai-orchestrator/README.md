@@ -1,6 +1,6 @@
 # POC AI Orchestrator
 
-AI Orchestrator service with LangGraph workflow engine, intent-based prompt selection, human-in-the-loop capabilities, and **Hybrid MCP Protocol Support** (official MCP SDK + HTTP fallback) for the Chat Banking application.
+AI Orchestrator service with LangGraph workflow engine, intent-based prompt selection, policy-engine guardrails, human-in-the-loop capabilities, and **Hybrid MCP Protocol Support** (official MCP SDK + HTTP fallback) for the Chat Banking application.
 
 ## 🎯 Overview
 
@@ -8,6 +8,7 @@ The AI Orchestrator is the intelligent brain of the chat banking system, respons
 
 - **LangGraph Workflow Execution**: State machine-based conversation flow management
 - **Intent-Based Processing**: Dynamic prompt selection based on customer intent
+- **Policy Engine Guardrails**: Ingress screening, pre-tool gating, and response sanitization
 - **Human-in-the-Loop**: Interactive data collection and confirmation workflows
 - **Hybrid MCP Integration**: Official MCP Protocol (SSE) with automatic HTTP fallback
 - **Automatic Tool Discovery**: No manual tool configuration required
@@ -77,6 +78,7 @@ State machine-based workflow with the following nodes:
 - **check_required_data**: Validates if all required data is collected
 - **request_human_input**: Requests missing data from customer
 - **execute_tools**: Executes banking operations via MCP
+- **handle_policy**: Returns policy-driven blocks before unsafe actions execute
 - **generate_response**: Generates AI-powered responses
 - **request_confirmation**: Requests user confirmation for sensitive operations
 - **handle_error**: Error handling and recovery
@@ -108,7 +110,17 @@ Supports:
 - **Confirmation**: Request approval for sensitive operations
 - **Validation**: Validate collected data before execution
 
-### 4. Session Management
+### 4. Policy Engine
+
+The workflow now applies policy enforcement at three stages:
+
+- **Ingress**: Blocks prompt-injection attempts, oversized requests, and unauthenticated protected intents before the workflow executes
+- **Pre-tool**: Enforces confirmation before sensitive tool execution and blocks requests that exceed automated policy limits
+- **Response**: Redacts account data, tokens, and similar sensitive values before the final response is persisted or returned
+
+The core settings are exposed through `POLICY_ENGINE_ENABLED`, `POLICY_BLOCK_PROMPT_INJECTION`, `POLICY_TRANSFER_CONFIRMATION_AMOUNT`, and `POLICY_TRANSFER_HARD_BLOCK_AMOUNT`.
+
+### 5. Session Management
 
 PostgreSQL-based persistent session storage:
 
@@ -156,7 +168,7 @@ PORT=3007
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=ai_orchestrator_dev
-DB_USERNAME=postgres
+DB_USER=postgres
 DB_PASSWORD=postgres
 
 # OpenAI
@@ -411,10 +423,10 @@ docker run -d \
 
 ### Docker Compose
 
-The service is included in `docker-compose-full-stack.yml`:
+The service is included in `docker/docker-compose-full-stack.yml`:
 
 ```bash
-docker-compose -f docker-compose-full-stack.yml up ai-orchestrator
+docker compose -f docker/docker-compose-full-stack.yml up ai-orchestrator
 ```
 
 ## 📊 Monitoring

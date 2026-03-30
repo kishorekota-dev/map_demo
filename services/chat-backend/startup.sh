@@ -87,7 +87,7 @@ ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:808
 # Microservice URLs
 API_GATEWAY_URL=http://localhost:3001
 BANKING_SERVICE_URL=http://localhost:3005
-NLP_SERVICE_URL=http://localhost:3002
+NLP_SERVICE_URL=http://localhost:3003
 NLU_SERVICE_URL=http://localhost:3003
 MCP_SERVICE_URL=http://localhost:3004
 
@@ -144,7 +144,7 @@ print_status "Checking dependent microservices..."
 
 check_service "http://localhost:3001" "API Gateway" || print_warning "API Gateway not available - some features may not work"
 check_service "http://localhost:3005" "Banking Service" || print_warning "Banking Service not available - banking features may not work"
-check_service "http://localhost:3002" "NLP Service" || print_warning "NLP Service not available - text analysis may not work"
+check_service "http://localhost:3003" "NLP Compatibility Surface" || print_warning "NLP compatibility surface not available - text analysis may not work"
 check_service "http://localhost:3003" "NLU Service" || print_warning "NLU Service not available - intent detection may not work"
 check_service "http://localhost:3004" "MCP Service" || print_warning "MCP Service not available - tool calling may not work"
 

@@ -1,0 +1,63 @@
+flowchart TD
+  U[User] --> UI["Chat UI<br/>(Chat Frontend)"]
+
+  subgraph Backend["Chat Backend"]
+    AUTH["Authentication & Session<br/>Validation"]
+    SSTORE[("Session Store")]
+    SESS["Session Store Access<br/>(conversation history,<br/>preferences)"]
+    ROUTE["Message Routing<br/>& Orchestrator Invocation"]
+    OUT["Return Response<br/>to Chat UI"]
+  end
+
+  subgraph NLULayer["NLU Services"]
+    NLU_PIPE["Hybrid NLU Pipeline<br/>(Primary NLU, Secondary Model,<br/>LLM-based extraction)"]
+  end
+
+  subgraph Orchestrator["AI Orchestrator"]
+    CTX["Session & Context<br/>Management"]
+    WF["Graph-Based Workflow Engine<br/>(intent analysis, entity checks,<br/>policy checkpoints, HITL,<br/>confirmations, checkpoint resume)"]
+    PROMPTS["Prompt Construction<br/>(system/user prompts,<br/>examples, safety)"]
+    POLICY_AI["AI Safety Policy Engine<br/>(Ingress Screening,<br/>Pre-Tool Gating,<br/>Response Sanitization)"]
+    RESP["LLM Invocation &<br/>Response Post-Processing"]
+  end
+
+  subgraph MCP["MCP Service Layer"]
+    VAL["Schema Validation<br/>& Parameter Checking"]
+    REG["Tool Registry<br/>(names, schemas,<br/>metadata, discovery)"]
+    POLICY_MCP["Data Policy Engine<br/>(RBAC, API Data Rules)"]
+    MASK["Masking & Redaction<br/>(sensitive fields)"]
+    LOG["Tool Invocation Logging<br/>(audit, metrics)"]
+  end
+
+  subgraph Domain["Domain Services & Data"]
+    SVC["Domain Microservices<br/>(Account, Transaction, Card, etc.)"]
+    DB[("Primary Database")]
+    AUDIT[("Audit & Observability Store")]
+  end
+
+  UI -->|HTTPS/WebSocket<br/>user messages| AUTH
+  AUTH --> SESS
+  AUTH --> SSTORE
+  SESS --> ROUTE
+  ROUTE --> NLU_PIPE
+  NLU_PIPE -->|intent + entities| ROUTE
+  ROUTE -->|invoke with state| CTX
+  CTX --> WF
+
+  WF -->|tool invocations<br/>via MCP or fallback transport| VAL
+  VAL --> REG
+  VAL --> LOG
+  LOG --> AUDIT
+
+  REG --> SVC
+  SVC --> DB
+  DB -->|raw results| POLICY_MCP
+  POLICY_MCP -->|trigger obfuscation| MASK
+  MASK -->|structured & safe results| PROMPTS
+
+  PROMPTS -->|validate inputs| POLICY_AI
+  POLICY_AI -->|safe prompt| RESP
+  RESP -->|validate outputs| POLICY_AI
+  POLICY_AI -->|cleared output| OUT
+  OUT --> UI
+  UI --> U

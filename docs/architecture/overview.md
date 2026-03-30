@@ -78,20 +78,20 @@ The POC Banking Chat is a microservices-based application for conversational ban
 | Service | Port | Technology | Purpose |
 |---------|------|------------|---------|
 | Banking Service | 3005 | Express + PostgreSQL | Banking operations, accounts, transactions |
-| AI Orchestrator | 3007 | Express + LangGraph | AI workflow orchestration, GPT-4 integration |
+| AI Orchestrator | 3007 | Express + LangGraph | AI workflow orchestration, OpenAI-backed response generation |
 
 ## Data Flow
 
 ### Chat Message Flow
 
 ```
-1. User sends message via Frontend
-2. WebSocket connection to Chat Backend
-3. Chat Backend extracts intent via NLU Service
-4. AI Orchestrator processes with LangGraph workflow
-5. MCP Service executes banking tools
-6. Banking Service performs operations
-7. Response flows back through same path
+1. Frontend sends REST chat and session traffic to the API Gateway.
+2. The gateway proxies chat traffic to the Chat Backend.
+3. Chat Backend extracts intent via NLU Service.
+4. AI Orchestrator processes workflow-driven requests when required.
+5. MCP Service executes banking tools.
+6. Banking Service performs operations.
+7. Frontend receives REST responses through the gateway and uses Socket.IO directly for real-time updates.
 ```
 
 ### Authentication Flow
@@ -110,7 +110,7 @@ The POC Banking Chat is a microservices-based application for conversational ban
 |----------|------------|
 | Frontend | React 18, Vite, TypeScript, Zustand |
 | Backend | Node.js, Express, Socket.IO |
-| AI/NLU | LangGraph, OpenAI GPT-4, DialogFlow |
+| AI/NLU | LangGraph, OpenAI, DialogFlow |
 | Database | PostgreSQL, Flyway migrations |
 | Protocol | MCP (Model Context Protocol) |
 | Auth | JWT, bcrypt |
@@ -119,7 +119,7 @@ The POC Banking Chat is a microservices-based application for conversational ban
 ## Service Communication
 
 ### Synchronous (REST)
-- Frontend → API Gateway → Services
+- Frontend → API Gateway → Chat Backend and domain services
 - Inter-service REST calls
 
 ### Asynchronous (WebSocket)
@@ -145,6 +145,14 @@ The POC Banking Chat is a microservices-based application for conversational ban
 ## Configuration
 
 Each service has its own `.env` file. See [Configuration Guide](../getting-started/configuration.md).
+
+## Current Recommendations
+
+- Treat the NLU service as the consolidated NLP and NLU runtime surface. Legacy callers now resolve through compatibility endpoints, but the naming should be simplified next.
+- Keep browser HTTP traffic on the API gateway and browser WebSocket traffic on the chat backend. That split now works, but it should be codified in tests and docs.
+- Reduce deployment drift by treating `docker/docker-compose.local.yml` and `docker/docker-compose-full-stack.yml` as the only supported compose entry points.
+
+See [Architecture Recommendations](recommendations.md) for the detailed follow-up list.
 
 ## Diagrams
 

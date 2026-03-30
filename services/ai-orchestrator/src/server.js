@@ -138,6 +138,7 @@ function configureRoutes() {
       features: [
         'LangGraph workflow execution',
         'Intent-based prompt selection',
+        'Policy engine guardrails',
         'Human-in-the-loop support',
         'MCP tool integration',
         'PostgreSQL session management',
@@ -186,6 +187,7 @@ async function startServer() {
       logger.info('Features:');
       logger.info('  • LangGraph workflow execution');
       logger.info('  • Intent-based processing');
+      logger.info('  • Policy engine guardrails');
       logger.info('  • Human-in-the-loop');
       logger.info('  • MCP tool integration');
       logger.info('  • Session management (PostgreSQL)');

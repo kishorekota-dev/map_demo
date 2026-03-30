@@ -1,6 +1,8 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
+const defaultNlpServiceUrl = process.env.NLP_SERVICE_URL || process.env.NLU_SERVICE_URL || 'http://localhost:3003';
+
 class ServiceRegistry {
   constructor() {
     this.services = new Map();
@@ -38,7 +40,7 @@ class ServiceRegistry {
       },
       {
         name: 'nlp',
-        url: process.env.NLP_SERVICE_URL || 'http://localhost:3002',
+        url: defaultNlpServiceUrl,
         healthPath: '/health',
         weight: 5,
         priority: 2

@@ -194,12 +194,12 @@ paths:
         '200':
           description: Request forwarded successfully
 
-  # NLP Service Proxy Routes
+  # NLP Compatibility Proxy Routes
   /api/nlp/{path+}:
-    x-proxy-to: http://poc-nlp-service:3002
+    x-proxy-to: http://nlu-service:3003
     get:
-      tags: [NLP Proxy]
-      summary: Proxy GET requests to NLP service
+      tags: [NLP Compatibility Proxy]
+      summary: Proxy GET requests to the NLU-hosted NLP compatibility surface
       parameters:
         - name: path
           in: path
@@ -211,8 +211,8 @@ paths:
           description: Request forwarded successfully
 
     post:
-      tags: [NLP Proxy]
-      summary: Proxy POST requests to NLP service
+      tags: [NLP Compatibility Proxy]
+      summary: Proxy POST requests to the NLU-hosted NLP compatibility surface
       parameters:
         - name: path
           in: path
@@ -335,7 +335,7 @@ components:
               $ref: '#/components/schemas/ServiceHealth'
             banking-service:
               $ref: '#/components/schemas/ServiceHealth'
-            nlp-service:
+            nlp-compatibility:
               $ref: '#/components/schemas/ServiceHealth'
             nlu-service:
               $ref: '#/components/schemas/ServiceHealth'

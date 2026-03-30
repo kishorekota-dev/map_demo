@@ -112,7 +112,7 @@ curl -X POST http://localhost:3004/api/mcp/execute \
 ## Directory Structure
 
 ```
-poc-mcp-service/
+services/mcp-service/
 ├── src/
 │   ├── mcp/
 │   │   └── mcpProtocolServer.js   # WebSocket MCP protocol
@@ -163,7 +163,7 @@ npm test                # Run tests
 Configure AI Orchestrator to use this service:
 
 ```bash
-# In poc-ai-orchestrator/.env
+# In services/ai-orchestrator/.env
 MCP_SERVICE_URL=http://localhost:3004
 ```
 
@@ -171,7 +171,7 @@ MCP_SERVICE_URL=http://localhost:3004
 
 ```bash
 # From AI Orchestrator directory
-cd ../poc-ai-orchestrator
+cd ../ai-orchestrator
 node test-mcp-integration.js
 ```
 

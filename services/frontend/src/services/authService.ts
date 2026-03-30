@@ -1,24 +1,27 @@
 import axios from 'axios';
+import { getRuntimeConfig } from '@/config/runtimeConfig';
 import type { LoginRequest, LoginResponse, TokenPair, UserProfile } from '@/types';
 
-const STORAGE_KEYS = {
-  ACCESS_TOKEN: 'poc_access_token',
-  REFRESH_TOKEN: 'poc_refresh_token',
-  USER_PROFILE: 'poc_user_profile',
+const STORAGE_NAMESPACE = 'enterprise-chat';
+
+const getStorageKey = (suffix: string): string => {
+  const { tenantId } = getRuntimeConfig();
+  return `${STORAGE_NAMESPACE}:${tenantId}:${suffix}`;
 };
 
-// Banking service URL for direct login (unauthenticated)
-const BANKING_SERVICE_URL = import.meta.env.VITE_BANKING_SERVICE_URL || 'http://localhost:3010/api/v1';
+const buildAuthUrl = (path: string): string => {
+  const baseUrl = getRuntimeConfig().authBaseUrl.replace(/\/$/, '');
+  return `${baseUrl}${path}`;
+};
 
 class AuthService {
   /**
-   * Login via banking service directly (unauthenticated)
-   * This is the only direct API connection outside of poc-chat-backend
+   * Login via the configured authentication API directly (unauthenticated)
    */
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
       const response = await axios.post<LoginResponse>(
-        `${BANKING_SERVICE_URL}/auth/login`,
+        buildAuthUrl('/auth/login'),
         credentials,
         {
           headers: {
@@ -67,7 +70,7 @@ class AuthService {
    * Set access token manually (for users who have a token already)
    */
   setManualToken(accessToken: string, userProfile?: Partial<UserProfile>): void {
-    localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+    localStorage.setItem(getStorageKey('access_token'), accessToken);
     
     if (userProfile) {
       const profile: UserProfile = {
@@ -87,30 +90,30 @@ class AuthService {
    * Logout user
    */
   logout(): void {
-    localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.USER_PROFILE);
+    localStorage.removeItem(getStorageKey('access_token'));
+    localStorage.removeItem(getStorageKey('refresh_token'));
+    localStorage.removeItem(getStorageKey('user_profile'));
   }
 
   /**
    * Get stored access token
    */
   getAccessToken(): string | null {
-    return localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+    return localStorage.getItem(getStorageKey('access_token'));
   }
 
   /**
    * Get stored refresh token
    */
   getRefreshToken(): string | null {
-    return localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+    return localStorage.getItem(getStorageKey('refresh_token'));
   }
 
   /**
    * Get stored user profile
    */
   getUserProfile(): UserProfile | null {
-    const profileStr = localStorage.getItem(STORAGE_KEYS.USER_PROFILE);
+    const profileStr = localStorage.getItem(getStorageKey('user_profile'));
     if (!profileStr) return null;
     
     try {
@@ -131,9 +134,9 @@ class AuthService {
    * Store tokens
    */
   private setTokens(tokens: TokenPair): void {
-    localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, tokens.accessToken);
+    localStorage.setItem(getStorageKey('access_token'), tokens.accessToken);
     if (tokens.refreshToken) {
-      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, tokens.refreshToken);
+      localStorage.setItem(getStorageKey('refresh_token'), tokens.refreshToken);
     }
   }
 
@@ -141,12 +144,12 @@ class AuthService {
    * Store user profile
    */
   private setUserProfile(profile: UserProfile): void {
-    localStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(profile));
+    localStorage.setItem(getStorageKey('user_profile'), JSON.stringify(profile));
   }
 
   /**
    * Refresh access token using refresh token
-   * This would typically call the banking service or chat backend
+  * This would typically call the configured authentication service
    */
   async refreshToken(): Promise<TokenPair | null> {
     const refreshToken = this.getRefreshToken();
@@ -154,7 +157,7 @@ class AuthService {
 
     try {
       const response = await axios.post<{ data: { tokens: TokenPair } }>(
-        `${BANKING_SERVICE_URL}/auth/refresh`,
+        buildAuthUrl('/auth/refresh'),
         { refreshToken },
         {
           headers: {

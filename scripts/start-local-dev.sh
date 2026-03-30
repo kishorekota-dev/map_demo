@@ -26,6 +26,7 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.local.yml"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}POC Banking System - Local Deployment${NC}"
@@ -69,39 +70,39 @@ print_success "Docker Compose is available"
 cd "$PROJECT_ROOT"
 
 # Check if docker-compose.local.yml exists
-if [ ! -f "docker-compose.local.yml" ]; then
-    print_error "docker-compose.local.yml not found in project root"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    print_error "docker/docker-compose.local.yml not found"
     exit 1
 fi
 
 # Stop any existing containers
 print_info "Stopping existing containers..."
-docker compose -f docker-compose.local.yml down 2>/dev/null || true
+docker compose -f "$COMPOSE_FILE" down 2>/dev/null || true
 print_success "Existing containers stopped"
 
 # Create necessary directories
 print_info "Creating necessary directories..."
-mkdir -p poc-nlu-service/logs
-mkdir -p poc-nlu-service/credentials
-mkdir -p poc-banking-service/logs
-mkdir -p poc-mcp-service/logs
-mkdir -p poc-chat-backend/logs
+mkdir -p services/nlu-service/logs
+mkdir -p services/nlu-service/credentials
+mkdir -p services/banking-service/logs
+mkdir -p services/mcp-service/logs
+mkdir -p services/chat-backend/logs
 chmod +x scripts/init-multiple-databases.sh 2>/dev/null || true
 print_success "Directories created"
 
 # Check for DialogFlow credentials (optional)
-if [ -f "poc-nlu-service/credentials/dialogflow-key.json" ]; then
+if [ -f "services/nlu-service/credentials/dialogflow-key.json" ]; then
     print_success "DialogFlow credentials found"
 else
     print_warning "DialogFlow credentials not found - NLU will use fallback mode"
     print_info "To enable DialogFlow, place your service account key at:"
-    print_info "  poc-nlu-service/credentials/dialogflow-key.json"
+    print_info "  services/nlu-service/credentials/dialogflow-key.json"
 fi
 
 # Build and start services
 print_info "Building and starting services..."
 echo ""
-docker compose -f docker-compose.local.yml up --build -d
+docker compose -f "$COMPOSE_FILE" up --build -d
 
 # Wait for services to be healthy
 print_info "Waiting for services to become healthy..."
@@ -113,18 +114,19 @@ INTERVAL=5
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
     # Check service health
-    POSTGRES_HEALTHY=$(docker compose -f docker-compose.local.yml ps postgres | grep -c "healthy" || echo "0")
-    REDIS_HEALTHY=$(docker compose -f docker-compose.local.yml ps redis | grep -c "healthy" || echo "0")
-    BANKING_HEALTHY=$(docker compose -f docker-compose.local.yml ps poc-banking-service | grep -c "healthy" || echo "0")
-    NLU_HEALTHY=$(docker compose -f docker-compose.local.yml ps poc-nlu-service | grep -c "healthy" || echo "0")
-    MCP_HEALTHY=$(docker compose -f docker-compose.local.yml ps poc-mcp-service | grep -c "healthy" || echo "0")
-    CHAT_HEALTHY=$(docker compose -f docker-compose.local.yml ps poc-chat-backend | grep -c "healthy" || echo "0")
+    POSTGRES_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps postgres | grep -c "healthy" || echo "0")
+    REDIS_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps redis | grep -c "healthy" || echo "0")
+    BANKING_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps banking-service | grep -c "healthy" || echo "0")
+    NLU_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps nlu-service | grep -c "healthy" || echo "0")
+    MCP_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps mcp-service | grep -c "healthy" || echo "0")
+    CHAT_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps chat-backend | grep -c "healthy" || echo "0")
+    FRONTEND_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps frontend | grep -c "healthy" || echo "0")
     
-    TOTAL_HEALTHY=$((POSTGRES_HEALTHY + REDIS_HEALTHY + BANKING_HEALTHY + NLU_HEALTHY + MCP_HEALTHY + CHAT_HEALTHY))
+    TOTAL_HEALTHY=$((POSTGRES_HEALTHY + REDIS_HEALTHY + BANKING_HEALTHY + NLU_HEALTHY + MCP_HEALTHY + CHAT_HEALTHY + FRONTEND_HEALTHY))
     
-    echo -ne "\r${BLUE}Services healthy: ${TOTAL_HEALTHY}/6${NC} (${ELAPSED}s/${TIMEOUT}s)"
+    echo -ne "\r${BLUE}Services healthy: ${TOTAL_HEALTHY}/7${NC} (${ELAPSED}s/${TIMEOUT}s)"
     
-    if [ $TOTAL_HEALTHY -eq 6 ]; then
+    if [ $TOTAL_HEALTHY -eq 7 ]; then
         echo ""
         print_success "All services are healthy!"
         break
@@ -139,7 +141,7 @@ echo ""
 if [ $ELAPSED -ge $TIMEOUT ]; then
     print_warning "Timeout waiting for all services to become healthy"
     print_info "Some services may still be starting up. Check logs with:"
-    print_info "  docker compose -f docker-compose.local.yml logs -f [service-name]"
+    print_info "  docker compose -f docker/docker-compose.local.yml logs -f [service-name]"
 else
     print_success "Deployment completed successfully!"
 fi
@@ -170,20 +172,20 @@ echo "  • NLU Service:     http://localhost:3003/health"
 echo "  • MCP Service:     http://localhost:3004/health"
 echo ""
 print_info "Useful Commands:"
-echo "  • View all logs:        docker compose -f docker-compose.local.yml logs -f"
-echo "  • View service logs:    docker compose -f docker-compose.local.yml logs -f [service-name]"
-echo "  • Stop all services:    docker compose -f docker-compose.local.yml down"
-echo "  • Restart service:      docker compose -f docker-compose.local.yml restart [service-name]"
-echo "  • Check service status: docker compose -f docker-compose.local.yml ps"
+echo "  • View all logs:        docker compose -f docker/docker-compose.local.yml logs -f"
+echo "  • View service logs:    docker compose -f docker/docker-compose.local.yml logs -f [service-name]"
+echo "  • Stop all services:    docker compose -f docker/docker-compose.local.yml down"
+echo "  • Restart service:      docker compose -f docker/docker-compose.local.yml restart [service-name]"
+echo "  • Check service status: docker compose -f docker/docker-compose.local.yml ps"
 echo ""
 print_info "Service Names:"
-echo "  • poc-postgres"
-echo "  • poc-redis"
-echo "  • poc-banking-service"
-echo "  • poc-nlu-service"
-echo "  • poc-mcp-service"
-echo "  • poc-chat-backend"
-echo "  • poc-frontend"
+echo "  • postgres"
+echo "  • redis"
+echo "  • banking-service"
+echo "  • nlu-service"
+echo "  • mcp-service"
+echo "  • chat-backend"
+echo "  • frontend"
 echo ""
 print_success "Happy coding! 🚀"
 echo ""

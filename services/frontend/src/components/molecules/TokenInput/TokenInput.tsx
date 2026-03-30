@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getRuntimeConfig } from '@/config/runtimeConfig';
 import { Input } from '@atoms/Input/Input';
 import { Button } from '@atoms/Button/Button';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,6 +12,7 @@ export interface TokenInputProps {
 
 export function TokenInput({ onSuccess }: TokenInputProps) {
   const { setManualToken } = useAuthStore();
+  const runtimeConfig = getRuntimeConfig();
   const [token, setToken] = useState('');
   const [userInfo, setUserInfo] = useState<Partial<UserProfile>>({
     username: '',
@@ -103,7 +105,7 @@ export function TokenInput({ onSuccess }: TokenInputProps) {
 
       <div className="token-input__footer">
         <p className="token-input__help-text">
-          You can get an API token from the banking service login endpoint
+          Tokens should be issued by your enterprise identity or platform integration endpoint at {runtimeConfig.authBaseUrl}
         </p>
       </div>
     </form>

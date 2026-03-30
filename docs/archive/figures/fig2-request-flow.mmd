@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant User
+    participant ChatBackend as Chat Backend & NLU
+    participant Orchestrator as AI Orchestrator
+    participant MCPPly as Data Policy Engine (MCP)
+    participant MCP as MCP Service Layer
+    participant Domain as Domain Services
+
+    User->>ChatBackend: Message ("What's my balance?")
+    ChatBackend->>ChatBackend: Authenticate & Detect Intent
+    ChatBackend->>Orchestrator: Forward Intent + Entities + Context
+    Orchestrator->>Orchestrator: Match Workflow, Restore Checkpoint & Extract Parameters
+    Orchestrator->>Orchestrator: Policy Checkpoint: Ingress / Pre-Tool
+    Orchestrator->>MCP: Invoke Tool Request (MCP Exec or HTTP Fallback)
+    MCP->>MCP: Validate Schema
+    MCP->>Domain: Execute Business Logic
+    Domain-->>MCPPly: Raw Domain Data
+    MCPPly->>MCPPly: Apply Data Redaction, RBAC & Masking
+    MCPPly-->>Orchestrator: Safe Tool Results
+    Orchestrator->>Orchestrator: Generate Prompts
+    Orchestrator->>Orchestrator: Policy Checkpoint: Prompt Injection / Tool Governance
+    Orchestrator->>LLM: Call Large Language Model
+    LLM-->>Orchestrator: Draft Natural Language Response
+    Orchestrator->>Orchestrator: Policy Checkpoint: Redaction / Leakage Filtering
+    Orchestrator-->>ChatBackend: Approved Natural Language Response
+    ChatBackend-->>User: Display Output

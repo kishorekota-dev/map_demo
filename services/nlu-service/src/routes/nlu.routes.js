@@ -39,6 +39,13 @@ router.post('/analyze',
 );
 
 /**
+ * POST /api/nlu/process
+ * POST /api/nlp/process
+ * Legacy NLP-compatible text processing.
+ */
+router.post('/process', NLUController.processLegacyNlp);
+
+/**
  * POST /api/nlu/intents
  * Detect intent from user message
  */

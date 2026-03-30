@@ -6,7 +6,7 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-**Enterprise-grade conversational banking platform built with microservices architecture**
+**Enterprise conversational platform with a banking accelerator, built on microservices architecture**
 
 [Quick Start](#-quick-start) •
 [Architecture](#-architecture) •
@@ -23,7 +23,7 @@
 ### 🤖 AI-Powered Banking
 - **LangGraph Workflows** - State machine-based conversation orchestration
 - **Intent Detection** - Natural language understanding with DialogFlow
-- **GPT-4 Integration** - Advanced AI responses for complex queries
+- **Configurable OpenAI Integration** - Advanced AI responses for complex queries
 - **MCP Tools** - Model Context Protocol for tool execution
 
 ### 💬 Real-time Communication
@@ -123,8 +123,11 @@ npm install
 # Configure environment
 cp .env.example .env.development
 
-# Start development
+# Start core backend services
 npm run dev
+
+# Start the customer UI in a second terminal
+npm run dev:frontend
 ```
 
 ### Verify Installation
@@ -176,9 +179,11 @@ poc-banking-chat/
 |----------|-------------|
 | [Quick Start](docs/getting-started/quick-start.md) | Get started in 5 minutes |
 | [Architecture](docs/architecture/overview.md) | System design and data flow |
+| [Recommendations](docs/architecture/recommendations.md) | Current architecture follow-ups |
+| [Productization](docs/guides/productization.md) | How to package this repo for enterprise rollout |
 | [Development](docs/guides/development.md) | Development workflows |
 | [Deployment](docs/guides/deployment.md) | Production deployment |
-| [API Reference](docs/api/gateway.md) | API documentation |
+| [API Overview](docs/api/README.md) | API and OpenAPI entry points |
 
 ---
 
@@ -187,11 +192,12 @@ poc-banking-chat/
 ### Commands
 
 ```bash
-# Development (all services)
+# Development (core backend services)
 npm run dev
 
-# Development (specific service)
+# Development (UI and specific services)
 npm run dev:frontend
+npm run dev:agent
 npm run dev:banking
 npm run dev:chat
 
@@ -240,7 +246,7 @@ npm run docker:down
 ### Full Stack
 
 ```bash
-docker-compose -f docker/docker-compose.full.yml up -d
+docker compose -f docker/docker-compose-full-stack.yml up -d --build
 ```
 
 ---
@@ -266,6 +272,16 @@ BANKING_SERVICE_URL=http://localhost:3005
 OPENAI_API_KEY=your-openai-key
 DIALOGFLOW_PROJECT_ID=your-project-id
 ```
+
+### Enterprise Packaging
+
+Generate a tenant deployment profile and frontend runtime config with:
+
+```bash
+npm run product:generate
+```
+
+See [Productization](docs/guides/productization.md) for the platform-core versus domain-accelerator split and the remaining work to make this a reusable enterprise product.
 
 See [Configuration Guide](docs/getting-started/configuration.md) for all options.
 
@@ -319,7 +335,7 @@ curl http://localhost:3006/health  # Chat Backend
 npm run docker:logs
 
 # Specific service
-docker-compose logs -f banking-service
+docker compose -f docker/docker-compose.local.yml logs -f banking-service
 ```
 
 ---

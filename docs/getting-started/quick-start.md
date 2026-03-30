@@ -40,7 +40,11 @@ Edit `.env.development` with your settings (see [Configuration](configuration.md
 
 **Option A: All services at once**
 ```bash
+# Start the backend and service mesh
 npm run dev
+
+# Start the customer UI in a second terminal
+npm run dev:frontend
 ```
 
 **Option B: Individual services**
@@ -79,8 +83,9 @@ npm run health
 
 - [Full Configuration Guide](configuration.md)
 - [Architecture Overview](../architecture/overview.md)
+- [Architecture Recommendations](../architecture/recommendations.md)
 - [Development Guide](../guides/development.md)
-- [API Reference](../api/gateway.md)
+- [API Overview](../api/README.md)
 
 ## Troubleshooting
 
@@ -95,7 +100,7 @@ lsof -ti:3000 | xargs kill -9
 
 ```bash
 # Ensure PostgreSQL is running
-docker-compose -f docker/docker-compose.yml up -d postgres
+docker compose -f docker/docker-compose.local.yml up -d postgres
 
 # Or start a local PostgreSQL
 pg_ctl start

@@ -129,6 +129,17 @@ module.exports = {
     maxPromptLength: parseInt(process.env.MAX_PROMPT_LENGTH) || 4000
   },
 
+  // Policy Engine Configuration
+  policy: {
+    enabled: process.env.POLICY_ENGINE_ENABLED !== 'false',
+    blockPromptInjection: process.env.POLICY_BLOCK_PROMPT_INJECTION !== 'false',
+    redactSensitiveData: process.env.POLICY_REDACT_SENSITIVE_DATA !== 'false',
+    maxInputLength: parseInt(process.env.POLICY_MAX_INPUT_LENGTH) || 2000,
+    maxResponseLength: parseInt(process.env.POLICY_MAX_RESPONSE_LENGTH) || 2000,
+    transferConfirmationAmount: parseFloat(process.env.POLICY_TRANSFER_CONFIRMATION_AMOUNT) || 1000,
+    transferHardBlockAmount: parseFloat(process.env.POLICY_TRANSFER_HARD_BLOCK_AMOUNT) || 25000
+  },
+
   // Rate Limiting
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes

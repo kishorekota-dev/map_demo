@@ -166,8 +166,8 @@ const createServiceProxy = (options) => {
  */
 const getFallbackUrl = (serviceName) => {
   const fallbackMap = {
+    'chat-backend': process.env.CHAT_BACKEND_URL,
     'poc-banking-service': process.env.BANKING_SERVICE_URL,
-    'poc-nlp-service': process.env.NLP_SERVICE_URL,
     'poc-nlu-service': process.env.NLU_SERVICE_URL,
     'poc-mcp-service': process.env.MCP_SERVICE_URL
   };

@@ -99,6 +99,44 @@ class NLUController {
   }
 
   /**
+   * Backward-compatible NLP processing endpoint.
+   */
+  async processLegacyNlp(req, res) {
+    try {
+      const inputText = req.body.text || req.body.user_input || req.body.message?.content || req.body.message;
+
+      if (!inputText || typeof inputText !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'A text or message payload is required'
+        });
+      }
+
+      const processed = nluService.processTextAnalysis(inputText);
+
+      res.json({
+        success: true,
+        sentiment: processed.sentiment,
+        entities: processed.entities,
+        keywords: processed.keywords,
+        data: {
+          processed
+        },
+        metadata: {
+          source: 'nlu-service-compatibility',
+          timestamp: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Error in processLegacyNlp', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to process text'
+      });
+    }
+  }
+
+  /**
    * Detect intent from user message
    */
   async detectIntent(req, res) {

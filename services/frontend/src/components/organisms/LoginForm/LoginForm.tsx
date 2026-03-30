@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getRuntimeConfig } from '@/config/runtimeConfig';
 import { Input } from '@atoms/Input/Input';
 import { Button } from '@atoms/Button/Button';
 import { LoadingSpinner } from '@atoms/LoadingSpinner/LoadingSpinner';
@@ -13,6 +14,7 @@ export interface LoginFormProps {
 
 export function LoginForm({ onSuccess, onError }: LoginFormProps) {
   const { login, isLoading, error, clearError } = useAuthStore();
+  const runtimeConfig = getRuntimeConfig();
   const [formData, setFormData] = useState<LoginRequest>({
     username: '',
     password: '',
@@ -68,7 +70,7 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
     <form className="login-form" onSubmit={handleSubmit}>
       <div className="login-form__header">
         <h2>Sign In</h2>
-        <p>Sign in to your banking account</p>
+        <p>Sign in to {runtimeConfig.productName}</p>
       </div>
 
       {error && (
@@ -120,7 +122,7 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
 
       <div className="login-form__footer">
         <p className="login-form__help-text">
-          Use your banking credentials to sign in
+          Use the credentials issued by your organization administrator
         </p>
       </div>
     </form>

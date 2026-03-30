@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.local.yml"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}Stopping POC Banking System${NC}"
@@ -43,8 +44,8 @@ print_error() {
 cd "$PROJECT_ROOT"
 
 # Check if docker-compose.local.yml exists
-if [ ! -f "docker-compose.local.yml" ]; then
-    print_error "docker-compose.local.yml not found in project root"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    print_error "docker/docker-compose.local.yml not found"
     exit 1
 fi
 
@@ -58,10 +59,10 @@ fi
 # Stop and remove containers
 print_info "Stopping services..."
 if [ "$REMOVE_VOLUMES" = true ]; then
-    docker compose -f docker-compose.local.yml down -v
+    docker compose -f "$COMPOSE_FILE" down -v
     print_success "Services stopped and volumes removed"
 else
-    docker compose -f docker-compose.local.yml down
+    docker compose -f "$COMPOSE_FILE" down
     print_success "Services stopped"
 fi
 

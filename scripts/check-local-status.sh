@@ -14,6 +14,7 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.local.yml"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}POC Banking System - Service Status${NC}"
@@ -24,8 +25,8 @@ echo ""
 cd "$PROJECT_ROOT"
 
 # Check if docker-compose.local.yml exists
-if [ ! -f "docker-compose.local.yml" ]; then
-    echo -e "${RED}✗ docker-compose.local.yml not found${NC}"
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo -e "${RED}✗ docker/docker-compose.local.yml not found${NC}"
     exit 1
 fi
 
@@ -33,18 +34,24 @@ fi
 check_service() {
     local service_name=$1
     local port=$2
-    local url="http://localhost:${port}/health"
+    local health_path=$3
     
     # Check if container is running
-    RUNNING=$(docker compose -f docker-compose.local.yml ps $service_name 2>/dev/null | grep -c "Up" || echo "0")
+    RUNNING=$(docker compose -f "$COMPOSE_FILE" ps $service_name 2>/dev/null | grep -c "Up" || echo "0")
     
     if [ "$RUNNING" = "0" ]; then
         echo -e "${RED}✗ ${service_name} - Not Running${NC}"
         return 1
     fi
     
+    if [ -z "$health_path" ]; then
+        echo -e "${GREEN}✓ ${service_name} - Running${NC}"
+        return 0
+    fi
+
     # Check health endpoint
     if command -v curl &> /dev/null; then
+        local url="http://localhost:${port}${health_path}"
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $url 2>/dev/null || echo "000")
         if [ "$HTTP_CODE" = "200" ]; then
             echo -e "${GREEN}✓ ${service_name} - Healthy (Port ${port})${NC}"
@@ -67,18 +74,18 @@ fi
 
 # Check container status
 echo -e "${BLUE}Container Status:${NC}"
-docker compose -f docker-compose.local.yml ps
+docker compose -f "$COMPOSE_FILE" ps
 echo ""
 
 # Check service health
 echo -e "${BLUE}Service Health Checks:${NC}"
-check_service "poc-postgres" "5432"
-check_service "poc-redis" "6379"
-check_service "poc-banking-service" "3005"
-check_service "poc-nlu-service" "3003"
-check_service "poc-mcp-service" "3004"
-check_service "poc-chat-backend" "3006"
-check_service "poc-frontend" "3000"
+check_service "postgres" "5432" ""
+check_service "redis" "6379" ""
+check_service "banking-service" "3005" "/health"
+check_service "nlu-service" "3003" "/health"
+check_service "mcp-service" "3004" "/health"
+check_service "chat-backend" "3006" "/health"
+check_service "frontend" "3000" "/"
 
 echo ""
 echo -e "${BLUE}Quick Access URLs:${NC}"
@@ -89,5 +96,5 @@ echo "  • NLU Service:     http://localhost:3003/health"
 echo "  • MCP Service:     http://localhost:3004/health"
 echo ""
 echo -e "${BLUE}View Logs:${NC}"
-echo "  docker compose -f docker-compose.local.yml logs -f [service-name]"
+echo "  docker compose -f docker/docker-compose.local.yml logs -f [service-name]"
 echo ""

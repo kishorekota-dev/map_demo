@@ -93,6 +93,9 @@ app.get('/api', (req, res) => {
     version: '1.0.0',
     description: 'Central API Gateway for POC microservices architecture',
     services: {
+      chat: '/api/chat/*',
+      sessions: '/api/sessions/*',
+      health: '/api/health',
       banking: '/api/banking/*',
       nlp: '/api/nlp/*',
       nlu: '/api/nlu/*',
@@ -107,6 +110,34 @@ app.get('/api', (req, res) => {
 
 // Service-specific routing with authentication and load balancing
 
+// Chat Backend compatibility routes used by the frontend.
+app.use('/api/chat',
+  rateLimitMiddleware,
+  proxyMiddleware({
+    serviceName: 'chat-backend',
+    pathRewrite: { '^/api/chat': '/api/chat' },
+    changeOrigin: true
+  })
+);
+
+app.use('/api/sessions',
+  rateLimitMiddleware,
+  proxyMiddleware({
+    serviceName: 'chat-backend',
+    pathRewrite: { '^/api/sessions': '/api/sessions' },
+    changeOrigin: true
+  })
+);
+
+app.use('/api/health',
+  rateLimitMiddleware,
+  proxyMiddleware({
+    serviceName: 'chat-backend',
+    pathRewrite: { '^/api/health': '/api/health' },
+    changeOrigin: true
+  })
+);
+
 // Banking Service Routes
 app.use('/api/banking',
   authMiddleware,
@@ -117,11 +148,11 @@ app.use('/api/banking',
   })
 );
 
-// NLP Service Routes  
+// NLP Compatibility Routes
 app.use('/api/nlp',
   authMiddleware,
   proxyMiddleware({
-    serviceName: 'poc-nlp-service',
+    serviceName: 'poc-nlu-service',
     pathRewrite: { '^/api/nlp': '/api' },
     changeOrigin: true
   })
@@ -151,7 +182,7 @@ app.use('/api/mcp',
 app.use('/api/public/nlp',
   rateLimitMiddleware,
   proxyMiddleware({
-    serviceName: 'poc-nlp-service',
+    serviceName: 'poc-nlu-service',
     pathRewrite: { '^/api/public/nlp': '/api/public' },
     changeOrigin: true
   })
@@ -184,6 +215,9 @@ app.use('*', (req, res) => {
     method: req.method,
     timestamp: new Date().toISOString(),
     availableServices: {
+      chat: '/api/chat',
+      sessions: '/api/sessions',
+      health: '/api/health',
       banking: '/api/banking',
       nlp: '/api/nlp',
       nlu: '/api/nlu',
