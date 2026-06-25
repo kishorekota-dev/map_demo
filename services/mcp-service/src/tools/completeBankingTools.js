@@ -39,12 +39,22 @@ class CompleteBankingTools {
   }
 
   /**
-   * Execute a tool by name
+   * Execute a tool by name. Validates arguments against the tool's inputSchema
+   * before dispatch so malformed/out-of-range arguments are rejected
+   * deterministically (defense in depth — banking-service is still the
+   * authoritative validator).
    */
-  async executeTool(toolName, parameters) {
+  async executeTool(toolName, parameters = {}) {
     const tool = this.getToolDefinitions().find(t => t.name === toolName);
     if (!tool) {
       throw new Error(`Tool not found: ${toolName}`);
+    }
+
+    const validation = this.validateParameters(tool, parameters);
+    if (!validation.valid) {
+      const message = `Invalid arguments for ${toolName}: ${validation.errors.join('; ')}`;
+      logger.warn('Tool argument validation failed', { toolName, errors: validation.errors });
+      throw new Error(message);
     }
 
     logger.info('Executing tool', { toolName, parameters: Object.keys(parameters) });
@@ -61,6 +71,69 @@ class CompleteBankingTools {
       });
       throw error;
     }
+  }
+
+  /**
+   * Validate parameters against a tool's JSON-schema-style inputSchema.
+   * Checks required presence, primitive type, enum membership and numeric
+   * minimum. Deterministic and dependency-free.
+   */
+  validateParameters(tool, parameters) {
+    const schema = tool.inputSchema || {};
+    const props = schema.properties || {};
+    const required = schema.required || [];
+    const errors = [];
+
+    for (const field of required) {
+      if (parameters[field] === undefined || parameters[field] === null || parameters[field] === '') {
+        errors.push(`missing required field "${field}"`);
+      }
+    }
+
+    for (const [field, rule] of Object.entries(props)) {
+      const value = parameters[field];
+      if (value === undefined || value === null) continue;
+
+      if (rule.type === 'number') {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+          errors.push(`"${field}" must be a number`);
+          continue;
+        }
+        if (rule.minimum !== undefined && value < rule.minimum) {
+          errors.push(`"${field}" must be >= ${rule.minimum}`);
+        }
+      } else if (rule.type === 'boolean') {
+        if (typeof value !== 'boolean') errors.push(`"${field}" must be a boolean`);
+      } else if (rule.type === 'string') {
+        if (typeof value !== 'string') errors.push(`"${field}" must be a string`);
+      }
+
+      if (Array.isArray(rule.enum) && value !== undefined && !rule.enum.includes(value)) {
+        errors.push(`"${field}" must be one of: ${rule.enum.join(', ')}`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Assert that every tool name the orchestrator may call has a registered
+   * handler. `expectedToolNames` is the orchestrator's CANONICAL_BANKING_TOOLS
+   * list; passing it here (e.g. from a contract test or startup check) fails
+   * fast if a rename ever breaks the cross-service contract.
+   */
+  assertToolContract(expectedToolNames = []) {
+    const defined = new Set(this.getToolDefinitions().map(t => t.name));
+    const missingHandler = this.getToolDefinitions()
+      .filter(t => typeof this[`_execute_${t.name}`] !== 'function')
+      .map(t => t.name);
+    const missingTool = expectedToolNames.filter(name => !defined.has(name));
+
+    const problems = [];
+    if (missingHandler.length) problems.push(`tools without an _execute handler: ${missingHandler.join(', ')}`);
+    if (missingTool.length) problems.push(`expected tools not implemented: ${missingTool.join(', ')}`);
+
+    return { valid: problems.length === 0, problems };
   }
 
   // ==================== AUTHENTICATION TOOLS ====================
@@ -409,6 +482,33 @@ class CompleteBankingTools {
           },
           required: ['authToken', 'cardId']
         }
+      },
+      {
+        name: 'banking_activate_card',
+        description: 'Activate a new or replacement card',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            authToken: { type: 'string', description: 'JWT authentication token' },
+            cardId: { type: 'string', description: 'Card ID (UUID)' },
+            activationCode: { type: 'string', description: 'Activation code (optional)' }
+          },
+          required: ['authToken', 'cardId']
+        }
+      },
+      {
+        name: 'banking_replace_card',
+        description: 'Request a replacement card (lost, stolen, damaged or expired)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            authToken: { type: 'string', description: 'JWT authentication token' },
+            cardId: { type: 'string', description: 'Card ID (UUID)' },
+            reason: { type: 'string', enum: ['lost', 'stolen', 'damaged', 'expired', 'other'] },
+            replacementAddress: { type: 'string', description: 'Mailing address for the replacement (optional)' }
+          },
+          required: ['authToken', 'cardId', 'reason']
+        }
       }
     ];
   }
@@ -447,6 +547,27 @@ class CompleteBankingTools {
   async _execute_banking_unblock_card(params) {
     const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/unblock`, {
       notes: params.notes
+    }, {
+      headers: { Authorization: `Bearer ${params.authToken}` },
+      timeout: this.apiTimeout
+    });
+    return response.data;
+  }
+
+  async _execute_banking_activate_card(params) {
+    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/activate`, {
+      activationCode: params.activationCode
+    }, {
+      headers: { Authorization: `Bearer ${params.authToken}` },
+      timeout: this.apiTimeout
+    });
+    return response.data;
+  }
+
+  async _execute_banking_replace_card(params) {
+    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/replace`, {
+      reason: params.reason,
+      replacementAddress: params.replacementAddress
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
@@ -510,16 +631,42 @@ class CompleteBankingTools {
       },
       {
         name: 'banking_verify_transaction',
-        description: 'Verify if a transaction is legitimate or fraudulent',
+        description: 'Verify a flagged transaction/alert as legitimate or fraudulent. The banking service routes this to confirm-fraud or mark-false-positive based on isLegitimate.',
         inputSchema: {
           type: 'object',
           properties: {
             authToken: { type: 'string', description: 'JWT authentication token' },
-            transactionId: { type: 'string', description: 'Transaction ID (UUID)' },
-            isLegitimate: { type: 'boolean', description: 'True if legitimate, false if fraudulent' },
+            alertId: { type: 'string', description: 'Fraud alert ID (UUID)' },
+            isLegitimate: { type: 'boolean', description: 'True if legitimate (false positive), false if fraudulent (confirm)' },
             notes: { type: 'string', description: 'Additional notes (optional)' }
           },
-          required: ['authToken', 'transactionId', 'isLegitimate']
+          required: ['authToken', 'alertId', 'isLegitimate']
+        }
+      },
+      {
+        name: 'banking_confirm_fraud',
+        description: 'Confirm a fraud alert as genuine fraud',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            authToken: { type: 'string', description: 'JWT authentication token' },
+            alertId: { type: 'string', description: 'Fraud alert ID (UUID)' },
+            notes: { type: 'string', description: 'Confirmation notes (optional)' }
+          },
+          required: ['authToken', 'alertId']
+        }
+      },
+      {
+        name: 'banking_mark_false_positive',
+        description: 'Mark a fraud alert as a false positive (legitimate activity)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            authToken: { type: 'string', description: 'JWT authentication token' },
+            alertId: { type: 'string', description: 'Fraud alert ID (UUID)' },
+            notes: { type: 'string', description: 'Resolution notes (optional)' }
+          },
+          required: ['authToken', 'alertId']
         }
       }
     ];
@@ -565,9 +712,28 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_verify_transaction(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/fraud/verify-transaction`, {
-      transactionId: params.transactionId,
+    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/verify`, {
       isLegitimate: params.isLegitimate,
+      notes: params.notes
+    }, {
+      headers: { Authorization: `Bearer ${params.authToken}` },
+      timeout: this.apiTimeout
+    });
+    return response.data;
+  }
+
+  async _execute_banking_confirm_fraud(params) {
+    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/confirm`, {
+      notes: params.notes
+    }, {
+      headers: { Authorization: `Bearer ${params.authToken}` },
+      timeout: this.apiTimeout
+    });
+    return response.data;
+  }
+
+  async _execute_banking_mark_false_positive(params) {
+    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/false-positive`, {
       notes: params.notes
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -653,6 +819,21 @@ class CompleteBankingTools {
           },
           required: ['authToken', 'disputeId', 'reason']
         }
+      },
+      {
+        name: 'banking_update_dispute',
+        description: 'Update details of an existing dispute',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            authToken: { type: 'string', description: 'JWT authentication token' },
+            disputeId: { type: 'string', description: 'Dispute ID (UUID)' },
+            description: { type: 'string', description: 'Updated description (optional)' },
+            reason: { type: 'string', description: 'Updated reason (optional)' },
+            amountDisputed: { type: 'number', minimum: 0.01, description: 'Updated disputed amount (optional)' }
+          },
+          required: ['authToken', 'disputeId']
+        }
       }
     ];
   }
@@ -707,6 +888,18 @@ class CompleteBankingTools {
   async _execute_banking_withdraw_dispute(params) {
     const response = await axios.post(`${this.bankingServiceUrl}/disputes/${params.disputeId}/withdraw`, {
       reason: params.reason
+    }, {
+      headers: { Authorization: `Bearer ${params.authToken}` },
+      timeout: this.apiTimeout
+    });
+    return response.data;
+  }
+
+  async _execute_banking_update_dispute(params) {
+    const response = await axios.put(`${this.bankingServiceUrl}/disputes/${params.disputeId}`, {
+      description: params.description,
+      reason: params.reason,
+      amountDisputed: params.amountDisputed
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout

@@ -1,0 +1,56 @@
+name: CI
+
+# Test gate for the POC Banking Chat platform. Runs each service's jest/vitest
+# suite — including the cross-service contract tests (tool-name resolution and
+# intent-vocabulary parity) and the determinism regression tests — so a broken
+# contract (a tool rename, a dead prompt, a non-zero default temperature) fails
+# the build instead of shipping silently.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  service-tests:
+    name: test ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ai-orchestrator
+          - nlu-service
+          - mcp-service
+          - chat-backend
+          - api-gateway
+          - banking-service
+          - agent-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      - name: Run tests
+        working-directory: services/${{ matrix.service }}
+        # --passWithNoTests keeps services that have not yet added specs green,
+        # while any service that DOES have specs enforces them.
+        run: npx jest --ci --passWithNoTests
+
+  frontend-tests:
+    name: test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        working-directory: services/frontend
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      - name: Run tests
+        working-directory: services/frontend
+        run: npx vitest run --passWithNoTests

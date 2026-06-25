@@ -41,6 +41,40 @@ Provide accurate, helpful information about banking services.`,
       availableIntents: intentConfig.getAllIntents().length,
       availablePrompts: Object.keys(ALL_PROMPTS).length
     });
+
+    // Fail fast on structural config mistakes. A prefixed/missing prompt key or
+    // an intent missing a config block would otherwise silently degrade flows to
+    // the generic fallback prompt (the historical dead-prompt bug).
+    this.assertConfigConsistency();
+  }
+
+  /**
+   * Verify intent configuration is internally consistent and every referenced
+   * prompt template actually resolves in ALL_PROMPTS. Throws on the first run
+   * with a full list of problems so misconfiguration cannot reach production.
+   */
+  assertConfigConsistency() {
+    const problems = intentConfig.validateConfigConsistency();
+
+    for (const [intent, prompts] of Object.entries(intentConfig.INTENT_PROMPTS)) {
+      const { systemPromptTemplate, userPromptTemplate } = prompts;
+      if (systemPromptTemplate && !ALL_PROMPTS[systemPromptTemplate]) {
+        problems.push(`intent "${intent}" systemPromptTemplate "${systemPromptTemplate}" does not resolve in ALL_PROMPTS`);
+      }
+      if (userPromptTemplate && !ALL_PROMPTS[userPromptTemplate]) {
+        problems.push(`intent "${intent}" userPromptTemplate "${userPromptTemplate}" does not resolve in ALL_PROMPTS`);
+      }
+    }
+
+    if (problems.length > 0) {
+      const message = `Intent configuration is inconsistent:\n - ${problems.join('\n - ')}`;
+      logger.error('Intent configuration consistency check failed', { problems });
+      throw new Error(message);
+    }
+
+    logger.info('Intent configuration consistency check passed', {
+      intents: intentConfig.getAllIntents().length
+    });
   }
 
   /**

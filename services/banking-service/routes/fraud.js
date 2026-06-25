@@ -70,6 +70,18 @@ router.post('/alerts/:alertId/false-positive',
   fraudController.markAsFalsePositive
 );
 
+/**
+ * @route   POST /api/fraud/alerts/:alertId/verify
+ * @desc    Customer-facing verification: resolves the alert as false-positive
+ *          (isLegitimate=true) or confirms fraud (isLegitimate=false) in one
+ *          deterministic call. Backs the verify_transaction intent.
+ * @access  Private (alert owner)
+ */
+router.post('/alerts/:alertId/verify',
+  validators.validateId,
+  fraudController.verifyTransaction
+);
+
 // TODO: Implement additional fraud methods
 // /**
 //  * @route   POST /api/fraud/report

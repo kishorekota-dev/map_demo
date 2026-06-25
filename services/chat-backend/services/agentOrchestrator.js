@@ -2,629 +2,435 @@ const EventEmitter = require('events');
 const axios = require('axios');
 const logger = require('./logger');
 
+/**
+ * AgentOrchestrator
+ *
+ * Deterministic message router for the chat backend. For every customer
+ * message it runs a fixed, reproducible pipeline:
+ *
+ *   1. classify intent via the NLU service (deterministic classifier;
+ *      canonical snake_case vocabulary; stable fallback intent)
+ *   2. run the canonical AI workflow in ai-orchestrator
+ *      (LangGraph + policy engine) which performs data collection,
+ *      confirmation gating, deterministic tool execution and response
+ *      generation
+ *   3. map the workflow result to the chat response contract, surfacing
+ *      human-input / confirmation / escalation states explicitly
+ *
+ * Routing is a pure function of (intent, workflow state) — it does NOT depend
+ * on live agent load or health, so identical input + state always produces the
+ * same route. Capacity limits are handled as explicit backpressure, never by
+ * silently dropping a processing step.
+ */
 class AgentOrchestrator extends EventEmitter {
     constructor() {
         super();
+
+        // Downstream services
+        this.nluServiceUrl = process.env.NLU_SERVICE_URL || 'http://localhost:3003';
+        this.orchestratorUrl = process.env.AI_ORCHESTRATOR_URL || 'http://localhost:3007';
+
+        // Timeouts / retries
+        this.requestTimeout = parseInt(process.env.AGENT_RESPONSE_TIMEOUT, 10) || 30000;
+        // Only network-level failures are retried; timeouts are NOT retried so a
+        // slow state-changing call is never silently duplicated.
+        this.networkRetryAttempts = parseInt(process.env.AGENT_NETWORK_RETRY_ATTEMPTS, 10) || 2;
+
+        // Deterministic fallback intent when classification is unavailable.
+        this.fallbackIntent = process.env.DEFAULT_INTENT || 'general_inquiry';
+        this.escalationEnabled = process.env.AGENT_FALLBACK_ENABLED !== 'false';
+
+        // Concurrency tracking is observability/backpressure only — it never
+        // changes which steps run for a message.
+        this.activeRequests = new Map();
+        this.maxConcurrentRequests = parseInt(process.env.MAX_CONCURRENT_REQUESTS, 10) || 100;
+
+        // Kept for the /health endpoint and event listeners that other modules
+        // already subscribe to.
         this.agents = new Map();
-        this.activeConversations = new Map();
-        this.agentLoadBalancer = new Map();
-        this.fallbackAgent = process.env.DEFAULT_AGENT || 'banking-assistant';
-        this.maxConcurrentAgents = parseInt(process.env.MAX_CONCURRENT_AGENTS) || 10;
-        this.agentResponseTimeout = parseInt(process.env.AGENT_RESPONSE_TIMEOUT) || 30000;
-        this.retryAttempts = parseInt(process.env.AGENT_RETRY_ATTEMPTS) || 3;
-        this.fallbackEnabled = process.env.AGENT_FALLBACK_ENABLED === 'true';
-        
-        this.initializeAgents();
-        
+        this.registerStaticAgents();
+
         logger.info('AgentOrchestrator initialized', {
-            maxConcurrentAgents: this.maxConcurrentAgents,
-            fallbackAgent: this.fallbackAgent,
-            fallbackEnabled: this.fallbackEnabled
+            nluServiceUrl: this.nluServiceUrl,
+            orchestratorUrl: this.orchestratorUrl,
+            requestTimeout: this.requestTimeout,
+            fallbackIntent: this.fallbackIntent
         });
     }
 
     /**
-     * Initialize available agents
+     * Register the logical pipeline stages for health reporting.
      */
-    initializeAgents() {
-        // Banking Assistant Agent
-        this.registerAgent({
-            id: 'banking-assistant',
-            name: 'Banking Assistant',
-            type: 'ai',
-            capabilities: ['account_inquiry', 'transaction_history', 'balance_check', 'transfer_funds', 'card_services'],
-            priority: 1,
-            maxConcurrent: 5,
-            serviceEndpoint: process.env.BANKING_SERVICE_URL,
-            isActive: true
-        });
-
-        // NLP Processing Agent
-        this.registerAgent({
-            id: 'nlp-processor',
-            name: 'Natural Language Processor',
-            type: 'nlp',
-            capabilities: ['text_analysis', 'sentiment_analysis', 'entity_extraction', 'intent_classification'],
-            priority: 2,
-            maxConcurrent: 3,
-            serviceEndpoint: process.env.NLP_SERVICE_URL,
-            isActive: true
-        });
-
-        // NLU Intent Agent
-        this.registerAgent({
-            id: 'nlu-intent',
-            name: 'Natural Language Understanding',
-            type: 'nlu',
-            capabilities: ['intent_detection', 'context_understanding', 'dialogue_management'],
-            priority: 2,
-            maxConcurrent: 3,
-            serviceEndpoint: process.env.NLU_SERVICE_URL,
-            isActive: true
-        });
-
-        // MCP Tool Agent
-        this.registerAgent({
-            id: 'mcp-tools',
-            name: 'Model Context Protocol Tools',
-            type: 'mcp',
-            capabilities: ['tool_calling', 'external_api', 'data_retrieval', 'system_integration'],
-            priority: 3,
-            maxConcurrent: 2,
-            serviceEndpoint: process.env.MCP_SERVICE_URL,
-            isActive: true
-        });
-
-        // Human Escalation Agent (fallback)
-        this.registerAgent({
-            id: 'human-escalation',
-            name: 'Human Support Escalation',
-            type: 'human',
-            capabilities: ['complex_issues', 'dispute_resolution', 'manual_verification'],
-            priority: 10,
-            maxConcurrent: 1,
-            serviceEndpoint: null,
-            isActive: this.fallbackEnabled
-        });
-    }
-
-    /**
-     * Register a new agent
-     */
-    registerAgent(agentConfig) {
-        try {
-            const agent = {
-                ...agentConfig,
-                currentLoad: 0,
-                totalRequests: 0,
-                successfulRequests: 0,
-                failedRequests: 0,
-                averageResponseTime: 0,
-                lastHealthCheck: null,
-                isHealthy: true,
-                registeredAt: new Date()
-            };
-
-            this.agents.set(agentConfig.id, agent);
-            this.agentLoadBalancer.set(agentConfig.id, {
-                activeConversations: 0,
-                requestQueue: [],
-                healthStatus: 'healthy'
-            });
-
-            logger.info('Agent registered', { 
-                agentId: agentConfig.id, 
-                name: agentConfig.name,
-                capabilities: agentConfig.capabilities
-            });
-
-            this.emit('agentRegistered', agent);
-        } catch (error) {
-            logger.error('Error registering agent', { 
-                error: error.message, 
-                agentConfig
-            });
-            throw error;
+    registerStaticAgents() {
+        const stages = [
+            { id: 'nlu-intent', name: 'NLU Intent Classifier', type: 'nlu', endpoint: this.nluServiceUrl },
+            { id: 'ai-orchestrator', name: 'AI Orchestrator (LangGraph + Policy)', type: 'ai', endpoint: this.orchestratorUrl }
+        ];
+        for (const stage of stages) {
+            this.agents.set(stage.id, { ...stage, isActive: true, isHealthy: true, totalRequests: 0, failedRequests: 0 });
         }
     }
 
     /**
-     * Process message through appropriate agents
+     * Process a customer message deterministically.
+     *
+     * @param {string} sessionId
+     * @param {object} message - { content, type, sessionId?, userId?, authToken? }
+     * @param {object} conversationContext - session.state (may carry userId/authToken)
+     * @returns {object} { finalResponse, conversationContextUpdates, processingTime, agentsInvolved }
      */
     async processMessage(sessionId, message, conversationContext = {}) {
-        try {
-            logger.info('Starting message processing', { 
-                sessionId, 
-                messageId: message.id,
-                contentLength: message.content?.length || 0
-            });
+        const startTime = Date.now();
+        const requestKey = `${sessionId}:${message.id || startTime}`;
 
-            // Determine required agents based on message type and context
-            const requiredAgents = await this.determineRequiredAgents(message, conversationContext);
-            
-            // Create processing pipeline
-            const processingPipeline = this.createProcessingPipeline(requiredAgents, sessionId);
-            
-            // Execute pipeline
-            const result = await this.executePipeline(processingPipeline, message, conversationContext);
-            
-            logger.info('Message processing completed', { 
-                sessionId, 
-                messageId: message.id,
-                agentsInvolved: requiredAgents.map(a => a.id),
-                processingTime: result.processingTime
-            });
-
-            return result;
-        } catch (error) {
-            logger.error('Error processing message through agents', { 
-                error: error.message, 
+        // Explicit backpressure rather than silent step-dropping.
+        if (this.activeRequests.size >= this.maxConcurrentRequests) {
+            logger.warn('Orchestrator at capacity, applying backpressure', {
                 sessionId,
-                messageId: message.id
+                active: this.activeRequests.size
             });
-            
-            // Try fallback processing
-            if (this.fallbackEnabled) {
-                return await this.fallbackProcessing(sessionId, message, conversationContext);
-            }
-            
-            throw error;
-        }
-    }
-
-    /**
-     * Determine which agents are needed for processing
-     */
-    async determineRequiredAgents(message, conversationContext) {
-        const requiredAgents = [];
-        const messageContent = message.content?.toLowerCase() || '';
-        
-        try {
-            // Always start with NLP for text analysis
-            if (message.type === 'text' && messageContent) {
-                const nlpAgent = this.getAvailableAgent('nlp-processor');
-                if (nlpAgent) requiredAgents.push(nlpAgent);
-            }
-
-            // Add NLU for intent detection
-            const nluAgent = this.getAvailableAgent('nlu-intent');
-            if (nluAgent) requiredAgents.push(nluAgent);
-
-            // Determine if banking services are needed
-            const bankingKeywords = ['account', 'balance', 'transfer', 'payment', 'card', 'transaction', 'deposit', 'withdrawal'];
-            if (bankingKeywords.some(keyword => messageContent.includes(keyword)) || 
-                conversationContext.currentIntent?.includes('banking')) {
-                const bankingAgent = this.getAvailableAgent('banking-assistant');
-                if (bankingAgent) requiredAgents.push(bankingAgent);
-            }
-
-            // Check if MCP tools are needed
-            const mcpKeywords = ['calculate', 'search', 'lookup', 'external', 'api', 'tool'];
-            if (mcpKeywords.some(keyword => messageContent.includes(keyword)) ||
-                conversationContext.requiresTools) {
-                const mcpAgent = this.getAvailableAgent('mcp-tools');
-                if (mcpAgent) requiredAgents.push(mcpAgent);
-            }
-
-            // Fallback to banking assistant if no specific agents determined
-            if (requiredAgents.length === 0) {
-                const fallbackAgent = this.getAvailableAgent(this.fallbackAgent);
-                if (fallbackAgent) requiredAgents.push(fallbackAgent);
-            }
-
-            return requiredAgents;
-        } catch (error) {
-            logger.error('Error determining required agents', { 
-                error: error.message, 
-                messageContent: messageContent.substring(0, 100)
-            });
-            return [];
-        }
-    }
-
-    /**
-     * Get available agent by type or ID
-     */
-    getAvailableAgent(agentIdentifier) {
-        try {
-            // Try by ID first
-            let agent = this.agents.get(agentIdentifier);
-            
-            // If not found, try by type
-            if (!agent) {
-                agent = Array.from(this.agents.values()).find(a => a.type === agentIdentifier);
-            }
-
-            if (!agent || !agent.isActive || !agent.isHealthy) {
-                return null;
-            }
-
-            const loadInfo = this.agentLoadBalancer.get(agent.id);
-            if (loadInfo && loadInfo.activeConversations >= agent.maxConcurrent) {
-                return null;
-            }
-
-            return agent;
-        } catch (error) {
-            logger.error('Error getting available agent', { 
-                error: error.message, 
-                agentIdentifier
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Create processing pipeline
-     */
-    createProcessingPipeline(agents, sessionId) {
-        return {
-            sessionId,
-            agents,
-            steps: agents.map(agent => ({
-                agentId: agent.id,
-                agentName: agent.name,
-                agentType: agent.type,
-                serviceEndpoint: agent.serviceEndpoint,
-                timeout: this.agentResponseTimeout,
-                retries: this.retryAttempts
-            })),
-            startTime: new Date(),
-            results: []
-        };
-    }
-
-    /**
-     * Execute processing pipeline
-     */
-    async executePipeline(pipeline, message, conversationContext) {
-        const pipelineStartTime = Date.now();
-        let aggregatedResult = {
-            responses: [],
-            nlpAnalysis: null,
-            intentDetection: null,
-            bankingResult: null,
-            mcpResult: null,
-            finalResponse: null,
-            conversationContextUpdates: {},
-            processingTime: 0,
-            agentsInvolved: []
-        };
-
-        try {
-            for (const step of pipeline.steps) {
-                try {
-                    logger.debug('Executing pipeline step', { 
-                        sessionId: pipeline.sessionId,
-                        agentId: step.agentId,
-                        agentType: step.agentType
-                    });
-
-                    // Reserve agent
-                    this.reserveAgent(step.agentId, pipeline.sessionId);
-
-                    // Process with agent
-                    const stepResult = await this.processWithAgent(step, message, conversationContext, aggregatedResult);
-                    
-                    // Update aggregated result
-                    this.updateAggregatedResult(aggregatedResult, step.agentType, stepResult);
-                    
-                    // Release agent
-                    this.releaseAgent(step.agentId, pipeline.sessionId);
-
-                    pipeline.results.push({
-                        agentId: step.agentId,
-                        agentType: step.agentType,
-                        success: true,
-                        result: stepResult,
-                        timestamp: new Date()
-                    });
-
-                } catch (stepError) {
-                    logger.error('Pipeline step failed', { 
-                        error: stepError.message,
-                        sessionId: pipeline.sessionId,
-                        agentId: step.agentId
-                    });
-
-                    // Release agent on error
-                    this.releaseAgent(step.agentId, pipeline.sessionId);
-
-                    pipeline.results.push({
-                        agentId: step.agentId,
-                        agentType: step.agentType,
-                        success: false,
-                        error: stepError.message,
-                        timestamp: new Date()
-                    });
-
-                    // Continue with next agent unless critical failure
-                    if (step.agentType === 'banking' && !this.fallbackEnabled) {
-                        throw stepError;
-                    }
-                }
-            }
-
-            // Generate final response
-            aggregatedResult.finalResponse = this.generateFinalResponse(aggregatedResult, message);
-            aggregatedResult.processingTime = Date.now() - pipelineStartTime;
-            aggregatedResult.agentsInvolved = pipeline.results.map(r => r.agentId);
-
-            return aggregatedResult;
-        } catch (error) {
-            logger.error('Pipeline execution failed', { 
-                error: error.message,
-                sessionId: pipeline.sessionId,
-                completedSteps: pipeline.results.length
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Process message with specific agent
-     */
-    async processWithAgent(step, message, conversationContext, aggregatedResult) {
-        try {
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Agent timeout')), step.timeout);
-            });
-
-            const processingPromise = this.callAgentService(step, message, conversationContext, aggregatedResult);
-
-            return await Promise.race([processingPromise, timeoutPromise]);
-        } catch (error) {
-            // Retry logic
-            for (let retry = 1; retry <= step.retries; retry++) {
-                try {
-                    logger.warn(`Retrying agent call (attempt ${retry})`, { 
-                        agentId: step.agentId,
-                        error: error.message
-                    });
-                    
-                    const retryPromise = this.callAgentService(step, message, conversationContext, aggregatedResult);
-                    const timeoutPromise = new Promise((_, reject) => {
-                        setTimeout(() => reject(new Error('Agent timeout on retry')), step.timeout);
-                    });
-
-                    return await Promise.race([retryPromise, timeoutPromise]);
-                } catch (retryError) {
-                    if (retry === step.retries) {
-                        throw retryError;
-                    }
-                    // Wait before retry
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retry));
-                }
-            }
-        }
-    }
-
-    /**
-     * Call agent service
-     */
-    async callAgentService(step, message, conversationContext, aggregatedResult) {
-        try {
-            if (!step.serviceEndpoint) {
-                throw new Error('No service endpoint configured');
-            }
-
-            const requestData = {
-                message,
-                conversationContext,
-                previousResults: aggregatedResult,
-                sessionInfo: {
-                    sessionId: message.sessionId,
-                    userId: message.userId,
-                    timestamp: new Date().toISOString()
-                }
-            };
-
-            const response = await axios.post(
-                `${step.serviceEndpoint}/api/process`,
-                requestData,
+            return this.buildResult(
                 {
-                    timeout: step.timeout,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Agent-Type': step.agentType,
-                        'X-Session-ID': message.sessionId
-                    }
-                }
+                    content: 'We are handling a high volume of requests right now. Please resend your message in a moment.',
+                    type: 'text',
+                    confidence: 1,
+                    source: 'backpressure',
+                    metadata: { retryable: true }
+                },
+                {},
+                startTime,
+                ['backpressure']
+            );
+        }
+
+        this.activeRequests.set(requestKey, startTime);
+        this.emit('processingStarted', { sessionId, messageId: message.id });
+
+        try {
+            const question = (message.content || '').trim();
+            const userId = message.userId || conversationContext.userId || null;
+            const authToken = message.authToken || conversationContext.authToken || null;
+
+            if (!question) {
+                return this.buildResult(
+                    {
+                        content: 'Please enter a message so I can help.',
+                        type: 'text',
+                        confidence: 1,
+                        source: 'validation',
+                        metadata: {}
+                    },
+                    {},
+                    startTime,
+                    ['validation']
+                );
+            }
+
+            // If the customer is responding to a pending confirmation/data
+            // request, route the reply to the workflow's feedback endpoint so the
+            // confirm-then-execute path runs (with re-validation) instead of being
+            // re-classified as a brand new intent.
+            if (conversationContext.pendingFeedback) {
+                return await this.continuePendingWorkflow({
+                    sessionId,
+                    question,
+                    authToken,
+                    pendingFeedback: conversationContext.pendingFeedback,
+                    startTime
+                });
+            }
+
+            // Step 1 — deterministic intent classification
+            const intent = await this.classifyIntent(question, sessionId, conversationContext);
+
+            // Step 2 — canonical AI workflow
+            const workflow = await this.callOrchestrator({
+                path: '/api/orchestrator/process',
+                payload: { sessionId, intent, question, userId },
+                authToken
+            });
+
+            this.emit('processingCompleted', { sessionId, messageId: message.id, intent });
+
+            // Step 3 — map to chat response contract
+            return this.mapWorkflowResult(workflow, { intent, startTime, sessionId });
+        } catch (error) {
+            logger.error('Orchestration failed', { sessionId, error: error.message });
+            return this.escalate(sessionId, message, startTime, error);
+        } finally {
+            this.activeRequests.delete(requestKey);
+        }
+    }
+
+    /**
+     * Continue a workflow that is waiting on human input (confirmation or
+     * additional data). Reproducible: the same reply + pending state always
+     * resolves the same way.
+     */
+    async continuePendingWorkflow({ sessionId, question, authToken, pendingFeedback, startTime }) {
+        const confirmed = pendingFeedback.type === 'confirmation_required'
+            ? /\b(yes|confirm|approve|proceed|ok|okay)\b/i.test(question)
+            : undefined;
+
+        const workflow = await this.callOrchestrator({
+            path: '/api/orchestrator/feedback',
+            payload: { sessionId, response: question, confirmed },
+            authToken
+        });
+
+        return this.mapWorkflowResult(workflow, { intent: pendingFeedback.intent, startTime, sessionId });
+    }
+
+    /**
+     * Classify a message into a canonical orchestrator intent. The NLU service
+     * is the single deterministic classifier and is responsible for returning a
+     * canonical snake_case intent. On any failure we fall back to a fixed intent
+     * so behaviour is still defined and reproducible.
+     */
+    async classifyIntent(question, sessionId, conversationContext) {
+        // Honour an explicit intent already established for the conversation.
+        if (conversationContext.lockedIntent) {
+            return conversationContext.lockedIntent;
+        }
+
+        try {
+            const response = await this.httpPost(
+                `${this.nluServiceUrl}/api/nlu/intents`,
+                { text: question, sessionId },
+                { 'X-Session-ID': sessionId }
             );
 
-            return response.data;
+            const intent = response?.data?.intent
+                || response?.data?.result?.intent
+                || response?.data?.data?.intent;
+
+            if (intent && typeof intent === 'string') {
+                logger.debug('Intent classified', { sessionId, intent });
+                return intent;
+            }
+
+            logger.warn('NLU returned no intent, using fallback', { sessionId, fallback: this.fallbackIntent });
+            return this.fallbackIntent;
         } catch (error) {
-            if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-                throw new Error(`Agent service unavailable: ${step.agentId}`);
-            }
-            throw error;
-        }
-    }
-
-    /**
-     * Update aggregated result based on agent type
-     */
-    updateAggregatedResult(aggregatedResult, agentType, stepResult) {
-        switch (agentType) {
-            case 'nlp':
-                aggregatedResult.nlpAnalysis = stepResult;
-                break;
-            case 'nlu':
-                aggregatedResult.intentDetection = stepResult;
-                if (stepResult.conversationContextUpdates) {
-                    Object.assign(aggregatedResult.conversationContextUpdates, stepResult.conversationContextUpdates);
-                }
-                break;
-            case 'ai':
-            case 'banking':
-                aggregatedResult.bankingResult = stepResult;
-                break;
-            case 'mcp':
-                aggregatedResult.mcpResult = stepResult;
-                break;
-        }
-
-        aggregatedResult.responses.push({
-            agentType,
-            result: stepResult,
-            timestamp: new Date()
-        });
-    }
-
-    /**
-     * Generate final response from aggregated results
-     */
-    generateFinalResponse(aggregatedResult, originalMessage) {
-        try {
-            // Priority: Banking > MCP > NLU > NLP
-            if (aggregatedResult.bankingResult && aggregatedResult.bankingResult.response) {
-                return {
-                    content: aggregatedResult.bankingResult.response,
-                    type: 'text',
-                    confidence: aggregatedResult.bankingResult.confidence || 0.8,
-                    source: 'banking-assistant',
-                    metadata: {
-                        intent: aggregatedResult.intentDetection?.intent,
-                        entities: aggregatedResult.nlpAnalysis?.entities,
-                        sentiment: aggregatedResult.nlpAnalysis?.sentiment,
-                        suggestedActions: aggregatedResult.bankingResult.suggestedActions,
-                        quickReplies: aggregatedResult.bankingResult.quickReplies
-                    }
-                };
-            }
-
-            if (aggregatedResult.mcpResult && aggregatedResult.mcpResult.response) {
-                return {
-                    content: aggregatedResult.mcpResult.response,
-                    type: 'text',
-                    confidence: aggregatedResult.mcpResult.confidence || 0.7,
-                    source: 'mcp-tools',
-                    metadata: {
-                        toolsUsed: aggregatedResult.mcpResult.toolsUsed,
-                        dataRetrieved: aggregatedResult.mcpResult.dataRetrieved
-                    }
-                };
-            }
-
-            // Fallback response
-            return {
-                content: "I understand your message. How can I assist you with your banking needs today?",
-                type: 'text',
-                confidence: 0.5,
-                source: 'fallback',
-                metadata: {
-                    intent: aggregatedResult.intentDetection?.intent || 'general_inquiry',
-                    entities: aggregatedResult.nlpAnalysis?.entities || {},
-                    sentiment: aggregatedResult.nlpAnalysis?.sentiment || 'neutral'
-                }
-            };
-        } catch (error) {
-            logger.error('Error generating final response', { 
-                error: error.message,
-                aggregatedResult: Object.keys(aggregatedResult)
+            logger.warn('NLU classification unavailable, using fallback intent', {
+                sessionId,
+                fallback: this.fallbackIntent,
+                error: error.message
             });
-            
-            return {
-                content: "I apologize, but I'm having trouble processing your request right now. Please try again.",
-                type: 'text',
-                confidence: 0.1,
-                source: 'error-fallback',
-                metadata: {}
-            };
+            return this.fallbackIntent;
         }
     }
 
     /**
-     * Fallback processing when main pipeline fails
+     * Call the AI orchestrator with deterministic timeout and bounded
+     * network-only retries. A timeout aborts the in-flight request (so it cannot
+     * complete after we have given up) and is NOT retried, preventing duplicate
+     * execution of state-changing actions.
      */
-    async fallbackProcessing(sessionId, message, conversationContext) {
-        try {
-            logger.info('Using fallback processing', { sessionId, messageId: message.id });
-            
-            return {
-                responses: [],
-                finalResponse: {
-                    content: "I'm sorry, I'm experiencing some technical difficulties. A human agent will assist you shortly.",
+    async callOrchestrator({ path, payload, authToken }) {
+        const url = `${this.orchestratorUrl}${path}`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) {
+            headers.Authorization = `Bearer ${authToken}`;
+        }
+
+        let lastError;
+        for (let attempt = 0; attempt <= this.networkRetryAttempts; attempt++) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), this.requestTimeout);
+            try {
+                const response = await axios.post(url, payload, {
+                    headers,
+                    timeout: this.requestTimeout,
+                    signal: controller.signal
+                });
+                return response.data;
+            } catch (error) {
+                lastError = error;
+                const isNetwork = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(error.code);
+                // Only retry pure connection failures, never timeouts/aborts or
+                // HTTP error responses.
+                if (!isNetwork || attempt === this.networkRetryAttempts) {
+                    break;
+                }
+                logger.warn('Orchestrator unreachable, retrying', { url, attempt: attempt + 1 });
+                await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        const agent = this.agents.get('ai-orchestrator');
+        if (agent) { agent.failedRequests++; }
+        throw new Error(`AI orchestrator call failed (${path}): ${lastError?.message || 'unknown error'}`);
+    }
+
+    /**
+     * Translate an ai-orchestrator workflow result into the chat response
+     * contract and the conversation-context updates the socket layer applies.
+     * The response `type` returned by the workflow drives the mapping
+     * deterministically.
+     */
+    mapWorkflowResult(workflow, { intent, startTime, sessionId }) {
+        const type = workflow?.type;
+
+        // The workflow needs more information or a confirmation from the user.
+        if (workflow?.needsHumanInput || type === 'human_input_required' || type === 'confirmation_required') {
+            const question = workflow.question
+                || workflow.message
+                || 'Could you provide a bit more detail so I can continue?';
+
+            return this.buildResult(
+                {
+                    content: question,
                     type: 'text',
-                    confidence: 0.3,
-                    source: 'fallback-human',
+                    confidence: 1,
+                    source: 'ai-orchestrator',
                     metadata: {
-                        escalationRequired: true,
-                        originalMessage: message.content
+                        intent,
+                        requiresUserResponse: true,
+                        responseType: type,
+                        requiredFields: workflow.requiredFields || [],
+                        details: workflow.details || null
                     }
                 },
-                conversationContextUpdates: {
-                    escalationRequested: true,
-                    fallbackUsed: true
+                {
+                    // Persist pending state so the next user reply is routed to the
+                    // workflow's feedback endpoint, not re-classified.
+                    pendingFeedback: { type, intent },
+                    lockedIntent: intent
                 },
-                processingTime: 100,
-                agentsInvolved: ['fallback']
-            };
-        } catch (error) {
-            logger.error('Fallback processing failed', { 
-                error: error.message, 
-                sessionId
+                startTime,
+                ['nlu-intent', 'ai-orchestrator']
+            );
+        }
+
+        // A policy block (auth required, prompt injection, limit exceeded, etc.).
+        if (type === 'policy_blocked') {
+            return this.buildResult(
+                {
+                    content: workflow.message || 'I cannot complete that request under current policy.',
+                    type: 'text',
+                    confidence: 1,
+                    source: 'policy-engine',
+                    metadata: { intent, policyCode: workflow.code, stage: workflow.stage }
+                },
+                { pendingFeedback: null, lockedIntent: null },
+                startTime,
+                ['ai-orchestrator']
+            );
+        }
+
+        // Workflow error → escalate deterministically.
+        if (type === 'error') {
+            return this.escalate(sessionId, { content: workflow.message }, startTime, new Error(workflow.error || 'workflow error'));
+        }
+
+        // Completed: a normal response.
+        const content = workflow?.response
+            || workflow?.message
+            || "I've processed your request.";
+
+        return this.buildResult(
+            {
+                content,
+                type: 'text',
+                confidence: 0.9,
+                source: 'ai-orchestrator',
+                metadata: { intent, policy: workflow?.policy || null }
+            },
+            // Clear any pending state once a turn completes.
+            { pendingFeedback: null, lockedIntent: null },
+            startTime,
+            ['nlu-intent', 'ai-orchestrator']
+        );
+    }
+
+    /**
+     * Deterministic human escalation. Emits an escalation event the agent
+     * surface can consume and returns a stable message.
+     */
+    escalate(sessionId, message, startTime, error) {
+        const escalationContext = {
+            escalationRequired: true,
+            escalationReason: error?.message || 'processing_error',
+            escalatedAt: new Date().toISOString()
+        };
+
+        if (this.escalationEnabled) {
+            this.emit('humanEscalation', {
+                sessionId,
+                reason: escalationContext.escalationReason,
+                originalMessage: message?.content
             });
-            throw error;
         }
+
+        return this.buildResult(
+            {
+                content: this.escalationEnabled
+                    ? "I'm connecting you with a support specialist who can help. Please hold on."
+                    : "I'm having trouble completing that right now. Please try again shortly.",
+                type: 'text',
+                confidence: 0.3,
+                source: 'human-escalation',
+                metadata: escalationContext
+            },
+            escalationContext,
+            startTime,
+            ['human-escalation']
+        );
     }
 
     /**
-     * Reserve agent for processing
+     * Shape the orchestrator result into the contract socketHandler expects.
      */
-    reserveAgent(agentId, sessionId) {
-        const loadInfo = this.agentLoadBalancer.get(agentId);
-        if (loadInfo) {
-            loadInfo.activeConversations++;
-        }
-
-        const agent = this.agents.get(agentId);
-        if (agent) {
-            agent.currentLoad++;
-            agent.totalRequests++;
-        }
-
-        logger.debug('Agent reserved', { agentId, sessionId });
+    buildResult(finalResponse, conversationContextUpdates, startTime, agentsInvolved) {
+        return {
+            finalResponse,
+            conversationContextUpdates,
+            processingTime: Date.now() - startTime,
+            agentsInvolved
+        };
     }
 
     /**
-     * Release agent after processing
+     * POST helper with AbortController-based timeout (so timed-out requests are
+     * actually cancelled, not left dangling).
      */
-    releaseAgent(agentId, sessionId) {
-        const loadInfo = this.agentLoadBalancer.get(agentId);
-        if (loadInfo && loadInfo.activeConversations > 0) {
-            loadInfo.activeConversations--;
+    async httpPost(url, body, extraHeaders = {}) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.requestTimeout);
+        try {
+            return await axios.post(url, body, {
+                timeout: this.requestTimeout,
+                signal: controller.signal,
+                headers: { 'Content-Type': 'application/json', ...extraHeaders }
+            });
+        } finally {
+            clearTimeout(timer);
         }
-
-        const agent = this.agents.get(agentId);
-        if (agent && agent.currentLoad > 0) {
-            agent.currentLoad--;
-        }
-
-        logger.debug('Agent released', { agentId, sessionId });
     }
 
     /**
-     * Get orchestrator health status
+     * Health status for the /health endpoint.
      */
     getHealthStatus() {
-        const agentStatuses = Array.from(this.agents.values()).map(agent => ({
+        const agentStatuses = Array.from(this.agents.values()).map((agent) => ({
             id: agent.id,
             name: agent.name,
             type: agent.type,
+            endpoint: agent.endpoint,
             isActive: agent.isActive,
             isHealthy: agent.isHealthy,
-            currentLoad: agent.currentLoad,
             totalRequests: agent.totalRequests,
-            successRate: agent.totalRequests > 0 ? (agent.successfulRequests / agent.totalRequests) * 100 : 0
+            failedRequests: agent.failedRequests
         }));
 
         return {
             status: 'healthy',
-            totalAgents: this.agents.size,
-            activeAgents: Array.from(this.agents.values()).filter(a => a.isActive).length,
-            healthyAgents: Array.from(this.agents.values()).filter(a => a.isHealthy).length,
-            activeConversations: this.activeConversations.size,
+            pipeline: ['nlu-intent', 'ai-orchestrator'],
+            activeRequests: this.activeRequests.size,
+            maxConcurrentRequests: this.maxConcurrentRequests,
             agentStatuses,
             uptime: process.uptime()
         };

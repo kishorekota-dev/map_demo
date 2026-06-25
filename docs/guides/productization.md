@@ -41,6 +41,12 @@ The current stack still assumes local JWT-style flows. For enterprise rollout yo
 - organization and workspace RBAC
 - per-tenant session policy and token issuer validation
 
+> ⚠️ **Not yet functional:** the enterprise asset generator accepts
+> `identity.provider: oidc|saml` and emits `OIDC_ISSUER_URL` / `OIDC_AUDIENCE`,
+> but there is **no OIDC/SAML token-issuer validation implemented** in the
+> services yet (only local JWT). Treat `oidc`/`saml` profiles as placeholders;
+> use `jwt` for working deployments.
+
 ### 2. Multi-Tenant Isolation
 
 Today the codebase is deployment-configurable, not fully multi-tenant. To become a reusable enterprise product you need:

@@ -19,12 +19,16 @@ class BankingChatWorkflow {
     this.policyEngine = policyEngine;
     this.slm = slmDataExtractor;
     
-    // Initialize OpenAI
+    // Initialize OpenAI.
+    // Determinism: temperature/top_p default to 0 and the seed is pinned so the
+    // same intent + collected data + tool results produce the same response.
     this.llm = new ChatOpenAI({
       openAIApiKey: config.openai.apiKey,
       modelName: config.openai.model,
       temperature: config.openai.temperature,
-      maxTokens: config.openai.maxTokens
+      topP: config.openai.topP,
+      maxTokens: config.openai.maxTokens,
+      modelKwargs: Number.isFinite(config.openai.seed) ? { seed: config.openai.seed } : {}
     });
     
     // Get checkpointer instance
@@ -46,6 +50,7 @@ class BankingChatWorkflow {
     const graphState = {
       sessionId: null,
       userId: null,
+      authToken: null,
       intent: null,
       question: null,
       conversationHistory: [],
@@ -327,6 +332,38 @@ class BankingChatWorkflow {
 
     try {
       const tools = intentMapper.getToolsForIntent(state.intent);
+
+      // Deterministic auth guard: banking tools require a propagated session
+      // token. Fail fast with a stable block (routed through the same terminal
+      // path as a policy block) instead of letting every tool call return a
+      // non-deterministic 401 from the banking service.
+      if (tools.length > 0 && intentMapper.requiresAuth(state.intent) && !state.authToken) {
+        logger.warn('Tool execution blocked: missing auth token', {
+          sessionId: state.sessionId,
+          intent: state.intent
+        });
+        const authBlock = this.policyEngine.block(
+          'pre_tool',
+          'authentication_required',
+          'Your session is not authenticated for this banking action. Please sign in and try again.',
+          { flags: ['missing_auth_token'], metadata: { intent: state.intent, tools } }
+        );
+        return {
+          ...state,
+          pendingTools: tools,
+          policyDecision: authBlock,
+          policyTrace: [...(state.policyTrace || []), authBlock.audit],
+          currentStep: 'policy_pre_tool',
+          finalResponse: {
+            type: 'policy_blocked',
+            stage: authBlock.stage,
+            code: authBlock.code,
+            message: authBlock.message,
+            policy: authBlock.audit
+          }
+        };
+      }
+
       const policyDecision = this.policyEngine.evaluateToolExecution({
         intent: state.intent,
         tools,
@@ -664,10 +701,18 @@ class BankingChatWorkflow {
    */
   buildToolParameters(tool, state) {
     const params = { ...state.collectedData };
-    
-    // Add session context
+
+    // Add session + authenticated context. The banking tools require authToken
+    // (Authorization: Bearer <jwt>); without it every call 401s. Propagate the
+    // session JWT and userId so tool execution is correct and reproducible.
     params.sessionId = state.sessionId;
-    
+    if (state.userId) {
+      params.userId = state.userId;
+    }
+    if (state.authToken) {
+      params.authToken = state.authToken;
+    }
+
     return params;
   }
 

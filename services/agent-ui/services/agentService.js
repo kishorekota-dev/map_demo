@@ -1,24 +1,111 @@
 const EventEmitter = require('events');
 const axios = require('axios');
 const logger = require('./logger');
+const { getRedisClient } = require('./redisClient');
+
+// Redis hash key under which agent state is persisted (field = agentId).
+const AGENTS_REDIS_KEY = 'agent-ui:agents';
 
 class AgentService extends EventEmitter {
     constructor() {
         super();
+        // In-memory working copy / read layer. Backed by Redis via write-through
+        // so state survives restarts and is shared across instances. If Redis is
+        // unavailable we fall back to in-memory only (warning logged once).
         this.agents = new Map();
         this.agentSessions = new Map();
         this.agentCapabilities = new Map();
         this.statusUpdateInterval = parseInt(process.env.AGENT_STATUS_UPDATE_INTERVAL) || 30000;
         this.idleTimeout = parseInt(process.env.AGENT_IDLE_TIMEOUT) || 1800000; // 30 minutes
         this.maxConcurrentChats = parseInt(process.env.MAX_CONCURRENT_CHATS) || 10;
-        
+
+        // Hydrate from Redis (if available) before monitoring kicks in.
+        this.ready = this.hydrateFromStore();
         this.setupStatusMonitoring();
-        
+
         logger.info('AgentService initialized', {
             statusUpdateInterval: this.statusUpdateInterval,
             idleTimeout: this.idleTimeout,
             maxConcurrentChats: this.maxConcurrentChats
         });
+    }
+
+    /**
+     * Serialize an agent for Redis. currentChats is a Set; store it as an array.
+     */
+    serializeAgent(agent) {
+        return JSON.stringify({
+            ...agent,
+            currentChats: Array.from(agent.currentChats || [])
+        });
+    }
+
+    /**
+     * Rebuild an agent object from its stored JSON, restoring Set/Date types.
+     */
+    deserializeAgent(json) {
+        const data = JSON.parse(json);
+        data.currentChats = new Set(data.currentChats || []);
+        // Restore Date fields that JSON serialized to strings.
+        for (const field of ['registeredAt', 'lastActivity', 'lastStatusUpdate']) {
+            if (data[field]) {
+                data[field] = new Date(data[field]);
+            }
+        }
+        return data;
+    }
+
+    /**
+     * Write-through persist a single agent to Redis (no-op if Redis is down).
+     */
+    async persistAgent(agentId) {
+        try {
+            const client = await getRedisClient();
+            if (!client) return; // in-memory fallback
+            const agent = this.agents.get(agentId);
+            if (agent) {
+                await client.hSet(AGENTS_REDIS_KEY, agentId, this.serializeAgent(agent));
+            }
+        } catch (error) {
+            logger.warn('Failed to persist agent to Redis', { agentId, error: error.message });
+        }
+    }
+
+    /**
+     * Remove an agent from the Redis store (no-op if Redis is down).
+     */
+    async removeAgentFromStore(agentId) {
+        try {
+            const client = await getRedisClient();
+            if (!client) return;
+            await client.hDel(AGENTS_REDIS_KEY, agentId);
+        } catch (error) {
+            logger.warn('Failed to remove agent from Redis', { agentId, error: error.message });
+        }
+    }
+
+    /**
+     * Load previously persisted agents from Redis into the in-memory map.
+     */
+    async hydrateFromStore() {
+        try {
+            const client = await getRedisClient();
+            if (!client) {
+                logger.warn('AgentService running without Redis persistence (in-memory only)');
+                return;
+            }
+            const stored = await client.hGetAll(AGENTS_REDIS_KEY);
+            for (const [agentId, json] of Object.entries(stored || {})) {
+                const agent = this.deserializeAgent(json);
+                this.agents.set(agentId, agent);
+                this.agentCapabilities.set(agentId, new Set(agent.capabilities || []));
+            }
+            if (Object.keys(stored || {}).length > 0) {
+                logger.info('Hydrated agents from Redis', { count: this.agents.size });
+            }
+        } catch (error) {
+            logger.warn('Failed to hydrate agents from Redis', { error: error.message });
+        }
     }
 
     /**
@@ -69,6 +156,7 @@ class AgentService extends EventEmitter {
 
             this.agents.set(agentId, agent);
             this.agentCapabilities.set(agentId, new Set(agent.capabilities));
+            await this.persistAgent(agentId); // write-through to Redis
 
             logger.agent('agent_registered', agentId, {
                 name: agent.name,
@@ -129,6 +217,8 @@ class AgentService extends EventEmitter {
             if (details.reason) {
                 agent.statusReason = details.reason;
             }
+
+            await this.persistAgent(agentId); // write-through to Redis
 
             logger.agent('status_updated', agentId, {
                 previousStatus,
@@ -194,6 +284,8 @@ class AgentService extends EventEmitter {
             if (agent.currentChats.size >= agent.preferences.maxConcurrentChats) {
                 await this.updateAgentStatus(agentId, 'busy', { reason: 'max_capacity_reached' });
             }
+
+            await this.persistAgent(agentId); // write-through to Redis
 
             logger.agent('chat_assigned', agentId, {
                 sessionId: chatSession.sessionId,
@@ -262,6 +354,8 @@ class AgentService extends EventEmitter {
             if (agent.currentChats.size === 0 && agent.status === 'busy') {
                 await this.updateAgentStatus(agentId, 'available', { reason: 'chat_completed' });
             }
+
+            await this.persistAgent(agentId); // write-through to Redis
 
             logger.agent('chat_removed', agentId, {
                 sessionId,
@@ -424,7 +518,10 @@ class AgentService extends EventEmitter {
             const agent = this.agents.get(agentId);
             if (agent) {
                 agent.lastActivity = new Date();
-                
+                // Fire-and-forget persist (this method stays synchronous and is
+                // called on every agent action; we don't want to block on Redis).
+                this.persistAgent(agentId).catch(() => {});
+
                 logger.debug('Agent activity updated', {
                     agentId,
                     activity,

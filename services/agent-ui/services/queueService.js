@@ -1,9 +1,16 @@
 const EventEmitter = require('events');
 const logger = require('./logger');
+const { getRedisClient } = require('./redisClient');
+
+// Redis key under which a full queue snapshot is persisted.
+const QUEUE_REDIS_KEY = 'agent-ui:queue';
 
 class QueueService extends EventEmitter {
     constructor() {
         super();
+        // In-memory working copy / read layer, backed by Redis via a periodic
+        // write-through snapshot so the queue survives restarts and is shared
+        // across instances. Falls back to in-memory only if Redis is down.
         this.chatQueue = new Map();
         this.priorityQueue = [];
         this.escalationQueue = new Map();
@@ -15,21 +22,87 @@ class QueueService extends EventEmitter {
             averageWaitTime: 0,
             currentQueueSize: 0
         };
-        
+
         this.maxQueueSize = parseInt(process.env.MAX_QUEUE_SIZE) || 100;
         this.maxWaitTime = parseInt(process.env.MAX_WAIT_TIME) || 900000; // 15 minutes
         this.escalationThreshold = parseInt(process.env.ESCALATION_THRESHOLD) || 600000; // 10 minutes
         this.queueCheckInterval = parseInt(process.env.QUEUE_CHECK_INTERVAL) || 5000; // 5 seconds
-        
+
+        // Hydrate persisted queue state before monitoring/processing starts.
+        this.ready = this.hydrateFromStore();
         this.setupQueueMonitoring();
         this.initializeRoutingRules();
-        
+
         logger.info('QueueService initialized', {
             maxQueueSize: this.maxQueueSize,
             maxWaitTime: this.maxWaitTime,
             escalationThreshold: this.escalationThreshold,
             queueCheckInterval: this.queueCheckInterval
         });
+    }
+
+    /**
+     * Serialize the full queue state for Redis. Maps are stored as arrays of
+     * [key, value]; Date fields survive JSON as ISO strings and are restored
+     * on hydration.
+     */
+    serializeQueue() {
+        return JSON.stringify({
+            chatQueue: Array.from(this.chatQueue.entries()),
+            escalationQueue: Array.from(this.escalationQueue.entries()),
+            queueMetrics: this.queueMetrics
+        });
+    }
+
+    /**
+     * Write-through persist the whole queue snapshot to Redis (no-op if down).
+     */
+    async persistQueue() {
+        try {
+            const client = await getRedisClient();
+            if (!client) return; // in-memory fallback
+            await client.set(QUEUE_REDIS_KEY, this.serializeQueue());
+        } catch (error) {
+            logger.warn('Failed to persist queue to Redis', { error: error.message });
+        }
+    }
+
+    /**
+     * Load a previously persisted queue snapshot from Redis and rebuild the
+     * in-memory maps and the priority ordering.
+     */
+    async hydrateFromStore() {
+        try {
+            const client = await getRedisClient();
+            if (!client) {
+                logger.warn('QueueService running without Redis persistence (in-memory only)');
+                return;
+            }
+            const raw = await client.get(QUEUE_REDIS_KEY);
+            if (!raw) return;
+
+            const data = JSON.parse(raw);
+
+            for (const [queueId, entry] of data.chatQueue || []) {
+                // Restore Date fields used for wait-time calculations.
+                if (entry.queuedAt) entry.queuedAt = new Date(entry.queuedAt);
+                this.chatQueue.set(queueId, entry);
+                this.priorityQueue.push(entry);
+            }
+            for (const [escalationId, escalation] of data.escalationQueue || []) {
+                this.escalationQueue.set(escalationId, escalation);
+            }
+            if (data.queueMetrics) {
+                this.queueMetrics = { ...this.queueMetrics, ...data.queueMetrics };
+                this.queueMetrics.currentQueueSize = this.chatQueue.size;
+            }
+
+            if (this.chatQueue.size > 0) {
+                logger.info('Hydrated queue from Redis', { count: this.chatQueue.size });
+            }
+        } catch (error) {
+            logger.warn('Failed to hydrate queue from Redis', { error: error.message });
+        }
     }
 
     /**
@@ -84,6 +157,7 @@ class QueueService extends EventEmitter {
             // Update metrics
             this.queueMetrics.totalQueued++;
             this.queueMetrics.currentQueueSize = this.chatQueue.size;
+            await this.persistQueue(); // write-through to Redis
 
             logger.queue('chat_queued', queueId, {
                 sessionId: chatSession.sessionId,
@@ -162,6 +236,9 @@ class QueueService extends EventEmitter {
     async attemptAssignment(queueEntry) {
         try {
             queueEntry.attempts++;
+            // Persist updated attempt count (fire-and-forget; assignment flow
+            // continues regardless of Redis availability).
+            this.persistQueue().catch(() => {});
 
             // Get available agents based on requirements
             const availableAgents = await this.getMatchingAgents(queueEntry.requirements);
@@ -311,6 +388,7 @@ class QueueService extends EventEmitter {
             // Calculate wait time
             const waitTime = Date.now() - queueEntry.queuedAt.getTime();
             this.updateAverageWaitTime(waitTime);
+            await this.persistQueue(); // write-through to Redis
 
             logger.queue('chat_dequeued', queueId, {
                 sessionId: queueEntry.sessionId,
@@ -359,6 +437,7 @@ class QueueService extends EventEmitter {
 
             this.escalationQueue.set(escalationId, escalation);
             this.queueMetrics.totalEscalated++;
+            await this.persistQueue(); // write-through to Redis
 
             logger.queue('chat_escalated', queueEntry.queueId, {
                 escalationId,

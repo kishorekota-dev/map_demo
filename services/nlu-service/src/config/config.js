@@ -11,8 +11,18 @@ module.exports = {
   },
 
   nlu: {
-    // Intent detection configuration
-    confidenceThreshold: parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.6,
+    // Intent detection configuration.
+    // Read INTENT_CONFIDENCE_THRESHOLD first (the documented var) and fall back
+    // to CONFIDENCE_THRESHOLD. NaN-safe so an explicit 0 is honoured. Below this
+    // threshold the deterministic fallback intent is used.
+    confidenceThreshold: (() => {
+      const t = parseFloat(process.env.INTENT_CONFIDENCE_THRESHOLD ?? process.env.CONFIDENCE_THRESHOLD);
+      return Number.isFinite(t) ? t : 0.6;
+    })(),
+    entityConfidenceThreshold: (() => {
+      const t = parseFloat(process.env.ENTITY_CONFIDENCE_THRESHOLD);
+      return Number.isFinite(t) ? t : 0.5;
+    })(),
     maxIntents: parseInt(process.env.MAX_INTENTS) || 5,
     
     // Entity extraction settings

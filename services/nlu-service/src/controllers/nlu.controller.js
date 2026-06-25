@@ -6,6 +6,8 @@
 const nluService = require('../services/nlu.service');
 const bankingNLU = require('../services/banking-nlu.service');
 const dialogflowService = require('../services/dialogflow.service');
+const intentVocabulary = require('../services/intent-vocabulary');
+const config = require('../config/config');
 const logger = require('../utils/logger');
 
 class NLUController {
@@ -28,27 +30,47 @@ class NLUController {
         sessionId
       });
 
-      // Use DialogFlow for intent detection
+      // Use DialogFlow for intent detection (advisory)
       const dialogflowResult = await dialogflowService.detectIntent(
-        user_input, 
-        sessionId, 
+        user_input,
+        sessionId,
         languageCode
       );
-      
-      // Also run banking-specific analysis
+
+      // Run the deterministic banking-specific analysis (primary)
       const bankingIntent = await bankingNLU.detectBankingIntent(user_input);
-      
+
       // Extract entities
       const bankingEntities = bankingNLU.extractBankingEntities(user_input);
-      
+
+      // Deterministic precedence: prefer the banking classifier when it clears
+      // the confidence threshold; only then consider DialogFlow. Either way the
+      // exposed intent is canonical, so /analyze and /intents agree.
+      const threshold = config.nlu.confidenceThreshold;
+      let primaryRaw = null;
+      let primaryConfidence = 0;
+      let primarySource = 'fallback';
+      if (bankingIntent && bankingIntent.confidence >= threshold) {
+        primaryRaw = bankingIntent.intent;
+        primaryConfidence = bankingIntent.confidence;
+        primarySource = 'banking-nlu';
+      } else if (dialogflowResult && (dialogflowResult.confidence ?? 0) >= threshold) {
+        primaryRaw = dialogflowResult.intent;
+        primaryConfidence = dialogflowResult.confidence;
+        primarySource = 'dialogflow';
+      }
+      const canonicalIntent = intentVocabulary.toCanonical(primaryRaw);
+
       // Combine results
       const response = {
         success: true,
         data: {
-          // Primary intent from DialogFlow
-          intent: dialogflowResult.intent,
-          confidence: dialogflowResult.confidence,
-          
+          // Canonical, deterministic-first primary intent
+          intent: canonicalIntent,
+          rawIntent: primaryRaw,
+          source: primarySource,
+          confidence: primaryConfidence,
+
           // DialogFlow specific data
           dialogflow: {
             fulfillmentText: dialogflowResult.fulfillmentText,
@@ -72,17 +94,19 @@ class NLUController {
           
           // Metadata
           metadata: {
-            source: 'dialogflow',
+            source: primarySource,
             sessionId,
             userId,
             timestamp: new Date().toISOString()
           }
         }
       };
-      
+
       logger.info('User input analysis complete', {
-        intent: dialogflowResult.intent,
-        confidence: dialogflowResult.confidence,
+        intent: canonicalIntent,
+        rawIntent: primaryRaw,
+        source: primarySource,
+        confidence: primaryConfidence,
         entitiesCount: response.data.entities.length
       });
       
