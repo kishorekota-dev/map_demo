@@ -15,10 +15,12 @@ const AgentService = require('./services/agentService');
 const QueueService = require('./services/queueService');
 const ChatClientService = require('./services/chatClientService');
 const SocketManager = require('./services/socketManager');
+const { closeRedisClient } = require('./services/redisClient');
 
 // Import routes
 const agentsRoutes = require('./routes/agents');
 const queueRoutes = require('./routes/queue');
+const authRoutes = require('./routes/auth');
 
 // Load environment variables
 require('dotenv').config({ path: '.env.development' });
@@ -348,6 +350,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentsRoutes);
 app.use('/api/queue', queueRoutes);
 
@@ -409,13 +412,15 @@ async function shutdown() {
             queueService?.cleanup(),
             chatClientService?.cleanup(),
             socketManager?.cleanup()
-        ]).then(() => {
+        ]).then(async () => {
             redisClient.quit();
+            await closeRedisClient(); // close the shared agent/queue state client
             logger.info('Graceful shutdown completed');
             process.exit(0);
-        }).catch((error) => {
+        }).catch(async (error) => {
             logger.error('Error during shutdown', { error: error.message });
             redisClient.quit();
+            await closeRedisClient();
             process.exit(1);
         });
     });

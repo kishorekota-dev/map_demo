@@ -101,6 +101,40 @@ class FraudController {
       next(error);
     }
   }
+
+  /**
+   * Verify a flagged alert in a single deterministic call. isLegitimate === true
+   * resolves the alert as a false positive; false confirms it as fraud. This
+   * backs the customer-facing verify_transaction intent so the orchestrator does
+   * not need to choose between two contradictory tools.
+   */
+  async verifyTransaction(req, res, next) {
+    try {
+      const { alertId } = req.params;
+      const { isLegitimate, notes } = req.body;
+      const resolvedBy = req.user.userId;
+
+      if (typeof isLegitimate !== 'boolean') {
+        return res.status(400).json({ success: false, error: 'isLegitimate (boolean) is required' });
+      }
+
+      const alert = isLegitimate
+        ? await FraudRepository.markAsFalsePositive(alertId, resolvedBy, notes)
+        : await FraudRepository.confirmFraud(alertId, resolvedBy, notes, null);
+
+      if (!alert) {
+        return res.status(404).json({ success: false, error: 'Fraud alert not found' });
+      }
+
+      const resolution = isLegitimate ? 'false_positive' : 'confirmed_fraud';
+      logger.warn(`Fraud alert ${alertId} verified by user: ${resolution}`);
+
+      res.json({ success: true, message: `Alert verified (${resolution})`, data: alert });
+    } catch (error) {
+      logger.error('Error verifying transaction/alert:', error);
+      next(error);
+    }
+  }
 }
 
 module.exports = new FraudController();

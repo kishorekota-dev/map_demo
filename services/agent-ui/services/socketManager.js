@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const http = require('http');
 const socketIo = require('socket.io');
+const jwt = require('jsonwebtoken');
 const logger = require('./logger');
 
 class SocketManager extends EventEmitter {
@@ -651,9 +652,46 @@ class SocketManager extends EventEmitter {
      * Service integration methods (to be connected with other services)
      */
     async validateAgentAuth(agentId, token) {
-        // This would integrate with authentication service
-        this.emit('validateAuth', { agentId, token });
-        return true; // Placeholder
+        // SECURITY: verify a real, server-issued JWT. Previously this always
+        // returned true, which let any browser self-issue an agent identity.
+        // The token must be signed with the shared JWT_SECRET used by the
+        // other services and must identify the same agent that is connecting.
+        try {
+            if (!token || typeof token !== 'string') {
+                logger.warn('Agent auth rejected: missing token', { agentId });
+                return false;
+            }
+
+            const secret = process.env.JWT_SECRET;
+            if (!secret) {
+                // Fail closed: without a secret we cannot verify anything.
+                logger.error('Agent auth rejected: JWT_SECRET is not configured');
+                return false;
+            }
+
+            const decoded = jwt.verify(token, secret);
+
+            // Bind the token to the connecting agentId. Accept common claim
+            // names used across the services (agentId / sub / id / userId).
+            const tokenAgentId =
+                decoded.agentId || decoded.sub || decoded.id || decoded.userId;
+
+            if (agentId && tokenAgentId && String(tokenAgentId) !== String(agentId)) {
+                logger.warn('Agent auth rejected: token/agentId mismatch', {
+                    agentId,
+                    tokenAgentId
+                });
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            logger.warn('Agent auth rejected: invalid token', {
+                agentId,
+                error: error.message
+            });
+            return false;
+        }
     }
 
     async updateAgentStatus(agentId, statusData) {

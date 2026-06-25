@@ -1,9 +1,16 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
-const serviceRegistry = require('../services/serviceRegistry');
-const loadBalancer = require('../services/loadBalancer');
-const circuitBreaker = require('../services/circuitBreaker');
+const serviceRegistryModule = require('../services/serviceRegistry');
+const loadBalancerModule = require('../services/loadBalancer');
+const circuitBreakerModule = require('../services/circuitBreaker');
 const logger = require('../utils/logger');
 const { recordProxyMetrics } = require('../routes/metrics');
+
+// These modules export factory singletons rather than ready-to-use instances.
+// Instantiate them here so the proxy uses the same shared singletons as the
+// rest of the gateway. The load balancer depends on the service registry.
+const serviceRegistry = serviceRegistryModule.getInstance();
+const loadBalancer = loadBalancerModule.getInstance(serviceRegistry);
+const circuitBreaker = circuitBreakerModule.getInstance();
 
 /**
  * Create proxy middleware for routing requests to microservices
@@ -26,25 +33,28 @@ const createServiceProxy = (options) => {
     timeout,
     
     // Dynamic target resolution using service discovery
-    router: async (req) => {
+    router: (req) => {
       try {
-        // Get service instance from load balancer
-        const serviceInstance = await loadBalancer.getServiceInstance(serviceName);
-        
+        // Get service instance from load balancer (returns the registered
+        // service object, which stores a full `url`).
+        const serviceInstance = loadBalancer.getServiceInstance(serviceName);
+
         if (!serviceInstance) {
           logger.warn(`No healthy instances found for service: ${serviceName}`);
-          
+
           // Fallback to environment variable
           const fallbackUrl = getFallbackUrl(serviceName);
           if (fallbackUrl) {
             logger.info(`Using fallback URL for ${serviceName}: ${fallbackUrl}`);
             return fallbackUrl;
           }
-          
+
           throw new Error(`Service ${serviceName} is unavailable`);
         }
-        
-        const targetUrl = `http://${serviceInstance.host}:${serviceInstance.port}`;
+
+        // The registry stores the target as `url` (e.g. http://localhost:3005),
+        // not separate host/port fields.
+        const targetUrl = serviceInstance.url;
         logger.debug(`Routing request to ${serviceName}`, {
           target: targetUrl,
           path: req.path,
@@ -165,13 +175,17 @@ const createServiceProxy = (options) => {
  * @returns {string|null} Fallback URL or null
  */
 const getFallbackUrl = (serviceName) => {
+  // Keys must match the standardized service names registered in the service
+  // registry (chat-backend, banking, nlp, nlu, mcp, ai-orchestrator).
   const fallbackMap = {
     'chat-backend': process.env.CHAT_BACKEND_URL,
-    'poc-banking-service': process.env.BANKING_SERVICE_URL,
-    'poc-nlu-service': process.env.NLU_SERVICE_URL,
-    'poc-mcp-service': process.env.MCP_SERVICE_URL
+    'banking': process.env.BANKING_SERVICE_URL,
+    'nlp': process.env.NLP_SERVICE_URL || process.env.NLU_SERVICE_URL,
+    'nlu': process.env.NLU_SERVICE_URL,
+    'mcp': process.env.MCP_SERVICE_URL,
+    'ai-orchestrator': process.env.AI_ORCHESTRATOR_URL
   };
-  
+
   return fallbackMap[serviceName] || null;
 };
 

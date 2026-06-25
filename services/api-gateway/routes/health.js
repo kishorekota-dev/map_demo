@@ -9,7 +9,8 @@ const services = {
   'banking': process.env.BANKING_SERVICE_URL || 'http://localhost:3005',
   'nlp': defaultNlpServiceUrl,
   'nlu': process.env.NLU_SERVICE_URL || 'http://localhost:3003',
-  'mcp': process.env.MCP_SERVICE_URL || 'http://localhost:3004'
+  'mcp': process.env.MCP_SERVICE_URL || 'http://localhost:3004',
+  'ai-orchestrator': process.env.AI_ORCHESTRATOR_URL || 'http://localhost:3007'
 };
 
 /**

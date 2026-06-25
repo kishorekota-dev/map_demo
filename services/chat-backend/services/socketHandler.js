@@ -106,10 +106,100 @@ class SocketHandler {
             this.handlePing(socket, data);
         });
 
+        // Generic agent-surface request/response protocol (used by agent-ui).
+        // Every request gets exactly one 'response' so the client never hangs.
+        socket.on('request', async (envelope) => {
+            await this.handleAgentRequest(socket, envelope);
+        });
+
         // Error handling
         socket.on('error', (error) => {
             this.handleSocketError(socket, error);
         });
+    }
+
+    /**
+     * Generic request dispatcher for the agent dashboard. The agent-ui wraps all
+     * of its operations in a { requestId, type, data } envelope and awaits a
+     * matching 'response' { requestId, success, result|error }. Without this the
+     * client times out on every call. Routing is a fixed switch (deterministic).
+     */
+    async handleAgentRequest(socket, envelope = {}) {
+        const { requestId, type, data = {} } = envelope;
+        const respond = (success, payload) => {
+            socket.emit('response', success
+                ? { requestId, success: true, result: payload }
+                : { requestId, success: false, error: payload });
+        };
+
+        try {
+            const clientInfo = this.connectedClients.get(socket.id);
+            if (!clientInfo || !clientInfo.isAuthenticated) {
+                return respond(false, 'Not authenticated');
+            }
+
+            switch (type) {
+                case 'getSessionHistory': {
+                    const session = await this.sessionManager.getSession(data.sessionId);
+                    if (!session) return respond(false, 'Session not found');
+                    const history = await this.chatService.getMessageHistory?.(data.sessionId)
+                        ?? session.messages
+                        ?? session.state?.conversationHistory
+                        ?? [];
+                    return respond(true, { sessionId: data.sessionId, messages: history });
+                }
+
+                case 'sendMessage': {
+                    // An agent posting a message into a customer session.
+                    await this.chatService.sendResponse(
+                        data.sessionId,
+                        { content: data.content, type: data.type || 'text' },
+                        { agentId: clientInfo.userId, agentType: 'human' }
+                    );
+                    return respond(true, { sessionId: data.sessionId, delivered: true });
+                }
+
+                case 'assignAgent': {
+                    await this.sessionManager.updateSession(data.sessionId, {
+                        state: { assignedAgentId: data.agentId || clientInfo.userId, assignmentStatus: 'assigned' }
+                    });
+                    this.broadcastToSession(data.sessionId, 'agentAssigned', {
+                        sessionId: data.sessionId, agentId: data.agentId || clientInfo.userId
+                    });
+                    return respond(true, { sessionId: data.sessionId, assigned: true });
+                }
+
+                case 'transferSession': {
+                    await this.sessionManager.updateSession(data.sessionId, {
+                        state: { assignedAgentId: data.toAgentId, assignmentStatus: 'transferred' }
+                    });
+                    this.broadcastToSession(data.sessionId, 'agentAssigned', {
+                        sessionId: data.sessionId, agentId: data.toAgentId, transferred: true
+                    });
+                    return respond(true, { sessionId: data.sessionId, transferred: true });
+                }
+
+                case 'endSession': {
+                    await this.sessionManager.updateSession(data.sessionId, {
+                        state: { assignmentStatus: 'ended' }
+                    });
+                    this.broadcastToSession(data.sessionId, 'sessionEnded', { sessionId: data.sessionId });
+                    return respond(true, { sessionId: data.sessionId, ended: true });
+                }
+
+                case 'updateAgentStatus': {
+                    // Agent presence is owned by agent-ui; acknowledge so the
+                    // client promise resolves deterministically.
+                    return respond(true, { agentId: clientInfo.userId, status: data.status });
+                }
+
+                default:
+                    return respond(false, `Unknown request type: ${type}`);
+            }
+        } catch (error) {
+            logger.error('Agent request failed', { type, error: error.message });
+            return respond(false, error.message);
+        }
     }
 
     /**
@@ -140,6 +230,13 @@ class SocketHandler {
 
         this.agentOrchestrator.on('processingCompleted', (data) => {
             this.broadcastToSession(data.sessionId, 'processingCompleted', data);
+        });
+
+        // Human-in-the-loop escalation: surface to the customer session and to
+        // the agent dashboard queue so a human can take over.
+        this.agentOrchestrator.on('humanEscalation', (data) => {
+            this.broadcastToSession(data.sessionId, 'humanEscalation', data);
+            this.io.to('agents').emit('escalationRequested', data);
         });
 
         // Session manager events
@@ -176,7 +273,10 @@ class SocketHandler {
 
                     authResult = {
                         authenticated: true,
-                        userId: decoded.userId || decoded.id || data.userId || 'anonymous'
+                        userId: decoded.userId || decoded.id || data.userId || 'anonymous',
+                        // Retain the verified JWT so it can be propagated to the AI
+                        // orchestrator and on to authenticated banking tool calls.
+                        authToken: data.token
                     };
                 } catch (error) {
                     authResult = { authenticated: false, userId: null };
@@ -191,6 +291,7 @@ class SocketHandler {
             if (authResult.authenticated) {
                 clientInfo.isAuthenticated = true;
                 clientInfo.userId = authResult.userId;
+                clientInfo.authToken = authResult.authToken || null;
                 clientInfo.authenticationTime = new Date();
 
                 logger.info('Client authenticated', {
@@ -438,12 +539,23 @@ class SocketHandler {
 
             // Get conversation context
             const session = await this.sessionManager.getSession(clientInfo.sessionId);
-            const conversationContext = session ? session.state : {};
+            const conversationContext = session ? { ...session.state } : {};
 
-            // Process through agent orchestrator
+            // Attach the authenticated identity + token so the orchestrator can
+            // run authenticated banking tools (and resolve pending workflows).
+            const enrichedMessage = {
+                ...message,
+                sessionId: clientInfo.sessionId,
+                userId: clientInfo.userId,
+                authToken: clientInfo.authToken || null
+            };
+            conversationContext.userId = clientInfo.userId;
+            conversationContext.authToken = clientInfo.authToken || null;
+
+            // Process through agent orchestrator (deterministic NLU -> workflow)
             const agentResult = await this.agentOrchestrator.processMessage(
                 clientInfo.sessionId,
-                message,
+                enrichedMessage,
                 conversationContext
             );
 

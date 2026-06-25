@@ -259,21 +259,57 @@ class AgentDashboard {
     }
 
     async promptAgentLogin() {
-        // For demo purposes, create a mock agent
-        const mockAgent = {
-            agentId: `agent_${Date.now()}`,
-            token: 'mock_token_' + Math.random().toString(36).substr(2, 9),
-            name: prompt('Enter your name:') || 'Agent',
-            email: prompt('Enter your email:') || 'agent@example.com',
-            department: 'customer-service',
-            role: 'agent',
-            capabilities: ['general-support', 'technical-support']
-        };
+        // SECURITY: the browser must NOT mint its own token. It collects
+        // credentials and exchanges them for a REAL, server-issued JWT via the
+        // server login endpoint (/api/auth/login), which proxies to the
+        // upstream authentication service. The socket layer then verifies that
+        // JWT against the shared JWT_SECRET before granting agent access.
+        // TODO: replace these prompt() dialogs with a proper login form/modal
+        // for credential capture.
+        const email = prompt('Enter your email:');
+        const password = prompt('Enter your password:');
 
-        // Store for next session
-        localStorage.setItem('agentData', JSON.stringify(mockAgent));
-        
-        return mockAgent;
+        if (!email || !password) {
+            this.showToast('Login cancelled', 'warning');
+            return null;
+        }
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success || !data.token) {
+                this.showToast(data.error || 'Authentication failed', 'error');
+                return null;
+            }
+
+            const profile = data.agent || {};
+            const agentData = {
+                agentId: profile.agentId || profile.id || email,
+                token: data.token, // real, server-issued JWT
+                name: profile.name || email,
+                email: profile.email || email,
+                department: profile.department || 'customer-service',
+                role: profile.role || 'agent',
+                capabilities: profile.capabilities || ['general-support']
+            };
+
+            // Cache profile for this session (the token is the source of trust;
+            // it is re-verified server-side on every socket authenticate).
+            localStorage.setItem('agentData', JSON.stringify(agentData));
+
+            return agentData;
+        } catch (error) {
+            console.error('Agent login failed:', error);
+            this.showToast('Unable to reach authentication service', 'error');
+            return null;
+        }
     }
 
     updateAgentInfo() {

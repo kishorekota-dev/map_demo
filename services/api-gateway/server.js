@@ -7,19 +7,25 @@ const compression = require('compression');
 const winston = require('winston');
 
 // Import middleware
-const authMiddleware = require('./middleware/auth');
+// These modules export OBJECTS with named members, so destructure the actual
+// exports rather than treating the module export as a function.
+const { authMiddleware } = require('./middleware/auth');
 const rateLimitMiddleware = require('./middleware/rateLimit');
-const proxyMiddleware = require('./middleware/proxy');
-const errorMiddleware = require('./middleware/error');
+const { createServiceProxy } = require('./middleware/proxy');
+const { errorHandler } = require('./middleware/error');
 const securityMiddleware = require('./middleware/security');
 
 // Import routes
 const healthRoutes = require('./routes/health');
 const metricsRoutes = require('./routes/metrics');
 
-// Import services
-const serviceRegistry = require('./services/serviceRegistry');
-const loadBalancer = require('./services/loadBalancer');
+// Import services. These modules export factory singletons via getInstance(),
+// so instantiate them here. Constructing the registry kicks off health checks;
+// the load balancer depends on the registry instance.
+const serviceRegistryModule = require('./services/serviceRegistry');
+const loadBalancerModule = require('./services/loadBalancer');
+const serviceRegistry = serviceRegistryModule.getInstance();
+const loadBalancer = loadBalancerModule.getInstance(serviceRegistry);
 
 // Initialize Express app
 const app = express();
@@ -99,7 +105,8 @@ app.get('/api', (req, res) => {
       banking: '/api/banking/*',
       nlp: '/api/nlp/*',
       nlu: '/api/nlu/*',
-      mcp: '/api/mcp/*'
+      mcp: '/api/mcp/*',
+      orchestrator: '/api/orchestrator/*'
     },
     authentication: 'JWT Bearer Token required for protected endpoints',
     documentation: '/api/docs',
@@ -111,9 +118,11 @@ app.get('/api', (req, res) => {
 // Service-specific routing with authentication and load balancing
 
 // Chat Backend compatibility routes used by the frontend.
+// Service names below match the registry's standardized names (chat-backend,
+// banking, nlp, nlu, mcp, ai-orchestrator) so routes resolve correctly.
 app.use('/api/chat',
   rateLimitMiddleware,
-  proxyMiddleware({
+  createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/chat': '/api/chat' },
     changeOrigin: true
@@ -122,7 +131,7 @@ app.use('/api/chat',
 
 app.use('/api/sessions',
   rateLimitMiddleware,
-  proxyMiddleware({
+  createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/sessions': '/api/sessions' },
     changeOrigin: true
@@ -131,7 +140,7 @@ app.use('/api/sessions',
 
 app.use('/api/health',
   rateLimitMiddleware,
-  proxyMiddleware({
+  createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/health': '/api/health' },
     changeOrigin: true
@@ -141,8 +150,8 @@ app.use('/api/health',
 // Banking Service Routes
 app.use('/api/banking',
   authMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-banking-service',
+  createServiceProxy({
+    serviceName: 'banking',
     pathRewrite: { '^/api/banking': '/api' },
     changeOrigin: true
   })
@@ -151,8 +160,8 @@ app.use('/api/banking',
 // NLP Compatibility Routes
 app.use('/api/nlp',
   authMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-nlu-service',
+  createServiceProxy({
+    serviceName: 'nlp',
     pathRewrite: { '^/api/nlp': '/api' },
     changeOrigin: true
   })
@@ -161,8 +170,8 @@ app.use('/api/nlp',
 // NLU Service Routes
 app.use('/api/nlu',
   authMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-nlu-service', 
+  createServiceProxy({
+    serviceName: 'nlu',
     pathRewrite: { '^/api/nlu': '/api' },
     changeOrigin: true
   })
@@ -171,9 +180,19 @@ app.use('/api/nlu',
 // MCP Service Routes
 app.use('/api/mcp',
   authMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-mcp-service',
+  createServiceProxy({
+    serviceName: 'mcp',
     pathRewrite: { '^/api/mcp': '/api' },
+    changeOrigin: true
+  })
+);
+
+// AI Orchestrator Routes
+app.use('/api/orchestrator',
+  authMiddleware,
+  createServiceProxy({
+    serviceName: 'ai-orchestrator',
+    pathRewrite: { '^/api/orchestrator': '/api' },
     changeOrigin: true
   })
 );
@@ -181,8 +200,8 @@ app.use('/api/mcp',
 // Public endpoints (no authentication required)
 app.use('/api/public/nlp',
   rateLimitMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-nlu-service',
+  createServiceProxy({
+    serviceName: 'nlp',
     pathRewrite: { '^/api/public/nlp': '/api/public' },
     changeOrigin: true
   })
@@ -190,15 +209,15 @@ app.use('/api/public/nlp',
 
 app.use('/api/public/nlu',
   rateLimitMiddleware,
-  proxyMiddleware({
-    serviceName: 'poc-nlu-service',
+  createServiceProxy({
+    serviceName: 'nlu',
     pathRewrite: { '^/api/public/nlu': '/api/public' },
     changeOrigin: true
   })
 );
 
 // Error handling middleware
-app.use(errorMiddleware);
+app.use(errorHandler);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -221,31 +240,39 @@ app.use('*', (req, res) => {
       banking: '/api/banking',
       nlp: '/api/nlp',
       nlu: '/api/nlu',
-      mcp: '/api/mcp'
+      mcp: '/api/mcp',
+      orchestrator: '/api/orchestrator'
     }
   });
 });
 
-// Initialize service registry and load balancer
-async function initializeServices() {
+// Initialize service registry and load balancer.
+// Both singletons are already constructed (and the registry has started its
+// health checks) when their getInstance() factories ran above. There are no
+// async initialize() methods to call, so this simply confirms readiness.
+function initializeServices() {
   try {
-    await serviceRegistry.initialize();
-    await loadBalancer.initialize();
-    
-    logger.info('Service registry and load balancer initialized');
+    const stats = serviceRegistry.getStatistics();
+    logger.info('Service registry and load balancer initialized', {
+      registeredServices: stats.total,
+      strategy: loadBalancer.strategy
+    });
   } catch (error) {
     logger.error('Failed to initialize services', { error: error.message });
   }
 }
 
-// Graceful shutdown handling
+// Graceful shutdown handling.
+// The registry exposes cleanup() (which stops its health-check timer and clears
+// state); the load balancer holds no external resources, so we just reset its
+// in-memory counters.
 const gracefulShutdown = (signal) => {
   logger.info(`${signal} received, shutting down API Gateway gracefully`);
-  
-  server.close(async () => {
+
+  server.close(() => {
     try {
-      await serviceRegistry.shutdown();
-      await loadBalancer.shutdown();
+      serviceRegistry.cleanup();
+      loadBalancer.resetStatistics();
       logger.info('API Gateway shutdown complete');
       process.exit(0);
     } catch (error) {
@@ -259,14 +286,14 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Start server
-const server = app.listen(PORT, async () => {
+const server = app.listen(PORT, () => {
   logger.info(`POC API Gateway running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Gateway endpoints available at http://localhost:${PORT}/api`);
   logger.info(`Health check available at http://localhost:${PORT}/health`);
-  
-  // Initialize services after server starts
-  await initializeServices();
+
+  // Confirm services are initialized after server starts
+  initializeServices();
 });
 
 module.exports = app;

@@ -15,8 +15,18 @@ class MCPProtocolServer extends EventEmitter {
     this.connections = new Map();
     this.bankingTools = new CompleteBankingTools();
     this.protocolVersion = '2024-11-05';
-    
-    logger.info('MCP Protocol Server initialized');
+
+    // Fail fast if any advertised tool lacks an execution handler — this is the
+    // self-half of the cross-service tool contract (the other half, that the
+    // orchestrator's referenced names all exist here, is a contract test).
+    const contract = this.bankingTools.assertToolContract();
+    if (!contract.valid) {
+      throw new Error(`Banking tool contract broken: ${contract.problems.join('; ')}`);
+    }
+
+    logger.info('MCP Protocol Server initialized', {
+      tools: this.bankingTools.getToolDefinitions().length
+    });
   }
 
   /**

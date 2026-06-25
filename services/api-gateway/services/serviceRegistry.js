@@ -58,6 +58,14 @@ class ServiceRegistry {
         healthPath: '/health',
         weight: 5,
         priority: 2
+      },
+      {
+        // AI Orchestrator service - reachable through the gateway at /api/orchestrator.
+        name: 'ai-orchestrator',
+        url: process.env.AI_ORCHESTRATOR_URL || 'http://localhost:3007',
+        healthPath: '/health',
+        weight: 10,
+        priority: 1
       }
     ];
 

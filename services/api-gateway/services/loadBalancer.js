@@ -15,7 +15,7 @@ class LoadBalancer {
    */
   getNextInstance(serviceName) {
     const service = this.serviceRegistry.getHealthyService(serviceName);
-    
+
     if (!service) {
       logger.warn('No healthy instances available', { service: serviceName });
       return null;
@@ -23,6 +23,50 @@ class LoadBalancer {
 
     // For single instance, just return it
     return service;
+  }
+
+  /**
+   * Get a healthy service instance for the proxy layer.
+   *
+   * This is the entry point used by the proxy middleware. It collects the
+   * available (healthy) instances and selects one using the configured
+   * strategy. Returns the full service object (which includes `url`), or null
+   * when no healthy instance exists.
+   */
+  getServiceInstance(serviceName) {
+    const instances = this.getAllInstances(serviceName);
+
+    if (instances.length === 0) {
+      logger.warn('No healthy instances available', { service: serviceName });
+      return null;
+    }
+
+    return this.selectInstance(instances);
+  }
+
+  /**
+   * Select an instance from a list using the configured strategy.
+   *
+   * Round-robin is the default and, together with least-connections and the
+   * other deterministic strategies, always yields the same result for a given
+   * internal state. The non-deterministic 'random' strategy is guarded below.
+   */
+  selectInstance(instances) {
+    switch (this.strategy) {
+      case 'weighted-round-robin':
+        return this.weightedRoundRobin(instances);
+      case 'least-connections':
+        return this.leastConnections(instances);
+      case 'random':
+        return this.random(instances);
+      case 'fastest-response':
+        return this.fastestResponse(instances);
+      case 'priority':
+        return this.priority(instances);
+      case 'round-robin':
+      default:
+        return this.roundRobin(instances);
+    }
   }
 
   /**
@@ -108,9 +152,22 @@ class LoadBalancer {
 
   /**
    * Random strategy
+   *
+   * Non-deterministic by design. To keep production routing deterministic and
+   * reproducible, the random strategy is disallowed when NODE_ENV is
+   * 'production': we log a warning and fall back to round-robin instead.
    */
   random(instances) {
     if (instances.length === 0) return null;
+
+    if (process.env.NODE_ENV === 'production') {
+      logger.warn(
+        "Load balancer 'random' strategy is disallowed in production; falling back to round-robin",
+        { service: instances[0].name }
+      );
+      return this.roundRobin(instances);
+    }
+
     const index = Math.floor(Math.random() * instances.length);
     return instances[index];
   }

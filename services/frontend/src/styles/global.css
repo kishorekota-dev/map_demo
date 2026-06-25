@@ -31,3 +31,18 @@ body{
   padding:24px;
   flex:1;
 }
+
+.app-header__logout{
+  margin-left:16px;
+  padding:6px 12px;
+  font:inherit;
+  color:white;
+  background:var(--accent);
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+}
+
+.app-header__logout:hover{
+  opacity:0.9;
+}

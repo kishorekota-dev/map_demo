@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { getRuntimeConfig } from '@/config/runtimeConfig';
 import authService from '@/services/authService';
@@ -11,10 +11,19 @@ import {
   ApiError 
 } from '@/types';
 
+// Extend the axios request config so we can flag a request that has already
+// been retried after a 401, preventing infinite refresh/retry loops.
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retried?: boolean;
+}
+
 class ApiService {
   private client: AxiosInstance;
   private sessionId: string;
   private baseURL: string;
+  // Holds the in-flight refresh request so that multiple concurrent 401s share
+  // a single token refresh instead of each firing their own.
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.baseURL = getRuntimeConfig().apiBaseUrl.replace(/\/$/, '');
@@ -65,22 +74,81 @@ class ApiService {
         }
         return response;
       },
-      (error) => {
+      async (error: AxiosError) => {
+        const originalRequest = error.config as RetryableRequestConfig | undefined;
+        const status = error.response?.status;
+
+        // Automatic 401 handling: attempt a single token refresh and retry the
+        // original request. If refresh succeeds, the request is replayed with a
+        // fresh Authorization header (added by the request interceptor). If it
+        // fails (or there is no refresh token), the user is logged out.
+        if (status === 401 && originalRequest && !originalRequest._retried) {
+          originalRequest._retried = true;
+
+          const refreshed = await this.refreshAccessToken();
+
+          if (refreshed) {
+            // Drop any stale Authorization header so the request interceptor
+            // re-attaches the newly minted access token on the replay.
+            if (originalRequest.headers) {
+              delete originalRequest.headers['Authorization'];
+            }
+            return this.client(originalRequest);
+          }
+
+          // Refresh failed -> force a clean logout so route guards redirect.
+          this.handleAuthFailure();
+        }
+
         const apiError: ApiError = {
-          message: error.response?.data?.message || error.message || 'Unknown error',
-          status: error.response?.status || 0,
-          endpoint: error.config?.url,
+          message:
+            (error.response?.data as any)?.message || error.message || 'Unknown error',
+          status: status || 0,
+          endpoint: originalRequest?.url,
           timestamp: new Date(),
         };
 
         console.error('API Response Error:', apiError);
-        
+
         // Dispatch custom event for global error handling
         window.dispatchEvent(new CustomEvent('api:error', { detail: apiError }));
-        
+
         return Promise.reject(apiError);
       }
     );
+  }
+
+  /**
+   * Refresh the access token, coalescing concurrent callers onto a single
+   * refresh request. Returns true when a new access token is available.
+   *
+   * NOTE: This relies on authService.refreshToken(), which calls the auth
+   * service's POST /auth/refresh endpoint using the stored refresh token. If no
+   * refresh token is present (e.g. manual-token auth), refreshToken() returns
+   * null and this resolves to false, triggering a logout-on-401 flow.
+   */
+  private async refreshAccessToken(): Promise<boolean> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = authService
+        .refreshToken()
+        .then((tokens) => tokens !== null)
+        .catch(() => false)
+        .finally(() => {
+          this.refreshPromise = null;
+        });
+    }
+
+    return this.refreshPromise;
+  }
+
+  /**
+   * Clear stored credentials and notify the app so the Zustand auth store can
+   * react (redirecting to /auth). Decoupled from the router via a window event
+   * to keep this service free of React/router dependencies.
+   */
+  private handleAuthFailure(): void {
+    authService.logout();
+    window.dispatchEvent(new CustomEvent('auth:logout'));
   }
 
   public generateSessionId(): string {

@@ -1,7 +1,35 @@
 const express = require('express');
-const { body, param, query } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const logger = require('../utils/logger');
+
+/**
+ * Enforce express-validator rules. Without this, the declared body()/param()
+ * validators are decorative and malformed/empty intents reach the workflow.
+ */
+function handleValidation(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: errors.array().map(e => ({ field: e.path, message: e.msg }))
+    });
+  }
+  return next();
+}
+
+/**
+ * Extract the bearer token from the Authorization header (or explicit body
+ * field) so it can be propagated into banking tool execution.
+ */
+function extractAuthToken(req) {
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    return header.slice('Bearer '.length).trim();
+  }
+  return req.body?.authToken || null;
+}
 
 /**
  * POST /api/orchestrator/process
@@ -17,15 +45,18 @@ router.post('/process',
     body('question').notEmpty().withMessage('Question is required'),
     body('userId').notEmpty().withMessage('User ID is required (from authenticated session)')
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { sessionId, intent, question, userId, metadata } = req.body;
       const { workflowService } = req.app.locals;
+      const authToken = extractAuthToken(req);
 
       logger.info('Processing orchestrator request', {
         sessionId,
         intent,
-        userId
+        userId,
+        hasAuthToken: !!authToken
       });
 
       // Process through workflow with authenticated user context
@@ -34,6 +65,7 @@ router.post('/process',
         intent,
         question,
         userId,
+        authToken,
         metadata
       });
 
@@ -66,10 +98,12 @@ router.post('/feedback',
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('response').notEmpty().withMessage('Response is required')
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { sessionId, response, confirmed } = req.body;
       const { workflowService } = req.app.locals;
+      const authToken = extractAuthToken(req);
 
       logger.info('Processing human feedback', {
         sessionId,
@@ -81,7 +115,8 @@ router.post('/feedback',
       const result = await workflowService.processHumanFeedback({
         sessionId,
         response,
-        confirmed
+        confirmed,
+        authToken
       });
 
       res.json({
@@ -111,6 +146,7 @@ router.get('/session/:sessionId',
   [
     param('sessionId').notEmpty().withMessage('Session ID is required')
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { sessionId } = req.params;
@@ -162,6 +198,7 @@ router.post('/session',
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('userId').notEmpty().withMessage('User ID is required')
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { sessionId, userId, intent, metadata } = req.body;
@@ -205,6 +242,7 @@ router.delete('/session/:sessionId',
   [
     param('sessionId').notEmpty().withMessage('Session ID is required')
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { sessionId } = req.params;
@@ -239,6 +277,7 @@ router.get('/user/:userId/sessions',
     param('userId').notEmpty().withMessage('User ID is required'),
     query('status').optional().isIn(['active', 'waiting_human_input', 'completed', 'failed', 'expired'])
   ],
+  handleValidation,
   async (req, res) => {
     try {
       const { userId } = req.params;

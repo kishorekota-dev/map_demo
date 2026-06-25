@@ -1,11 +1,15 @@
 const EventEmitter = require('events');
 const logger = require('./logger');
+const KeyedMutex = require('./keyedMutex');
 
 class SessionManager extends EventEmitter {
     constructor() {
         super();
         this.sessions = new Map();
         this.userSessions = new Map(); // userId -> Set of sessionIds
+        // Serializes per-session read-modify-write so concurrent updates on the
+        // same session don't clobber each other (last-writer-wins).
+        this.mutex = new KeyedMutex();
         this.sessionTTL = parseInt(process.env.SESSION_TTL) || 3600000; // 1 hour
         this.cleanupInterval = parseInt(process.env.SESSION_CLEANUP_INTERVAL) || 300000; // 5 minutes
         this.maxSessionsPerUser = parseInt(process.env.MAX_SESSIONS_PER_USER) || 5;
@@ -116,13 +120,13 @@ class SessionManager extends EventEmitter {
                 return null;
             }
 
-            // Update last access time
-            session.lastAccessTime = new Date();
-            
+            // NOTE: getSession is read-only. lastAccessTime is touched only on
+            // actual mutations (updateSession/updateSessionState/...), so a
+            // concurrent read never races a write or mutates shared state.
             return session;
         } catch (error) {
-            logger.error('Error getting session', { 
-                error: error.message, 
+            logger.error('Error getting session', {
+                error: error.message,
                 sessionId
             });
             return null;
@@ -133,9 +137,10 @@ class SessionManager extends EventEmitter {
      * Update session data
      */
     async updateSession(sessionId, updates) {
+      return this.mutex.runExclusive(sessionId, async () => {
         try {
             const session = this.sessions.get(sessionId);
-            
+
             if (!session) {
                 throw new Error('Session not found');
             }
@@ -189,13 +194,14 @@ class SessionManager extends EventEmitter {
 
             return session;
         } catch (error) {
-            logger.error('Error updating session', { 
-                error: error.message, 
+            logger.error('Error updating session', {
+                error: error.message,
                 sessionId,
                 updates: Object.keys(updates)
             });
             throw error;
         }
+      });
     }
 
     /**

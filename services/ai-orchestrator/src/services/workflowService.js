@@ -23,7 +23,7 @@ class WorkflowService {
   /**
    * Process a message through the workflow
    */
-  async processMessage({ sessionId, intent, question, userId, metadata = {} }) {
+  async processMessage({ sessionId, intent, question, userId, authToken = null, metadata = {} }) {
     const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     logger.info('Processing message through workflow', {
@@ -98,10 +98,12 @@ class WorkflowService {
         };
       }
 
-      // Build workflow input with authenticated user context
+      // Build workflow input with authenticated user context.
+      // authToken is propagated into tool execution (Authorization: Bearer ...).
       const workflowInput = {
         sessionId,
         userId,
+        authToken,
         intent,
         question,
         conversationHistory: session.conversationHistory,
@@ -192,7 +194,7 @@ class WorkflowService {
   /**
    * Process human feedback
    */
-  async processHumanFeedback({ sessionId, response, confirmed }) {
+  async processHumanFeedback({ sessionId, response, confirmed, authToken = null }) {
     logger.info('Processing human feedback', {
       sessionId,
       confirmed
@@ -228,9 +230,9 @@ class WorkflowService {
 
       // Process based on feedback type
       if (feedback.feedbackType === 'confirmation') {
-        return await this.processConfirmation(sessionId, confirmed, feedback);
+        return await this.processConfirmation(sessionId, confirmed, feedback, authToken);
       } else {
-        return await this.processDataCollection(sessionId, response, feedback);
+        return await this.processDataCollection(sessionId, response, feedback, authToken);
       }
 
     } catch (error) {
@@ -245,7 +247,7 @@ class WorkflowService {
   /**
    * Process confirmation feedback
    */
-  async processConfirmation(sessionId, confirmed, feedback) {
+  async processConfirmation(sessionId, confirmed, feedback, authToken = null) {
     const normalizedConfirmation = typeof confirmed === 'string'
       ? confirmed.trim().toLowerCase()
       : confirmed;
@@ -257,12 +259,53 @@ class WorkflowService {
         ? feedback.context.tools
         : intentMapper.getToolsForIntent(session.intent);
 
+      // Determinism: re-run the same validation the StateGraph applies before
+      // executing tools, so the confirm-then-execute path produces identical
+      // tool calls (or the same re-prompt) as the graph path for identical
+      // input + state. Without this, range/enum/pattern rules (e.g. amount max,
+      // recipient pattern) are silently skipped on the confirmation path.
+      const validationResult = intentMapper.validateData(session.intent, session.collectedData);
+      if (!validationResult.valid) {
+        const pendingFields = [...new Set([
+          ...(validationResult.missing || []),
+          ...(validationResult.invalid || []).map(issue => issue.field).filter(Boolean)
+        ])];
+
+        await this.sessionManager.updateSession(sessionId, {
+          status: 'waiting_human_input',
+          requiredData: pendingFields,
+          currentStep: 'check_required_data'
+        });
+
+        return {
+          type: 'human_input_required',
+          message: 'Some details need to be corrected before I can proceed.',
+          requiredFields: pendingFields,
+          invalidFields: validationResult.invalid || [],
+          needsHumanInput: true,
+          currentStep: 'check_required_data'
+        };
+      }
+
+      // Deterministic auth guard mirrors the graph path.
+      if (tools.length > 0 && intentMapper.requiresAuth(session.intent) && !authToken) {
+        const authBlock = this.policyEngine.block(
+          'pre_tool',
+          'authentication_required',
+          'Your session is not authenticated for this banking action. Please sign in and try again.',
+          { flags: ['missing_auth_token'], metadata: { intent: session.intent, tools } }
+        );
+        await this.sessionManager.updateSession(sessionId, { status: 'active', currentStep: 'policy_pre_tool' });
+        return { currentStep: 'policy_pre_tool', needsHumanInput: false, ...this.buildPolicyResponse(authBlock) };
+      }
+
       const policyDecision = this.policyEngine.evaluateToolExecution({
         intent: session.intent,
         tools,
         state: {
           sessionId,
           userId: session.userId,
+          authToken,
           collectedData: session.collectedData,
           confirmationGranted: true
         }
@@ -290,6 +333,7 @@ class WorkflowService {
         const parameters = this.workflow.buildToolParameters(tool, {
           sessionId,
           userId: session.userId,
+          authToken,
           collectedData: session.collectedData
         });
 
@@ -345,7 +389,7 @@ class WorkflowService {
   /**
    * Process data collection feedback
    */
-  async processDataCollection(sessionId, response, feedback) {
+  async processDataCollection(sessionId, response, feedback, authToken = null) {
     await this.sessionManager.addMessage(
       sessionId,
       'user',
@@ -409,7 +453,8 @@ class WorkflowService {
         sessionId,
         intent: session.intent,
         question: session.conversationHistory[session.conversationHistory.length - 1]?.content || '',
-        userId: session.userId
+        userId: session.userId,
+        authToken
       });
     }
 

@@ -2,6 +2,7 @@ const { Session, WorkflowExecution, HumanFeedback } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 const config = require('../../config');
+const KeyedMutex = require('../utils/keyedMutex');
 
 /**
  * Session Manager Service
@@ -17,10 +18,14 @@ class SessionManager {
   constructor() {
     this.sessionTTL = config.session.ttl;
     this.maxSessionsPerUser = config.session.maxSessionsPerUser;
-    
+
+    // Serializes read-modify-write mutations per sessionId so concurrent
+    // requests on the same session cannot clobber each other's writes.
+    this.mutex = new KeyedMutex();
+
     // Start cleanup interval
     this.startCleanup();
-    
+
     logger.info('Session Manager initialized');
   }
 
@@ -122,135 +127,143 @@ class SessionManager {
    * Update session
    */
   async updateSession(sessionId, updates) {
-    try {
-      const session = await this.getSession(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
+    return this.mutex.runExclusive(sessionId, async () => {
+      try {
+        const session = await this.getSession(sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+
+        // Update last activity
+        updates.lastActivityAt = new Date();
+
+        await session.update(updates);
+
+        logger.debug('Session updated', { sessionId, updates: Object.keys(updates) });
+
+        return session;
+      } catch (error) {
+        logger.error('Failed to update session', {
+          sessionId,
+          error: error.message
+        });
+        throw error;
       }
-
-      // Update last activity
-      updates.lastActivityAt = new Date();
-
-      await session.update(updates);
-
-      logger.debug('Session updated', { sessionId, updates: Object.keys(updates) });
-
-      return session;
-    } catch (error) {
-      logger.error('Failed to update session', {
-        sessionId,
-        error: error.message
-      });
-      throw error;
-    }
+    });
   }
 
   /**
    * Add message to conversation history
    */
   async addMessage(sessionId, role, content, metadata = {}) {
-    try {
-      const session = await this.getSession(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
+    return this.mutex.runExclusive(sessionId, async () => {
+      try {
+        const session = await this.getSession(sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+
+        const message = {
+          role,
+          content,
+          timestamp: new Date().toISOString(),
+          ...metadata
+        };
+
+        const conversationHistory = [...session.conversationHistory, message];
+
+        await session.update({
+          conversationHistory,
+          lastActivityAt: new Date()
+        });
+
+        logger.debug('Message added to session', { sessionId, role });
+
+        return session;
+      } catch (error) {
+        logger.error('Failed to add message', {
+          sessionId,
+          error: error.message
+        });
+        throw error;
       }
-
-      const message = {
-        role,
-        content,
-        timestamp: new Date().toISOString(),
-        ...metadata
-      };
-
-      const conversationHistory = [...session.conversationHistory, message];
-
-      await session.update({
-        conversationHistory,
-        lastActivityAt: new Date()
-      });
-
-      logger.debug('Message added to session', { sessionId, role });
-
-      return session;
-    } catch (error) {
-      logger.error('Failed to add message', {
-        sessionId,
-        error: error.message
-      });
-      throw error;
-    }
+    });
   }
 
   /**
    * Update workflow state
    */
   async updateWorkflowState(sessionId, currentStep, stateUpdates) {
-    try {
-      const session = await this.getSession(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
+    return this.mutex.runExclusive(sessionId, async () => {
+      try {
+        const session = await this.getSession(sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+
+        const workflowState = {
+          ...session.workflowState,
+          ...stateUpdates,
+          lastStep: currentStep,
+          updatedAt: new Date().toISOString()
+        };
+
+        await session.update({
+          currentStep,
+          workflowState,
+          lastActivityAt: new Date()
+        });
+
+        logger.debug('Workflow state updated', { sessionId, currentStep });
+
+        return session;
+      } catch (error) {
+        logger.error('Failed to update workflow state', {
+          sessionId,
+          error: error.message
+        });
+        throw error;
       }
-
-      const workflowState = {
-        ...session.workflowState,
-        ...stateUpdates,
-        lastStep: currentStep,
-        updatedAt: new Date().toISOString()
-      };
-
-      await session.update({
-        currentStep,
-        workflowState,
-        lastActivityAt: new Date()
-      });
-
-      logger.debug('Workflow state updated', { sessionId, currentStep });
-
-      return session;
-    } catch (error) {
-      logger.error('Failed to update workflow state', {
-        sessionId,
-        error: error.message
-      });
-      throw error;
-    }
+    });
   }
 
   /**
    * Collect data from user
    */
   async collectData(sessionId, fieldName, value) {
-    try {
-      const session = await this.getSession(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
+    return this.mutex.runExclusive(sessionId, async () => {
+      try {
+        const session = await this.getSession(sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+
+        const collectedData = {
+          ...session.collectedData,
+          [fieldName]: value
+        };
+
+        // Remove from required data if present
+        const requiredData = session.requiredData.filter(field => field !== fieldName);
+
+        await session.update({
+          collectedData,
+          requiredData,
+          lastActivityAt: new Date()
+        });
+
+        logger.debug('Data collected', { sessionId, fieldName });
+
+        return session;
+      } catch (error) {
+        logger.error('Failed to collect data', {
+          sessionId,
+          fieldName,
+          error: error.message
+        });
+        throw error;
       }
-
-      const collectedData = {
-        ...session.collectedData,
-        [fieldName]: value
-      };
-
-      // Remove from required data if present
-      const requiredData = session.requiredData.filter(field => field !== fieldName);
-
-      await session.update({
-        collectedData,
-        requiredData,
-        lastActivityAt: new Date()
-      });
-
-      logger.debug('Data collected', { sessionId, fieldName });
-
-      return session;
-    } catch (error) {
-      logger.error('Failed to collect data', {
-        sessionId,
-        fieldName,
-        error: error.message
-      });
-      throw error;
-    }
+    });
   }
 
   /**

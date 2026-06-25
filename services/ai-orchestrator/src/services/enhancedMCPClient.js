@@ -15,10 +15,18 @@ class EnhancedMCPClient {
     this.trueMCPClient = new TrueMCPClient();
     this.httpMCPClient = new MCPClient();
     
-    // Configuration
-    this.preferMCPProtocol = config.mcp.preferProtocol !== false; // Default true
-    this.enableFallback = config.mcp.enableFallback !== false;   // Default true
-    
+    // Transport selection (deterministic pinning).
+    // 'http' | 'protocol' | 'auto' — see config.mcp.transport.
+    this.transport = ['http', 'protocol', 'auto'].includes(config.mcp.transport)
+      ? config.mcp.transport
+      : 'http';
+    // Only attempt the MCP protocol when not pinned to HTTP.
+    this.preferMCPProtocol = this.transport !== 'http'
+      && config.mcp.preferProtocol !== false;
+    // Implicit per-error fallback to HTTP is only allowed in 'auto' mode.
+    this.enableFallback = this.transport === 'auto'
+      && config.mcp.enableFallback !== false;
+
     // Stats
     this.stats = {
       mcpSuccess: 0,
@@ -29,6 +37,7 @@ class EnhancedMCPClient {
     };
 
     logger.info('Enhanced MCP Client initialized', {
+      transport: this.transport,
       preferProtocol: this.preferMCPProtocol,
       fallbackEnabled: this.enableFallback
     });

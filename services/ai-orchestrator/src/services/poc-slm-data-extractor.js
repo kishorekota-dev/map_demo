@@ -16,10 +16,16 @@ class PocSlmDataExtractor {
     const baseUrl = slmConfig.baseUrl;
     const apiKey = slmConfig.apiKey || openaiConfig.apiKey;
     const modelName = slmConfig.model || openaiConfig.model;
-    const temperature = slmConfig.temperature !== undefined ? slmConfig.temperature : 0;
+    // Structured extraction MUST be deterministic: forcing temperature to 0
+    // (never inheriting a non-zero default) keeps the set of extracted fields
+    // — and therefore whether the user is re-prompted — stable for identical
+    // input. JSON mode defaults on so the model returns parseable output.
+    const temperature = Number.isFinite(slmConfig.temperature) ? slmConfig.temperature : 0;
+    const topP = Number.isFinite(slmConfig.topP) ? slmConfig.topP : 0;
+    const seed = Number.isFinite(slmConfig.seed) ? slmConfig.seed : 42;
     const maxTokens = Math.min(slmConfig.maxTokens || openaiConfig.maxTokens || 2000, 4000);
 
-    this.responseFormat = slmConfig.jsonMode ? { type: 'json_object' } : null;
+    this.responseFormat = slmConfig.jsonMode !== false ? { type: 'json_object' } : null;
     this.enabled = slmConfig.enabled !== false && (!!baseUrl || !!apiKey);
 
     if (this.enabled) {
@@ -27,7 +33,9 @@ class PocSlmDataExtractor {
         openAIApiKey: apiKey || 'not-required',
         modelName,
         temperature,
-        maxTokens
+        topP,
+        maxTokens,
+        modelKwargs: Number.isFinite(seed) ? { seed } : {}
       };
 
       if (baseUrl) {

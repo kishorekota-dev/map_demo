@@ -10,6 +10,7 @@ const logger = require('../utils/logger');
 const config = require('../config/config');
 const dialogflowService = require('./dialogflow.service'); // Singleton instance
 const bankingNLU = require('./banking-nlu.service'); // Singleton instance
+const intentVocabulary = require('./intent-vocabulary'); // canonical intent mapping
 
 class NLUService {
   constructor() {
@@ -103,22 +104,29 @@ class NLUService {
 
       const startTime = Date.now();
       let intentResult = null;
+      let classificationSource = 'fallback';
+      const threshold = config.nlu.confidenceThreshold;
 
-      // Try banking-specific NLU first
+      // PRIMARY: deterministic banking-nlu classifier. This is a pure pattern
+      // matcher, so identical input always yields the same intent + confidence.
       if (this.bankingNLU.isBankingRelated(message)) {
-        intentResult = await this.bankingNLU.detectBankingIntent(message);
-        if (intentResult && intentResult.confidence > config.nlu.confidenceThreshold) {
-          logger.info('Banking intent detected', {
-            intent: intentResult.intent,
-            confidence: intentResult.confidence
-          });
+        const bankingMatch = await this.bankingNLU.detectBankingIntent(message);
+        if (bankingMatch && bankingMatch.confidence >= threshold) {
+          intentResult = bankingMatch;
+          classificationSource = 'banking-nlu';
         }
       }
 
-      // Fallback to DialogFlow if available and no banking intent found
+      // ADVISORY: DialogFlow is a non-pinned hosted ML model, so it is only used
+      // to break ties when the deterministic classifier has nothing above
+      // threshold. We prefer the deterministic result whenever it exists.
       if (!intentResult && config.dialogflow.enabled) {
         try {
-          intentResult = await this.dialogflowService.detectIntent(message, sessionId);
+          const dfResult = await this.dialogflowService.detectIntent(message, sessionId);
+          if (dfResult && (dfResult.confidence ?? 0) >= threshold) {
+            intentResult = dfResult;
+            classificationSource = 'dialogflow';
+          }
         } catch (dfError) {
           logger.warn('DialogFlow detection failed, falling back to local', {
             error: dfError.message
@@ -126,10 +134,20 @@ class NLUService {
         }
       }
 
-      // Fallback to local intent detection
+      // Deterministic local matcher as the final classifier before fallback.
       if (!intentResult) {
-        intentResult = await this.detectLocalIntent(normalizedMessage);
+        const localResult = await this.detectLocalIntent(normalizedMessage);
+        if (localResult && (localResult.confidence ?? 0) >= threshold) {
+          intentResult = localResult;
+          classificationSource = 'local';
+        }
       }
+
+      // Map whatever was found to the canonical orchestrator vocabulary. When
+      // nothing cleared the threshold, intentResult is null and we resolve to
+      // the single deterministic fallback intent (general_inquiry).
+      const rawIntent = intentResult?.intent || null;
+      const canonicalIntent = intentVocabulary.toCanonical(rawIntent);
 
       // Enhance with NLP analysis if available
       if (intentResult) {
@@ -141,11 +159,14 @@ class NLUService {
         }
       }
 
-      // Add context and metadata
+      // Add context and metadata. `intent` is ALWAYS a canonical orchestrator
+      // intent; `rawIntent`/`source` are retained for traceability.
       const result = {
         success: true,
         data: {
-          intent: intentResult?.intent || 'unknown',
+          intent: canonicalIntent,
+          rawIntent: rawIntent || null,
+          source: classificationSource,
           confidence: intentResult?.confidence || 0,
           entities: intentResult?.entities || [],
           context: this.getContext(sessionId),

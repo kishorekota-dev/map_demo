@@ -131,6 +131,69 @@ const INTENT_METADATA = {
     requiresAuth: false,
     priority: 'normal',
     estimatedDuration: 'quick'
+  },
+
+  account_info: {
+    name: 'Account Information',
+    category: 'ACCOUNT_OPERATIONS',
+    description: 'View account details and metadata',
+    requiresAuth: true,
+    priority: 'normal',
+    estimatedDuration: 'quick'
+  },
+
+  account_statement: {
+    name: 'Account Statement',
+    category: 'ACCOUNT_OPERATIONS',
+    description: 'Retrieve an account statement',
+    requiresAuth: true,
+    priority: 'normal',
+    estimatedDuration: 'medium'
+  },
+
+  payment_inquiry: {
+    name: 'Payment Inquiry',
+    category: 'TRANSACTION_OPERATIONS',
+    description: 'Check status of payments and transfers',
+    requiresAuth: true,
+    priority: 'normal',
+    estimatedDuration: 'quick'
+  },
+
+  card_activation: {
+    name: 'Card Activation',
+    category: 'CARD_OPERATIONS',
+    description: 'Activate a new or replacement card',
+    requiresAuth: true,
+    priority: 'high',
+    estimatedDuration: 'medium'
+  },
+
+  card_replacement: {
+    name: 'Card Replacement',
+    category: 'CARD_OPERATIONS',
+    description: 'Request a replacement card',
+    requiresAuth: true,
+    priority: 'high',
+    estimatedDuration: 'medium'
+  },
+
+  help: {
+    name: 'Help',
+    category: 'SUPPORT_OPERATIONS',
+    description: 'Explain available services and how to use them',
+    requiresAuth: false,
+    priority: 'normal',
+    estimatedDuration: 'quick'
+  },
+
+  complaint: {
+    name: 'Complaint',
+    category: 'SUPPORT_OPERATIONS',
+    description: 'File or discuss a customer complaint',
+    requiresAuth: false,
+    priority: 'high',
+    estimatedDuration: 'medium'
   }
 };
 
@@ -207,6 +270,64 @@ const INTENT_BEHAVIOR = {
   },
   
   general_inquiry: {
+    needsConfirmation: false,
+    allowsPartialData: true,
+    requiresAllFields: false,
+    canUseDefaults: true,
+    maxRetries: 3
+  },
+
+  account_info: {
+    needsConfirmation: false,
+    allowsPartialData: true,
+    requiresAllFields: false,
+    canUseDefaults: true,
+    maxRetries: 3
+  },
+
+  account_statement: {
+    needsConfirmation: false,
+    allowsPartialData: true,
+    requiresAllFields: false,
+    canUseDefaults: true,
+    maxRetries: 3
+  },
+
+  payment_inquiry: {
+    needsConfirmation: false,
+    allowsPartialData: true,
+    requiresAllFields: false,
+    canUseDefaults: true,
+    maxRetries: 3
+  },
+
+  card_activation: {
+    needsConfirmation: true,
+    allowsPartialData: false,
+    requiresAllFields: true,
+    canUseDefaults: false,
+    maxRetries: 2,
+    confirmationMessage: 'Please confirm you want to activate card ${cardId}'
+  },
+
+  card_replacement: {
+    needsConfirmation: true,
+    allowsPartialData: false,
+    requiresAllFields: true,
+    canUseDefaults: false,
+    maxRetries: 2,
+    confirmationMessage: 'Please confirm you want to replace card ${cardId}'
+  },
+
+  help: {
+    needsConfirmation: false,
+    allowsPartialData: true,
+    requiresAllFields: false,
+    canUseDefaults: true,
+    maxRetries: 3
+  },
+
+  complaint: {
     needsConfirmation: false,
     allowsPartialData: true,
     requiresAllFields: false,
@@ -319,122 +440,291 @@ const INTENT_DATA_REQUIREMENTS = {
     required: [],
     optional: ['topic', 'relatedIntent'],
     defaults: {}
+  },
+
+  account_info: {
+    required: [],
+    optional: ['accountId'],
+    defaults: {}
+  },
+
+  account_statement: {
+    required: [],
+    optional: ['accountId', 'period', 'fromDate', 'toDate'],
+    defaults: {
+      period: 'last_30_days'
+    }
+  },
+
+  payment_inquiry: {
+    required: [],
+    optional: ['transferId', 'status', 'timeframe'],
+    defaults: {
+      timeframe: 'last_30_days'
+    }
+  },
+
+  card_activation: {
+    required: ['cardId'],
+    optional: ['activationCode'],
+    validation: {
+      cardId: { type: 'string', minLength: 4, maxLength: 40 }
+    }
+  },
+
+  card_replacement: {
+    required: ['cardId', 'reason'],
+    optional: ['replacementAddress'],
+    validation: {
+      cardId: { type: 'string', minLength: 4, maxLength: 40 },
+      reason: { type: 'string', minLength: 3, maxLength: 200 }
+    }
+  },
+
+  help: {
+    required: [],
+    optional: ['topic'],
+    defaults: {}
+  },
+
+  complaint: {
+    required: ['description'],
+    optional: ['category', 'relatedTransactionId'],
+    validation: {
+      description: { type: 'string', minLength: 10, maxLength: 1000 }
+    }
   }
 };
 
 // ==================== INTENT TOOL MAPPING ====================
 // Map each intent to the banking tools it can use
 
+// NOTE: Every tool name here MUST resolve to an implemented handler in
+// mcp-service (see CANONICAL_BANKING_TOOLS below). A startup contract assertion
+// and a cross-service test enforce this so a rename can never silently break a
+// flow (as the historical banking_transfer / *_details names did).
 const INTENT_TOOL_MAPPING = {
   balance_inquiry: [
     'banking_get_balance',
-    'banking_account_info'
+    'banking_get_account'
   ],
-  
+
+  account_info: [
+    'banking_get_account',
+    'banking_get_accounts'
+  ],
+
+  account_statement: [
+    'banking_get_account_statement'
+  ],
+
   transaction_history: [
     'banking_get_transactions'
   ],
-  
+
   transfer_funds: [
-    'banking_transfer',
+    'banking_create_transfer',
     'banking_get_balance',
-    'banking_account_info'
+    'banking_get_account'
   ],
-  
+
+  payment_inquiry: [
+    'banking_get_transfers',
+    'banking_get_transfer'
+  ],
+
   card_management: [
     'banking_get_cards',
     'banking_block_card',
-    'banking_unblock_card',
+    'banking_unblock_card'
+  ],
+
+  card_activation: [
+    'banking_get_cards',
+    'banking_activate_card'
+  ],
+
+  card_replacement: [
+    'banking_get_cards',
     'banking_replace_card'
   ],
-  
+
   dispute_transaction: [
     'banking_get_transactions',
     'banking_create_dispute',
     'banking_get_disputes',
-    'banking_get_dispute_details',
+    'banking_get_dispute',
     'banking_add_dispute_evidence',
     'banking_update_dispute',
     'banking_withdraw_dispute'
   ],
-  
+
+  // report_fraud is the URGENT fast path (no confirmation). Card blocking is a
+  // sensitive, disruptive action handled explicitly via card_management, so it
+  // is intentionally NOT in the auto-executed tool set here — keeping the fast
+  // path free of the sensitive-tool confirmation gate.
   report_fraud: [
     'banking_create_fraud_alert',
-    'banking_get_transactions',
-    'banking_block_card'
+    'banking_get_transactions'
   ],
-  
+
   check_fraud_alerts: [
     'banking_get_fraud_alerts',
-    'banking_get_fraud_alert_details'
+    'banking_get_fraud_alert'
   ],
-  
+
+  // verify_transaction makes a SINGLE deterministic decision: banking_verify_transaction
+  // takes the alertId + isLegitimate flag and the banking service routes it to
+  // confirm-fraud or mark-false-positive internally. Calling confirm AND
+  // false-positive together (as a multi-tool mapping would) is contradictory.
   verify_transaction: [
-    'banking_verify_transaction',
-    'banking_confirm_fraud',
-    'banking_mark_false_positive',
-    'banking_get_fraud_alert_details'
+    'banking_get_fraud_alert',
+    'banking_verify_transaction'
   ],
-  
-  general_inquiry: []
+
+  general_inquiry: [],
+  help: [],
+  complaint: []
 };
+
+// ==================== CANONICAL BANKING TOOL CONTRACT ====================
+// Single source of truth for the banking tool names the orchestrator may call.
+// mcp-service must implement a handler for every name here. Enforced by
+// assertToolContract() at startup and by a cross-service contract test.
+const CANONICAL_BANKING_TOOLS = [
+  'banking_get_accounts',
+  'banking_get_account',
+  'banking_get_balance',
+  'banking_get_account_statement',
+  'banking_get_transactions',
+  'banking_get_transaction',
+  'banking_create_transfer',
+  'banking_get_transfers',
+  'banking_get_transfer',
+  'banking_get_cards',
+  'banking_get_card',
+  'banking_block_card',
+  'banking_unblock_card',
+  'banking_activate_card',
+  'banking_replace_card',
+  'banking_create_fraud_alert',
+  'banking_get_fraud_alerts',
+  'banking_get_fraud_alert',
+  'banking_verify_transaction',
+  'banking_confirm_fraud',
+  'banking_mark_false_positive',
+  'banking_create_dispute',
+  'banking_get_disputes',
+  'banking_get_dispute',
+  'banking_add_dispute_evidence',
+  'banking_update_dispute',
+  'banking_withdraw_dispute'
+];
 
 // ==================== INTENT PROMPT TEMPLATES ====================
 // System and user prompts for each intent (using template references)
 
+// IMPORTANT: template keys are FLAT and UNPREFIXED. The prompt template modules
+// (src/prompts/templates/*.js) are merged into one flat ALL_PROMPTS map, so the
+// keys here must match the exported key exactly (e.g. 'balance_inquiry_system',
+// not 'account/balance_inquiry_system'). A prefixed key resolves to undefined
+// and silently degrades every intent to the generic fallback prompt — the exact
+// bug this fixes. assertPromptContract() enforces resolution at startup.
 const INTENT_PROMPTS = {
   balance_inquiry: {
-    systemPromptTemplate: 'account/balance_inquiry_system',
-    userPromptTemplate: 'account/balance_inquiry_user',
+    systemPromptTemplate: 'balance_inquiry_system',
+    userPromptTemplate: 'balance_inquiry_user',
     contextFields: ['userId', 'accountData']
   },
-  
+
+  account_info: {
+    systemPromptTemplate: 'account_info_system',
+    userPromptTemplate: 'account_info_user',
+    contextFields: ['userId', 'accountData']
+  },
+
+  account_statement: {
+    systemPromptTemplate: 'account_statement_system',
+    userPromptTemplate: 'account_statement_user',
+    contextFields: ['userId', 'accountData', 'period']
+  },
+
   transaction_history: {
-    systemPromptTemplate: 'transaction/transaction_history_system',
-    userPromptTemplate: 'transaction/transaction_history_user',
+    systemPromptTemplate: 'transaction_history_system',
+    userPromptTemplate: 'transaction_history_user',
     contextFields: ['userId', 'timeframe', 'transactions']
   },
-  
+
   transfer_funds: {
-    systemPromptTemplate: 'transaction/transfer_funds_system',
-    userPromptTemplate: 'transaction/transfer_funds_user',
+    systemPromptTemplate: 'transfer_funds_system',
+    userPromptTemplate: 'transfer_funds_user',
     contextFields: ['userId', 'recipient', 'amount', 'purpose', 'transferResult']
   },
-  
+
+  payment_inquiry: {
+    systemPromptTemplate: 'payment_inquiry_system',
+    userPromptTemplate: 'payment_inquiry_user',
+    contextFields: ['userId', 'transferId', 'status', 'transfers']
+  },
+
   card_management: {
-    systemPromptTemplate: 'card/card_management_system',
-    userPromptTemplate: 'card/card_management_user',
+    systemPromptTemplate: 'card_management_system',
+    userPromptTemplate: 'card_management_user',
     contextFields: ['userId', 'cardAction', 'cardData', 'actionResult']
   },
-  
+
+  card_activation: {
+    systemPromptTemplate: 'card_activation_system',
+    userPromptTemplate: 'card_activation_user',
+    contextFields: ['userId', 'cardId', 'cardData', 'actionResult']
+  },
+
+  card_replacement: {
+    systemPromptTemplate: 'card_replacement_system',
+    userPromptTemplate: 'card_replacement_user',
+    contextFields: ['userId', 'cardId', 'reason', 'actionResult']
+  },
+
   dispute_transaction: {
-    systemPromptTemplate: 'security/dispute_transaction_system',
-    userPromptTemplate: 'security/dispute_transaction_user',
+    systemPromptTemplate: 'dispute_transaction_system',
+    userPromptTemplate: 'dispute_transaction_user',
     contextFields: ['userId', 'transactionId', 'disputeType', 'reason', 'description', 'evidenceProvided', 'disputeResult']
   },
-  
+
   report_fraud: {
-    systemPromptTemplate: 'security/report_fraud_system',
-    userPromptTemplate: 'security/report_fraud_user',
+    systemPromptTemplate: 'report_fraud_system',
+    userPromptTemplate: 'report_fraud_user',
     contextFields: ['userId', 'fraudType', 'description', 'transactionId', 'amount', 'fraudAlert']
   },
-  
+
   check_fraud_alerts: {
-    systemPromptTemplate: 'security/check_fraud_alerts_system',
-    userPromptTemplate: 'security/check_fraud_alerts_user',
+    systemPromptTemplate: 'check_fraud_alerts_system',
+    userPromptTemplate: 'check_fraud_alerts_user',
     contextFields: ['userId', 'alerts', 'filterCriteria']
   },
-  
+
   verify_transaction: {
-    systemPromptTemplate: 'security/verify_transaction_system',
-    userPromptTemplate: 'security/verify_transaction_user',
+    systemPromptTemplate: 'verify_transaction_system',
+    userPromptTemplate: 'verify_transaction_user',
     contextFields: ['userId', 'alertId', 'transactionDetails', 'isLegitimate', 'verificationResult']
   },
-  
+
   general_inquiry: {
-    systemPromptTemplate: 'support/general_inquiry_system',
-    userPromptTemplate: 'support/general_inquiry_user',
+    systemPromptTemplate: 'general_inquiry_system',
+    userPromptTemplate: 'general_inquiry_user',
     contextFields: ['userId', 'topic', 'additionalInfo']
+  },
+
+  help: {
+    systemPromptTemplate: 'help_system',
+    userPromptTemplate: 'help_user',
+    contextFields: ['userId', 'topic']
+  },
+
+  complaint: {
+    systemPromptTemplate: 'complaint_system',
+    userPromptTemplate: 'complaint_user',
+    contextFields: ['userId', 'description', 'category', 'complaintResult']
   }
 };
 
@@ -518,12 +808,68 @@ const INTENT_PATTERNS = {
   ],
   
   general_inquiry: [
-    'help',
     'question',
     'how do i',
     'what is',
     'can you help',
     'need assistance'
+  ],
+
+  account_info: [
+    'account details',
+    'account information',
+    'account number',
+    'my account',
+    'account type'
+  ],
+
+  account_statement: [
+    'statement',
+    'account statement',
+    'monthly statement',
+    'download statement',
+    'bank statement'
+  ],
+
+  payment_inquiry: [
+    'payment status',
+    'did my payment go through',
+    'transfer status',
+    'where is my payment',
+    'pending payment'
+  ],
+
+  card_activation: [
+    'activate card',
+    'activate my card',
+    'new card activation',
+    'turn on card',
+    'enable card'
+  ],
+
+  card_replacement: [
+    'replace card',
+    'replacement card',
+    'new card',
+    'damaged card',
+    'reissue card'
+  ],
+
+  help: [
+    'help',
+    'what can you do',
+    'services',
+    'options',
+    'how does this work'
+  ],
+
+  complaint: [
+    'complaint',
+    'complain',
+    'not happy',
+    'poor service',
+    'file a complaint',
+    'unhappy with'
   ]
 };
 
@@ -635,6 +981,45 @@ function getDefaults(intent) {
   return INTENT_DATA_REQUIREMENTS[intent]?.defaults || {};
 }
 
+/**
+ * Validate internal configuration consistency. Returns a list of human-readable
+ * problems (empty array == consistent). Used by a startup assertion and tests so
+ * structural mistakes (an intent missing a config block, a tool name not in the
+ * canonical contract) fail fast and loudly instead of silently degrading flows.
+ */
+function validateConfigConsistency() {
+  const problems = [];
+  const canonical = new Set(CANONICAL_BANKING_TOOLS);
+
+  // Every intent listed in a category must have all five config blocks.
+  const categorizedIntents = Object.values(INTENT_CATEGORIES).flat();
+  for (const intent of categorizedIntents) {
+    if (!INTENT_METADATA[intent]) problems.push(`intent "${intent}" missing INTENT_METADATA`);
+    if (!INTENT_BEHAVIOR[intent]) problems.push(`intent "${intent}" missing INTENT_BEHAVIOR`);
+    if (!INTENT_DATA_REQUIREMENTS[intent]) problems.push(`intent "${intent}" missing INTENT_DATA_REQUIREMENTS`);
+    if (!INTENT_TOOL_MAPPING[intent]) problems.push(`intent "${intent}" missing INTENT_TOOL_MAPPING`);
+    if (!INTENT_PROMPTS[intent]) problems.push(`intent "${intent}" missing INTENT_PROMPTS`);
+  }
+
+  // Every metadata intent must be reachable from a category (no orphans).
+  for (const intent of Object.keys(INTENT_METADATA)) {
+    if (!categorizedIntents.includes(intent)) {
+      problems.push(`intent "${intent}" in INTENT_METADATA but not in any INTENT_CATEGORIES`);
+    }
+  }
+
+  // Every mapped tool name must be in the canonical banking-tool contract.
+  for (const [intent, tools] of Object.entries(INTENT_TOOL_MAPPING)) {
+    for (const tool of tools) {
+      if (!canonical.has(tool)) {
+        problems.push(`intent "${intent}" maps to unknown tool "${tool}" (not in CANONICAL_BANKING_TOOLS)`);
+      }
+    }
+  }
+
+  return problems;
+}
+
 // ==================== EXPORTS ====================
 
 module.exports = {
@@ -650,14 +1035,16 @@ module.exports = {
   INTENT_TOOL_MAPPING,
   INTENT_PROMPTS,
   INTENT_PATTERNS,
-  
+  CANONICAL_BANKING_TOOLS,
+
   // Unified Config
   getIntentConfig,
-  
+
   // Validation
   isValidIntent,
   getAllIntents,
   getIntentsByPriority,
+  validateConfigConsistency,
   
   // Quick Access Functions
   requiresAuth,

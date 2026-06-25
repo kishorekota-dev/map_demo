@@ -22,9 +22,10 @@
 
 ### 🤖 AI-Powered Banking
 - **LangGraph Workflows** - State machine-based conversation orchestration
-- **Intent Detection** - Natural language understanding with DialogFlow
-- **Configurable OpenAI Integration** - Advanced AI responses for complex queries
-- **MCP Tools** - Model Context Protocol for tool execution
+- **Deterministic by design** - Same input + state → same routing, tool calls, policy decisions, and a stable response. LLM sampling is pinned (temperature/top_p `0`, fixed seed). See [Deterministic Behavior](docs/architecture/determinism.md).
+- **Intent Detection** - Deterministic pattern matching with DialogFlow as an advisory tie-breaker; one canonical intent vocabulary across services
+- **Policy Engine** - Confirmation gates, transfer limits, prompt-injection blocking, and PII redaction
+- **MCP Tools** - Model Context Protocol for tool execution, with a startup tool contract
 
 ### 💬 Real-time Communication
 - **WebSocket Chat** - Bidirectional messaging via Socket.IO
@@ -98,6 +99,34 @@
 | `chat-backend` | 3006 | Socket.IO real-time chat |
 | `ai-orchestrator` | 3007 | LangGraph AI workflows |
 | `agent-ui` | 8081 | Support agent dashboard |
+
+> **Canonical implementation:** the services live under [services/](services/). The
+> root `package.json` workspaces are `services/*`. (`packages/*` and the
+> `docker-compose-enterprise.yml` topology are a separate legacy/experimental
+> track and are not the canonical product.)
+
+### Request flow
+
+Every customer message follows one fixed, reproducible pipeline:
+
+1. `chat-backend` receives the message over WebSocket and forwards it to
+   `nlu-service` for a **canonical intent**.
+2. `chat-backend` calls `ai-orchestrator` (`/api/orchestrator/process`) with the
+   user's JWT. Routing is a pure function of intent + state — never live load.
+3. `ai-orchestrator` runs the LangGraph workflow (validation → policy →
+   confirmation → tool execution → response) and calls `mcp-service` tools, which
+   call `banking-service`.
+4. Human-input / confirmation / escalation states are surfaced back to the chat
+   (and to `agent-ui` for human takeover).
+
+See [Deterministic Behavior](docs/architecture/determinism.md) for the guarantees
+enforced at each layer.
+
+> **Session state** is currently in-memory in `chat-backend` (and DB-backed in
+> `ai-orchestrator`). Per-session updates are serialized with a mutex to prevent
+> lost updates, but `chat-backend` session/message state does not survive a
+> restart. Durable persistence is a known follow-up (see the in-code notes in
+> `chat-backend/services/databaseService.js`).
 
 ---
 
