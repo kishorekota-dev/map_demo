@@ -20,7 +20,7 @@ This directory contains comprehensive end-to-end API tests for the POC Banking s
 - bc (for calculations)
 
 ### For Node.js Tests
-- Node.js 18+
+- Node.js 22+
 - npm
 
 ## Installation

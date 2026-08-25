@@ -1,12 +1,21 @@
 const EventEmitter = require('events');
+const { randomUUID } = require('crypto');
+const jwt = require('jsonwebtoken');
 const io = require('socket.io-client');
 const logger = require('./logger');
+
+const SERVICE_TOKEN_TTL_SECONDS = 5 * 60;
 
 class ChatClientService extends EventEmitter {
     constructor() {
         super();
         this.chatBackendUrl = process.env.CHAT_BACKEND_URL || 'http://localhost:3006';
         this.socket = null;
+        this.configuredAuthToken = process.env.CHAT_BACKEND_SERVICE_TOKEN?.trim() || null;
+        this.jwtSecret = process.env.JWT_SECRET?.trim() || null;
+        this.authToken = this.configuredAuthToken;
+        this.authTokenSource = this.configuredAuthToken ? 'configured' : 'generated';
+        this.shouldReconnect = true;
         this.isConnected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = parseInt(process.env.MAX_RECONNECT_ATTEMPTS) || 10;
@@ -34,14 +43,67 @@ class ChatClientService extends EventEmitter {
     }
 
     /**
+     * Create a short-lived service-principal credential for the chat backend.
+     * A unique JWT ID ensures a reconnect always receives a fresh token, even
+     * when two attempts happen within the same second.
+     */
+    createServiceToken() {
+        if (!this.jwtSecret) {
+            throw new Error(
+                'JWT_SECRET is required when CHAT_BACKEND_SERVICE_TOKEN is not configured'
+            );
+        }
+
+        return jwt.sign({
+            userId: 'agent-ui-service',
+            role: 'service',
+            service: 'agent-ui'
+        }, this.jwtSecret, {
+            expiresIn: SERVICE_TOKEN_TTL_SECONDS,
+            jwtid: randomUUID()
+        });
+    }
+
+    getAuthenticationToken(tokenOverride) {
+        const explicitToken = typeof tokenOverride === 'string' ? tokenOverride.trim() : '';
+        if (explicitToken) {
+            this.authTokenSource = explicitToken === this.configuredAuthToken
+                ? 'configured'
+                : 'explicit';
+            return explicitToken;
+        }
+
+        if (this.configuredAuthToken) {
+            this.authTokenSource = 'configured';
+            return this.configuredAuthToken;
+        }
+
+        this.authTokenSource = 'generated';
+        return this.createServiceToken();
+    }
+
+    canReconnect() {
+        return Boolean(
+            this.configuredAuthToken
+            || this.jwtSecret
+            || (this.authTokenSource === 'explicit' && this.authToken)
+        );
+    }
+
+    /**
      * Connect to chat backend
      */
-    async connect() {
+    async connect(tokenOverride) {
         try {
             if (this.socket && this.isConnected) {
-                logger.warn('Already connected to chat backend');
-                return;
+                return true;
             }
+
+            const token = this.getAuthenticationToken(tokenOverride);
+
+            this.authToken = token;
+            this.shouldReconnect = true;
+            this.socket?.disconnect();
 
             logger.chat('connecting_to_backend', null, {
                 url: this.chatBackendUrl,
@@ -53,6 +115,7 @@ class ChatClientService extends EventEmitter {
                 timeout: 20000,
                 reconnection: false, // We handle reconnection manually
                 auth: {
+                    token,
                     service: 'agent-ui',
                     version: process.env.npm_package_version || '1.0.0',
                     nodeId: process.env.NODE_ID || 'agent-ui-node'
@@ -61,28 +124,36 @@ class ChatClientService extends EventEmitter {
 
             await this.setupSocketHandlers();
             
-            return new Promise((resolve, reject) => {
+            return await new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     reject(new Error('Connection timeout'));
                 }, 20000);
 
                 this.socket.once('connect', () => {
+                    this.socket.emit('authenticate', { token, service: 'agent-ui' });
+                });
+
+                this.socket.once('authenticationSuccess', () => {
                     clearTimeout(timeout);
                     this.isConnected = true;
                     this.reconnectAttempts = 0;
                     this.connectionMetrics.connectTime = new Date();
                     this.connectionMetrics.reconnectCount++;
-                    
+
                     logger.chat('connected_to_backend', null, {
                         url: this.chatBackendUrl,
                         socketId: this.socket.id
                     });
-                    
+
                     this.emit('connected');
                     this.startHeartbeat();
                     this.processMessageQueue();
-                    
-                    resolve();
+                    resolve(true);
+                });
+
+                this.socket.once('authenticationError', (error) => {
+                    clearTimeout(timeout);
+                    reject(new Error(error?.error || 'Backend authentication failed'));
                 });
 
                 this.socket.once('connect_error', (error) => {
@@ -117,7 +188,7 @@ class ChatClientService extends EventEmitter {
             });
             
             this.emit('disconnected', { reason });
-            this.handleReconnection();
+            if (this.shouldReconnect) this.handleReconnection();
         });
 
         this.socket.on('error', (error) => {
@@ -149,15 +220,18 @@ class ChatClientService extends EventEmitter {
         });
 
         // Message events
-        this.socket.on('messageReceived', (data) => {
+        const handleMessage = (data) => {
+            const message = this.normalizeMessage(data);
             this.connectionMetrics.messagesReceived++;
-            logger.chat('message_received', data.sessionId, {
-                messageId: data.messageId,
-                sender: data.sender,
-                type: data.type
+            logger.chat('message_received', message.sessionId, {
+                messageId: message.messageId,
+                sender: message.sender,
+                type: message.type
             });
-            this.emit('messageReceived', data);
-        });
+            this.emit('messageReceived', message);
+        };
+        this.socket.on('messageReceived', handleMessage);
+        this.socket.on('newMessage', handleMessage);
 
         this.socket.on('messageSent', (data) => {
             logger.chat('message_sent', data.sessionId, {
@@ -205,14 +279,16 @@ class ChatClientService extends EventEmitter {
         });
 
         // Escalation events
-        this.socket.on('escalationRequest', (data) => {
+        const handleEscalation = (data) => {
             logger.chat('escalation_request', data.sessionId, {
                 reason: data.reason,
                 priority: data.priority,
                 fromAgent: data.fromAgent
             });
             this.emit('escalationRequest', data);
-        });
+        };
+        this.socket.on('escalationRequest', handleEscalation);
+        this.socket.on('escalationRequested', handleEscalation);
 
         this.socket.on('escalationAccepted', (data) => {
             logger.chat('escalation_accepted', data.sessionId, {
@@ -262,14 +338,22 @@ class ChatClientService extends EventEmitter {
                 throw new Error('Not connected to chat backend');
             }
 
+            const content = typeof message === 'string'
+                ? message
+                : message?.content || message?.message;
+            if (!content || !String(content).trim()) {
+                throw new Error('Message content is required');
+            }
+
             const messageData = {
                 sessionId,
-                messageId: this.generateMessageId(),
-                message,
+                messageId: message?.messageId || this.generateMessageId(),
+                content: String(content),
+                type: message?.type || 'text',
                 sender,
                 timestamp: new Date().toISOString(),
                 metadata: {
-                    agentId: message.agentId,
+                    agentId: message?.agentId,
                     source: 'agent-ui'
                 }
             };
@@ -280,7 +364,7 @@ class ChatClientService extends EventEmitter {
             logger.chat('message_sent_to_backend', sessionId, {
                 messageId: messageData.messageId,
                 sender,
-                messageLength: message.content?.length || 0
+                messageLength: messageData.content.length
             });
 
             return messageData;
@@ -308,6 +392,19 @@ class ChatClientService extends EventEmitter {
             };
 
             const result = await this.sendRequest('assignAgent', requestData);
+            try {
+                await this.joinSession(sessionId);
+            } catch (error) {
+                // Older chat-backend builds only allow the customer identity to
+                // join a session. Assignment still succeeds through the generic
+                // request protocol; keep the dashboard usable and surface the
+                // integration limitation in logs.
+                logger.warn('Assigned agent could not join backend session room', {
+                    sessionId,
+                    agentId,
+                    error: error.message
+                });
+            }
 
             logger.chat('agent_assignment_requested', sessionId, {
                 agentId,
@@ -420,7 +517,13 @@ class ChatClientService extends EventEmitter {
                 messageCount: result?.messages?.length || 0
             });
 
-            return result;
+            return {
+                sessionId,
+                messages: (result?.messages || []).map(message => this.normalizeMessage({
+                    ...message,
+                    sessionId: message.sessionId || sessionId
+                }))
+            };
         } catch (error) {
             logger.error('Error getting session history', {
                 error: error.message,
@@ -501,6 +604,50 @@ class ChatClientService extends EventEmitter {
         });
     }
 
+    async joinSession(sessionId) {
+        if (!this.isConnected || !this.socket) {
+            throw new Error('Not connected to chat backend');
+        }
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Join session timeout')), this.responseTimeout);
+            const onJoined = data => {
+                if (data?.sessionId !== sessionId) return;
+                cleanup();
+                resolve(data);
+            };
+            const onError = error => {
+                cleanup();
+                reject(new Error(error?.error || 'Failed to join session'));
+            };
+            const cleanup = () => {
+                clearTimeout(timer);
+                this.socket.off('sessionJoined', onJoined);
+                this.socket.off('sessionError', onError);
+            };
+
+            this.socket.on('sessionJoined', onJoined);
+            this.socket.once('sessionError', onError);
+            this.socket.emit('joinSession', { sessionId });
+        });
+    }
+
+    normalizeMessage(message = {}) {
+        const sender = message.sender
+            || (message.direction === 'incoming' ? 'customer' : 'agent');
+        return {
+            messageId: message.messageId || message.id || this.generateMessageId(),
+            sessionId: message.sessionId,
+            content: message.content || message.message || '',
+            sender,
+            senderName: message.senderName || message.agentInfo?.name || (sender === 'customer' ? 'Customer' : 'Agent'),
+            timestamp: message.timestamp || message.createdAt || new Date().toISOString(),
+            type: message.type || 'text',
+            metadata: message.metadata || {},
+            status: message.status || 'delivered'
+        };
+    }
+
     /**
      * Process queued messages
      */
@@ -535,6 +682,7 @@ class ChatClientService extends EventEmitter {
      * Handle reconnection
      */
     async handleReconnection() {
+        if (!this.shouldReconnect || !this.canReconnect()) return;
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             logger.error('Max reconnection attempts reached', {
                 attempts: this.reconnectAttempts,
@@ -552,9 +700,15 @@ class ChatClientService extends EventEmitter {
             delay: this.reconnectDelay
         });
 
-        setTimeout(async () => {
+        this.reconnectTimer = setTimeout(async () => {
             try {
-                await this.connect();
+                // Configured/explicit credentials remain stable. Generated
+                // service credentials are intentionally reissued for every
+                // reconnect attempt so an expired JWT is never reused.
+                const reconnectToken = this.authTokenSource === 'generated'
+                    ? undefined
+                    : this.authToken;
+                await this.connect(reconnectToken);
             } catch (error) {
                 logger.error('Reconnection attempt failed', {
                     error: error.message,
@@ -592,9 +746,15 @@ class ChatClientService extends EventEmitter {
      */
     async disconnect() {
         try {
+            this.shouldReconnect = false;
             if (this.heartbeatTimer) {
                 clearInterval(this.heartbeatTimer);
                 this.heartbeatTimer = null;
+            }
+
+            if (this.reconnectTimer) {
+                clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
             }
 
             if (this.socket) {

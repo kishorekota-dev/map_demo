@@ -1,31 +1,26 @@
 /* Icon Base Styles */
 .icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
+  flex: 0 0 auto;
 }
 
 /* Icon Sizes */
 .icon--small {
-  font-size: 0.875rem;
   width: 14px;
   height: 14px;
 }
 
 .icon--medium {
-  font-size: 1rem;
   width: 16px;
   height: 16px;
 }
 
 .icon--large {
-  font-size: 1.25rem;
   width: 20px;
   height: 20px;
 }
 
 .icon--xlarge {
-  font-size: 1.5rem;
   width: 24px;
   height: 24px;
 }

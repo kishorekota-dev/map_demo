@@ -54,10 +54,6 @@ function logError(msg, error = null) {
   results.failed++;
 }
 
-function logWarn(msg) {
-  console.log(`${colors.yellow}[WARN]${colors.reset} ${msg}`);
-}
-
 // HTTP Client
 const client = axios.create({
   timeout: CONFIG.timeout,

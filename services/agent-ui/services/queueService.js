@@ -27,6 +27,7 @@ class QueueService extends EventEmitter {
         this.maxWaitTime = parseInt(process.env.MAX_WAIT_TIME) || 900000; // 15 minutes
         this.escalationThreshold = parseInt(process.env.ESCALATION_THRESHOLD) || 600000; // 10 minutes
         this.queueCheckInterval = parseInt(process.env.QUEUE_CHECK_INTERVAL) || 5000; // 5 seconds
+        this.assignmentTimeout = parseInt(process.env.ASSIGNMENT_TIMEOUT) || 30000;
 
         // Hydrate persisted queue state before monitoring/processing starts.
         this.ready = this.hydrateFromStore();
@@ -127,7 +128,8 @@ class QueueService extends EventEmitter {
                     capabilities: requirements.capabilities || ['general-support'],
                     skillLevel: requirements.skillLevel || 'basic',
                     language: requirements.language || 'english',
-                    specialization: requirements.specialization || null
+                    specialization: requirements.specialization || null,
+                    excludeAgentIds: requirements.excludeAgentIds || []
                 },
                 queuedAt: new Date(),
                 estimatedWaitTime: this.calculateEstimatedWaitTime(priority),
@@ -212,6 +214,15 @@ class QueueService extends EventEmitter {
                     continue; // Already processed
                 }
 
+                if (queueEntry.pendingAssignment) {
+                    const pendingAge = Date.now() - new Date(queueEntry.pendingAssignment.assignedAt).getTime();
+                    if (pendingAge < this.assignmentTimeout) {
+                        continue;
+                    }
+                    queueEntry.lastAssignedAgentId = queueEntry.pendingAssignment.agentId;
+                    queueEntry.pendingAssignment = null;
+                }
+
                 try {
                     const assigned = await this.attemptAssignment(queueEntry);
                     if (assigned) {
@@ -241,7 +252,13 @@ class QueueService extends EventEmitter {
             this.persistQueue().catch(() => {});
 
             // Get available agents based on requirements
-            const availableAgents = await this.getMatchingAgents(queueEntry.requirements);
+            const availableAgents = await this.getMatchingAgents({
+                ...queueEntry.requirements,
+                excludeAgentIds: [
+                    ...(queueEntry.requirements.excludeAgentIds || []),
+                    ...(queueEntry.lastAssignedAgentId ? [queueEntry.lastAssignedAgentId] : [])
+                ]
+            });
             
             if (availableAgents.length === 0) {
                 logger.queue('no_agents_available', queueEntry.queueId, {
@@ -266,12 +283,18 @@ class QueueService extends EventEmitter {
                 return false;
             }
 
-            // Notify agent assignment
-            this.emit('assignmentRequest', {
+            // Keep the item queued until the selected agent explicitly accepts.
+            await this.emitAsync('assignmentRequest', {
                 queueEntry,
                 agentId: selectedAgent.agentId,
                 agent: selectedAgent
             });
+
+            queueEntry.pendingAssignment = {
+                agentId: selectedAgent.agentId,
+                assignedAt: new Date()
+            };
+            await this.persistQueue();
 
             logger.queue('assignment_attempted', queueEntry.queueId, {
                 sessionId: queueEntry.sessionId,
@@ -281,7 +304,7 @@ class QueueService extends EventEmitter {
                 waitTime: Date.now() - queueEntry.queuedAt.getTime()
             });
 
-            return true;
+            return false;
         } catch (error) {
             logger.error('Error attempting assignment', {
                 error: error.message,
@@ -321,6 +344,40 @@ class QueueService extends EventEmitter {
         }
     }
 
+    async emitAsync(event, payload) {
+        const handlers = this.listeners(event);
+        if (handlers.length === 0) {
+            throw new Error(`No integration registered for ${event}`);
+        }
+        await Promise.all(handlers.map(handler => handler(payload)));
+    }
+
+    findBySession(sessionId) {
+        return Array.from(this.chatQueue.values()).find(entry => entry.sessionId === sessionId) || null;
+    }
+
+    async acceptAssignment(sessionId, agentId) {
+        const entry = this.findBySession(sessionId);
+        if (!entry || entry.pendingAssignment?.agentId !== agentId) {
+            throw new Error('This chat is no longer assigned to the agent');
+        }
+        await this.removeFromQueue(entry.queueId, 'assigned');
+        return entry;
+    }
+
+    async releaseAssignment(sessionId, agentId) {
+        const entry = this.findBySession(sessionId);
+        if (!entry) return false;
+        if (entry.pendingAssignment?.agentId && entry.pendingAssignment.agentId !== agentId) {
+            return false;
+        }
+
+        entry.lastAssignedAgentId = agentId;
+        entry.pendingAssignment = null;
+        await this.persistQueue();
+        return true;
+    }
+
     /**
      * Select best agent using routing rules
      */
@@ -333,8 +390,8 @@ class QueueService extends EventEmitter {
 
             // Filter by routing rule criteria
             if (routingRule) {
-                candidateAgents = candidateAgents.filter(agent => 
-                    this.agentMatchesRule(agent, routingRule, queueEntry)
+                candidateAgents = candidateAgents.filter(agent =>
+                    this.agentMatchesRule(agent, routingRule)
                 );
             }
 
@@ -592,7 +649,7 @@ class QueueService extends EventEmitter {
 
     getRoutingRule(queueEntry) {
         // Find matching routing rule based on customer data and requirements
-        for (const [ruleId, rule] of this.routingRules) {
+        for (const rule of this.routingRules.values()) {
             if (this.queueEntryMatchesRule(queueEntry, rule)) {
                 return rule;
             }
@@ -613,7 +670,7 @@ class QueueService extends EventEmitter {
         return true;
     }
 
-    agentMatchesRule(agent, rule, queueEntry) {
+    agentMatchesRule(agent, rule) {
         const { requirements } = rule;
         
         // Check skill level
@@ -699,13 +756,13 @@ class QueueService extends EventEmitter {
     }
 
     setupQueueMonitoring() {
-        setInterval(async () => {
+        this.queueMonitor = setInterval(async () => {
             try {
                 // Check for expired queue items
                 const now = Date.now();
                 const expiredItems = [];
                 
-                for (const [queueId, queueEntry] of this.chatQueue) {
+                for (const queueEntry of this.chatQueue.values()) {
                     const waitTime = now - queueEntry.queuedAt.getTime();
                     
                     // Check for escalation threshold
@@ -747,8 +804,12 @@ class QueueService extends EventEmitter {
      */
     async cleanup() {
         try {
+            if (this.queueMonitor) {
+                clearInterval(this.queueMonitor);
+                this.queueMonitor = null;
+            }
             // Process remaining queue items
-            for (const [queueId, queueEntry] of this.chatQueue) {
+            for (const queueId of this.chatQueue.keys()) {
                 await this.removeFromQueue(queueId, 'service_shutdown');
             }
             

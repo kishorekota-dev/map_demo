@@ -26,10 +26,11 @@ describe('PolicyEngine', () => {
 
     const result = engine.evaluateToolExecution({
       intent: 'transfer_funds',
-      tools: ['banking_transfer'],
+      tools: ['banking_create_transfer'],
       state: {
         collectedData: {
-          recipient: 'SAVINGS12345',
+          fromAccountId: 'account-from',
+          toAccountId: 'account-to',
           amount: 1500
         },
         confirmationGranted: false
@@ -38,7 +39,21 @@ describe('PolicyEngine', () => {
 
     expect(result.action).toBe('require_confirmation');
     expect(result.stage).toBe('pre_tool');
-    expect(result.details.tools).toEqual(['banking_transfer']);
+    expect(result.details.tools).toEqual(['banking_create_transfer']);
+    expect(result.question).toContain('account-to');
+  });
+
+  it('uses current MCP identifiers in fallback confirmation questions', () => {
+    const engine = new PolicyEngine();
+
+    expect(engine.buildFallbackConfirmationQuestion('transfer_funds', {
+      amount: 25,
+      fromAccountId: 'account-from',
+      toAccountId: 'account-to'
+    })).toContain('from account-from to account-to');
+    expect(engine.buildFallbackConfirmationQuestion('verify_transaction', {
+      alertId: 'alert-123'
+    })).toContain('fraud alert alert-123');
   });
 
   it('redacts sensitive response data before returning it', () => {

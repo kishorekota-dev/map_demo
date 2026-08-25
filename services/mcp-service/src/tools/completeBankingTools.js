@@ -17,10 +17,28 @@ const logger = require('../utils/logger');
 
 class CompleteBankingTools {
   constructor(bankingServiceUrl) {
-    this.bankingServiceUrl = bankingServiceUrl || process.env.BANKING_SERVICE_URL || 'http://localhost:3005/api/v1';
+    this.bankingServiceUrl = CompleteBankingTools.normalizeBankingServiceUrl(
+      bankingServiceUrl || process.env.BANKING_SERVICE_URL || 'http://localhost:3005'
+    );
     this.apiTimeout = parseInt(process.env.API_TIMEOUT) || 30000;
     
     logger.info('Complete Banking Tools initialized', { bankingServiceUrl: this.bankingServiceUrl });
+  }
+
+  /**
+   * Banking routes are mounted under /api/v1. Compose and local environment
+   * files commonly provide only the service origin, while some deployments
+   * already include the prefix. Normalize both forms to one canonical base.
+   */
+  static normalizeBankingServiceUrl(serviceUrl) {
+    const normalized = String(serviceUrl).trim().replace(/\/+$/, '');
+    if (/\/api\/v1$/i.test(normalized)) {
+      return normalized;
+    }
+    if (/\/api$/i.test(normalized)) {
+      return `${normalized}/v1`;
+    }
+    return `${normalized}/api/v1`;
   }
 
   /**

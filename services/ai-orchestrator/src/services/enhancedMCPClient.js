@@ -44,6 +44,15 @@ class EnhancedMCPClient {
   }
 
   /**
+   * Expose the canonical HTTP MCP origin used by the wrapped client. Health
+   * responses and diagnostics historically read baseUrl from the MCP client,
+   * so keep that contract available on the enhanced facade.
+   */
+  get baseUrl() {
+    return this.httpMCPClient.baseUrl;
+  }
+
+  /**
    * Initialize connections
    */
   async initialize() {
@@ -409,8 +418,10 @@ class EnhancedMCPClient {
 
     // Check HTTP MCP
     try {
-      await this.httpMCPClient.healthCheck();
-      health.httpMcp.healthy = true;
+      const httpHealth = await this.httpMCPClient.healthCheck();
+      health.httpMcp.healthy = httpHealth?.healthy === true
+        || httpHealth?.status === 'healthy'
+        || httpHealth?.overall === 'healthy';
     } catch (error) {
       logger.debug('HTTP MCP health check failed', { error: error.message });
     }

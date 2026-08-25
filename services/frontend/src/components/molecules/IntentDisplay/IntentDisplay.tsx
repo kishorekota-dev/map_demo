@@ -35,21 +35,21 @@ export const IntentDisplay: React.FC<IntentDisplayProps> = ({
       <div className="intent-display__section">
         <h3 className="intent-display__title">
           <Icon name="brain" size="medium" color="primary" />
-          Intent Analysis
+          Conversation insight
         </h3>
         
         <div className="intent-analysis">
           <div className="intent-analysis__item">
-            <label className="intent-analysis__label">Last Detected Intent:</label>
+            <span className="intent-analysis__label">Last detected intent</span>
             <span className="intent-analysis__value">
-              {currentIntent?.detected || 'None'}
+              {currentIntent?.detected?.replace(/_/g, ' ') || 'Waiting for a message'}
             </span>
           </div>
           
           {currentIntent && (
             <>
               <div className="intent-analysis__item">
-                <label className="intent-analysis__label">Confidence:</label>
+                <span className="intent-analysis__label">Confidence</span>
                 <div className="confidence-container">
                   <span className={clsx(
                     'confidence-value',
@@ -74,7 +74,7 @@ export const IntentDisplay: React.FC<IntentDisplayProps> = ({
               
               {currentIntent.entities && currentIntent.entities.length > 0 && (
                 <div className="intent-analysis__item">
-                  <label className="intent-analysis__label">Entities:</label>
+                  <span className="intent-analysis__label">Details detected</span>
                   <div className="entities-list">
                     {currentIntent.entities.map((entity, index) => (
                       <div key={index} className="entity-tag">

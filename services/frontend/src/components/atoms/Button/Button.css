@@ -29,12 +29,12 @@
 
 /* Button Variants */
 .button--primary {
-  background-color: #3b82f6;
+  background-color: var(--teal-dark);
   color: white;
 }
 
 .button--primary:hover:not(.button--disabled):not(.button--loading) {
-  background-color: #2563eb;
+  background-color: #0d5042;
   transform: translateY(-1px);
 }
 

@@ -68,13 +68,8 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
 
   return (
     <form className="login-form" onSubmit={handleSubmit}>
-      <div className="login-form__header">
-        <h2>Sign In</h2>
-        <p>Sign in to {runtimeConfig.productName}</p>
-      </div>
-
       {error && (
-        <div className="login-form__error-banner">
+        <div className="login-form__error-banner" role="alert">
           {error}
         </div>
       )}
@@ -83,7 +78,7 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
         name="username"
         type="text"
         label="Username"
-        placeholder="Enter your username"
+        placeholder="you@example.com"
         value={formData.username}
         onChange={handleChange}
         error={validationErrors.username}
@@ -116,13 +111,13 @@ export function LoginForm({ onSuccess, onError }: LoginFormProps) {
             <span>Signing in...</span>
           </>
         ) : (
-          'Sign In'
+          'Continue securely'
         )}
       </Button>
 
       <div className="login-form__footer">
         <p className="login-form__help-text">
-          Use the credentials issued by your organization administrator
+          Signing in confirms you are authorized to access {runtimeConfig.productName}.
         </p>
       </div>
     </form>

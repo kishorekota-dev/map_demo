@@ -7,6 +7,7 @@ export interface ChatMessage {
   timestamp: Date;
   intent?: IntentAnalysis;
   metadata?: MessageMetadata;
+  status?: 'sending' | 'sent' | 'error';
 }
 
 export interface IntentAnalysis {
@@ -30,7 +31,7 @@ export interface MessageMetadata {
 
 export interface ChatResponse {
   message: string;
-  intent: IntentAnalysis;
+  intent?: IntentAnalysis;
   response: {
     type: string;
     timestamp: string;
@@ -38,6 +39,9 @@ export interface ChatResponse {
   conversation: {
     sessionId: string;
     messageId: string;
+  };
+  metadata?: {
+    processingTime?: number;
   };
 }
 
@@ -91,7 +95,7 @@ export interface ApiError {
 }
 
 export interface ChatHistory {
-  messages: ChatMessage[];
+  messages: Array<ChatMessage | Record<string, unknown>>;
   session: {
     sessionId: string;
     messageCount: number;

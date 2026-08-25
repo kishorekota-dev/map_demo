@@ -1,10 +1,12 @@
 const rateLimit = require('express-rate-limit');
-const RedisStore = require('rate-limit-redis');
+const { RedisStore } = require('rate-limit-redis');
 const redis = require('redis');
 const logger = require('../utils/logger');
 
 // Create Redis client if Redis URL is provided
 let redisClient;
+let redisConnection;
+let redisConnectionError;
 if (process.env.REDIS_URL) {
   try {
     redisClient = redis.createClient({
@@ -12,9 +14,10 @@ if (process.env.REDIS_URL) {
       legacyMode: false
     });
     
-    redisClient.connect().catch((error) => {
+    redisConnection = redisClient.connect().then(() => true).catch((error) => {
+      redisConnectionError = error;
       logger.error('Redis connection failed for rate limiting', { error: error.message });
-      redisClient = null;
+      return false;
     });
     
     logger.info('Rate limiting using Redis store');
@@ -25,6 +28,19 @@ if (process.env.REDIS_URL) {
 } else {
   logger.info('Rate limiting using in-memory store');
 }
+
+const createRedisStore = (prefix) => redisClient
+  ? new RedisStore({
+      sendCommand: async (...args) => {
+        const connected = await redisConnection;
+        if (!connected) {
+          throw redisConnectionError || new Error('Rate limiter Redis connection unavailable');
+        }
+        return redisClient.sendCommand(args);
+      },
+      prefix
+    })
+  : undefined;
 
 /**
  * Standard rate limiter for API requests
@@ -39,6 +55,7 @@ const standardLimiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  passOnStoreError: true,
   skip: (req) => {
     // Skip rate limiting for health checks
     return req.path === '/health' || req.path === '/health/live';
@@ -60,10 +77,7 @@ const standardLimiter = rateLimit({
   },
   // Use Redis store if available
   ...(redisClient ? {
-    store: new RedisStore({
-      client: redisClient,
-      prefix: 'rl:api:'
-    })
+    store: createRedisStore('rl:api:')
   } : {})
 });
 
@@ -74,6 +88,7 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Only 5 attempts per window
   skipSuccessfulRequests: true, // Don't count successful requests
+  passOnStoreError: true,
   message: {
     error: 'Too many authentication attempts',
     message: 'Too many failed login attempts. Please try again later.',
@@ -94,10 +109,7 @@ const authLimiter = rateLimit({
     });
   },
   ...(redisClient ? {
-    store: new RedisStore({
-      client: redisClient,
-      prefix: 'rl:auth:'
-    })
+    store: createRedisStore('rl:auth:')
   } : {})
 });
 
@@ -114,11 +126,9 @@ const publicLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
   ...(redisClient ? {
-    store: new RedisStore({
-      client: redisClient,
-      prefix: 'rl:public:'
-    })
+    store: createRedisStore('rl:public:')
   } : {})
 });
 
@@ -129,6 +139,7 @@ const createUserLimiter = (windowMs = 60000, max = 100) => {
   return rateLimit({
     windowMs,
     max,
+    passOnStoreError: true,
     keyGenerator: (req) => {
       // Use user ID if available, otherwise fall back to IP
       return req.userId || req.user?.userId || req.ip;
@@ -154,10 +165,7 @@ const createUserLimiter = (windowMs = 60000, max = 100) => {
       });
     },
     ...(redisClient ? {
-      store: new RedisStore({
-        client: redisClient,
-        prefix: 'rl:user:'
-      })
+      store: createRedisStore('rl:user:')
     } : {})
   });
 };
@@ -166,7 +174,7 @@ const createUserLimiter = (windowMs = 60000, max = 100) => {
  * Cleanup function to close Redis connection
  */
 const cleanup = async () => {
-  if (redisClient) {
+  if (redisClient?.isOpen) {
     await redisClient.quit();
     logger.info('Rate limiter Redis connection closed');
   }

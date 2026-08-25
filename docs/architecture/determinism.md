@@ -39,22 +39,27 @@ Every customer message follows the **same fixed pipeline**:
 | Intent classification | Same text → same canonical intent | Deterministic pattern matcher is primary; DialogFlow is advisory only and gated behind a confidence threshold; one canonical fallback intent (`general_inquiry`). See `nlu-service/src/services/intent-vocabulary.js`. |
 | Intent vocabulary | One vocabulary across services | Every classifier name is mapped to the orchestrator's snake_case vocabulary; parity with `intentConfig` is enforced by a contract test. |
 | Workflow routing | Same state → same next node | LangGraph `StateGraph` with pure routing functions (`routeAfterIntent`, `routeAfterDataCheck`, `routeAfterTools`). |
-| Data collection | Same input → same required/invalid fields | Rule-based `intentMapper.validateData`; the SLM extractor runs at temperature 0 with JSON mode. |
+| Data collection | Same input → same required/invalid fields by default | Rule-based `intentMapper.validateData`; remote SLM extraction requires `SLM_ENABLED=true`, while an explicit local `SLM_BASE_URL` is a separate opt-in. |
 | Confirmation / limits | Same amount + state → same gate | Policy engine: regex + fixed thresholds (`>$25k` hard block, `≥$1k` confirmation). The confirm-then-execute path re-runs the same validation as the graph path. |
 | Tool execution | Same tool set per intent; same call shape | `INTENT_TOOL_MAPPING` is static; a single pinned MCP transport (no implicit per-error fallback); arguments validated against each tool's schema. |
-| Response generation | Stable wording for same input | The response LLM runs at `temperature 0`, `top_p 0`, with a pinned `seed`. |
+| Response generation | Tool-backed replies contain authoritative banking values | Any intent with a tool path uses the deterministic formatter over raw tool results. Optional remote generation can run only for no-tool intents and requires `OPENAI_ENABLED=true` plus a usable key. |
 | Session state | No lost updates under concurrency | Per-session mutex serializes read-modify-write; reads are side-effect free. |
 
-## LLM sampling configuration
+## Optional model configuration
 
-The single free-generation step (the user-facing response) and the structured
-extractor are pinned to deterministic sampling:
+Remote model calls are disabled by default. Tool-backed responses never use a
+response LLM, even when it is enabled. If an operator explicitly enables remote
+generation for no-tool intents or remote structured extraction, sampling is
+pinned as follows:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `OPENAI_ENABLED` | `false` | Explicitly opt into remote generation for no-tool intents; also requires a usable `OPENAI_API_KEY`. |
 | `OPENAI_TEMPERATURE` | `0` | Greedy decoding for reproducible responses. |
 | `OPENAI_TOP_P` | `0` | Disable nucleus sampling. |
 | `OPENAI_SEED` | `42` | Pin the seed where the endpoint supports it. |
+| `SLM_ENABLED` | `false` | Explicitly opt into remote extraction; also requires a usable SLM or OpenAI key. |
+| `SLM_BASE_URL` | unset | A non-empty local OpenAI-compatible URL is itself an opt-in and needs no remote key. |
 | `SLM_TEMPERATURE` | `0` | Structured field extraction must be stable. |
 | `SLM_JSON_MODE` | `true` | Force parseable JSON output. |
 | `MCP_TRANSPORT` | `http` | Pin a single tool transport (no implicit fallback). |
@@ -63,8 +68,9 @@ extractor are pinned to deterministic sampling:
 > `parseFloat(x) || 0.7` silently overrode an explicit `0`, making determinism
 > unconfigurable. Setting `OPENAI_TEMPERATURE=0` is now honored.
 
-Raising temperature above 0 trades reproducibility for response variety and is
-**not recommended** for the banking use case.
+Pinned sampling is best-effort reproducibility for optional model calls, not the
+banking-data correctness boundary. Raising temperature above 0 trades
+reproducibility for response variety and is **not recommended**.
 
 ## Fail-fast contracts
 

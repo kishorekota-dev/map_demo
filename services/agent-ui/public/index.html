@@ -6,11 +6,24 @@
     <title>Agent Dashboard - Customer Support</title>
     <link rel="stylesheet" href="/styles/dashboard.css">
     <link rel="stylesheet" href="/styles/chat.css">
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <div id="app" class="dashboard-container">
+    <section id="login-panel" class="login-panel" aria-labelledby="login-title">
+        <form id="login-form" class="login-card">
+            <div class="login-brand" aria-hidden="true">🎧</div>
+            <h1 id="login-title">Agent sign in</h1>
+            <p>Use your support account to open the dashboard.</p>
+            <label for="login-username">Username</label>
+            <input id="login-username" name="username" type="text" autocomplete="username" required>
+            <label for="login-password">Password</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+            <p id="login-error" class="form-error hidden" role="alert"></p>
+            <button id="login-submit" class="btn btn-primary" type="submit">Sign in</button>
+        </form>
+    </section>
+
+    <div id="app" class="dashboard-container" inert aria-hidden="true">
         <!-- Header -->
         <header class="dashboard-header">
             <div class="header-left">
@@ -46,7 +59,7 @@
             
             <div class="header-right">
                 <div class="notification-center">
-                    <button id="notifications-btn" class="notification-btn">
+                    <button id="notifications-btn" class="notification-btn" aria-label="Show notifications" aria-expanded="false">
                         <span class="icon">🔔</span>
                         <span id="notification-count" class="notification-count hidden">0</span>
                     </button>
@@ -148,23 +161,23 @@
                         </div>
                         
                         <div class="chat-actions">
-                            <button id="transfer-chat-btn" class="chat-action-btn" title="Transfer Chat">
+                            <button id="transfer-chat-btn" class="chat-action-btn" title="Transfer Chat" aria-label="Transfer chat">
                                 <span class="icon">↗️</span>
                             </button>
-                            <button id="escalate-chat-btn" class="chat-action-btn" title="Escalate Chat">
+                            <button id="escalate-chat-btn" class="chat-action-btn" title="Escalate Chat" aria-label="Escalate chat">
                                 <span class="icon">⬆️</span>
                             </button>
-                            <button id="customer-info-btn" class="chat-action-btn" title="Customer Info">
+                            <button id="customer-info-btn" class="chat-action-btn" title="Customer Info" aria-label="Show customer information">
                                 <span class="icon">ℹ️</span>
                             </button>
-                            <button id="end-chat-btn" class="chat-action-btn end-chat" title="End Chat">
+                            <button id="end-chat-btn" class="chat-action-btn end-chat" title="End Chat" aria-label="End chat">
                                 <span class="icon">✖️</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Chat Messages -->
-                    <div id="chat-messages" class="chat-messages">
+                    <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
                         <!-- Messages will be dynamically inserted here -->
                     </div>
 
@@ -180,20 +193,13 @@
                         </div>
                         
                         <div class="chat-input-area">
-                            <button id="emoji-btn" class="input-action-btn" title="Add Emoji">
-                                <span class="icon">😊</span>
-                            </button>
-                            
+                            <label class="sr-only" for="message-input">Message</label>
                             <textarea id="message-input" 
                                      class="message-input" 
                                      placeholder="Type your message..."
                                      rows="1"></textarea>
                             
-                            <button id="attachment-btn" class="input-action-btn" title="Attach File">
-                                <span class="icon">📎</span>
-                            </button>
-                            
-                            <button id="send-message-btn" class="send-btn" disabled title="Send Message">
+                            <button id="send-message-btn" class="send-btn" disabled title="Send Message" aria-label="Send message">
                                 <span class="icon">➤</span>
                             </button>
                         </div>
@@ -289,17 +295,17 @@
         </main>
 
         <!-- Queue Notifications -->
-        <div id="queue-notifications" class="queue-notifications">
+        <div id="queue-notifications" class="queue-notifications hidden" aria-label="Notifications">
             <!-- Queue items will be displayed here -->
         </div>
 
         <!-- Modals -->
         <!-- Chat Assignment Modal -->
-        <div id="chat-assignment-modal" class="modal hidden">
-            <div class="modal-content">
+        <div id="chat-assignment-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="assignment-title">
+            <div class="modal-content" tabindex="-1">
                 <div class="modal-header">
-                    <h3>New Chat Assignment</h3>
-                    <button class="modal-close" data-modal="chat-assignment-modal">×</button>
+                    <h3 id="assignment-title">New Chat Assignment</h3>
+                    <button class="modal-close" data-modal="chat-assignment-modal" aria-label="Close assignment">×</button>
                 </div>
                 <div class="modal-body">
                     <div class="assignment-info">
@@ -332,26 +338,17 @@
         </div>
 
         <!-- Transfer Chat Modal -->
-        <div id="transfer-modal" class="modal hidden">
-            <div class="modal-content">
+        <div id="transfer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
+            <div class="modal-content" tabindex="-1">
                 <div class="modal-header">
-                    <h3>Transfer Chat</h3>
-                    <button class="modal-close" data-modal="transfer-modal">×</button>
+                    <h3 id="transfer-title">Transfer Chat</h3>
+                    <button class="modal-close" data-modal="transfer-modal" aria-label="Close transfer dialog">×</button>
                 </div>
                 <div class="modal-body">
                     <div class="transfer-options">
                         <label for="transfer-agent">Select Agent:</label>
                         <select id="transfer-agent" class="form-select">
                             <option value="">Choose an agent...</option>
-                        </select>
-                        
-                        <label for="transfer-department">Or Department:</label>
-                        <select id="transfer-department" class="form-select">
-                            <option value="">Choose department...</option>
-                            <option value="technical">Technical Support</option>
-                            <option value="billing">Billing</option>
-                            <option value="sales">Sales</option>
-                            <option value="management">Management</option>
                         </select>
                         
                         <label for="transfer-reason">Transfer Reason:</label>
@@ -367,11 +364,11 @@
         </div>
 
         <!-- End Chat Modal -->
-        <div id="end-chat-modal" class="modal hidden">
-            <div class="modal-content">
+        <div id="end-chat-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="end-chat-title">
+            <div class="modal-content" tabindex="-1">
                 <div class="modal-header">
-                    <h3>End Chat Session</h3>
-                    <button class="modal-close" data-modal="end-chat-modal">×</button>
+                    <h3 id="end-chat-title">End Chat Session</h3>
+                    <button class="modal-close" data-modal="end-chat-modal" aria-label="Close end chat dialog">×</button>
                 </div>
                 <div class="modal-body">
                     <div class="end-chat-options">
@@ -386,10 +383,6 @@
                         <label for="chat-summary">Summary (Optional):</label>
                         <textarea id="chat-summary" class="form-textarea" 
                                  placeholder="Brief summary of the chat resolution..." rows="4"></textarea>
-                        
-                        <label for="follow-up">Follow-up Required:</label>
-                        <input type="checkbox" id="follow-up-required">
-                        <span>Schedule follow-up</span>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -400,11 +393,11 @@
         </div>
 
         <!-- Settings Modal -->
-        <div id="settings-modal" class="modal hidden">
-            <div class="modal-content large">
+        <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <div class="modal-content large" tabindex="-1">
                 <div class="modal-header">
-                    <h3>Agent Settings</h3>
-                    <button class="modal-close" data-modal="settings-modal">×</button>
+                    <h3 id="settings-title">Agent Settings</h3>
+                    <button class="modal-close" data-modal="settings-modal" aria-label="Close settings">×</button>
                 </div>
                 <div class="modal-body">
                     <div class="settings-tabs">
@@ -416,15 +409,15 @@
                     <div class="tab-content">
                         <div id="preferences-tab" class="tab-pane active">
                             <div class="setting-group">
-                                <label>Maximum Concurrent Chats:</label>
+                                <label for="max-chats">Maximum Concurrent Chats:</label>
                                 <input type="number" id="max-chats" min="1" max="10" value="3">
                             </div>
                             <div class="setting-group">
-                                <label>Auto Accept Chats:</label>
+                                <label for="auto-accept">Auto Accept Chats:</label>
                                 <input type="checkbox" id="auto-accept">
                             </div>
                             <div class="setting-group">
-                                <label>Default Status on Login:</label>
+                                <label for="default-status">Default Status on Login:</label>
                                 <select id="default-status">
                                     <option value="available">Available</option>
                                     <option value="away">Away</option>
@@ -434,15 +427,15 @@
                         
                         <div id="notifications-tab" class="tab-pane hidden">
                             <div class="setting-group">
-                                <label>New Chat Notifications:</label>
+                                <label for="chat-notifications">New Chat Notifications:</label>
                                 <input type="checkbox" id="chat-notifications" checked>
                             </div>
                             <div class="setting-group">
-                                <label>Sound Notifications:</label>
+                                <label for="sound-notifications">Sound Notifications:</label>
                                 <input type="checkbox" id="sound-notifications" checked>
                             </div>
                             <div class="setting-group">
-                                <label>Desktop Notifications:</label>
+                                <label for="desktop-notifications">Desktop Notifications:</label>
                                 <input type="checkbox" id="desktop-notifications">
                             </div>
                         </div>
@@ -473,7 +466,7 @@
         </div>
 
         <!-- Loading Overlay -->
-        <div id="loading-overlay" class="loading-overlay">
+        <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
             <div class="loading-spinner">
                 <div class="spinner"></div>
                 <p>Connecting to chat system...</p>
@@ -481,16 +474,10 @@
         </div>
 
         <!-- Toast Notifications -->
-        <div id="toast-container" class="toast-container">
+        <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false">
             <!-- Toast notifications will appear here -->
         </div>
     </div>
-
-    <!-- Audio for notifications -->
-    <audio id="notification-sound" preload="auto">
-        <source src="/sounds/notification.mp3" type="audio/mpeg">
-        <source src="/sounds/notification.ogg" type="audio/ogg">
-    </audio>
 
     <!-- Scripts -->
     <script src="/js/dashboard.js"></script>

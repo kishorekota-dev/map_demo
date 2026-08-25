@@ -223,7 +223,7 @@ const INTENT_BEHAVIOR = {
     requiresAllFields: true,
     canUseDefaults: false,
     maxRetries: 3,
-    confirmationMessage: 'Please confirm you want to transfer ${amount} to ${recipient}'
+    confirmationMessage: 'Please confirm you want to transfer ${amount} to ${toAccountId}'
   },
   
   card_management: {
@@ -266,7 +266,7 @@ const INTENT_BEHAVIOR = {
     requiresAllFields: true,
     canUseDefaults: false,
     maxRetries: 2,
-    confirmationMessage: 'Please confirm: Did you authorize transaction ${transactionId}?'
+    confirmationMessage: 'Please confirm your decision for fraud alert ${alertId}'
   },
   
   general_inquiry: {
@@ -358,26 +358,32 @@ const INTENT_DATA_REQUIREMENTS = {
   },
   
   transfer_funds: {
-    required: ['recipient', 'amount'],
-    optional: ['purpose', 'memo', 'scheduledDate'],
+    required: ['fromAccountId', 'toAccountId', 'amount'],
+    optional: ['purpose', 'memo', 'scheduledDate', 'currency'],
     validation: {
       amount: { type: 'number', min: 0.01, max: 10000 },
-      recipient: { type: 'string', pattern: '^[A-Z0-9]{10,20}$' }
+      fromAccountId: { type: 'string', minLength: 1, maxLength: 100 },
+      toAccountId: { type: 'string', minLength: 1, maxLength: 100 }
     }
   },
   
   card_management: {
     required: ['cardAction'],
-    optional: ['cardId', 'reason', 'replacementAddress'],
+    optional: ['cardId', 'reason', 'notes', 'replacementAddress'],
     validation: {
-      cardAction: { type: 'enum', values: ['block', 'unblock', 'replace', 'view'] }
+      cardAction: { type: 'enum', values: ['block', 'unblock', 'replace', 'view'] },
+      reason: {
+        type: 'enum',
+        values: ['lost', 'stolen', 'suspected_fraud', 'damaged', 'expired', 'other']
+      }
     }
   },
   
   dispute_transaction: {
-    required: ['transactionId', 'disputeType', 'reason'],
-    optional: ['description', 'evidenceProvided', 'amountDisputed', 'merchantName'],
+    required: ['transactionId', 'disputeType', 'amountDisputed', 'reason'],
+    optional: ['description', 'evidenceProvided', 'merchantName'],
     validation: {
+      amountDisputed: { type: 'number', min: 0.01 },
       disputeType: {
         type: 'enum',
         values: [
@@ -404,15 +410,15 @@ const INTENT_DATA_REQUIREMENTS = {
       fraudType: {
         type: 'enum',
         values: [
-          'unauthorized_transaction',
           'unusual_activity',
-          'card_not_present',
-          'identity_theft',
-          'account_takeover',
+          'high_value_transaction',
+          'multiple_failed_attempts',
+          'location_mismatch',
+          'velocity_check',
           'suspicious_merchant',
-          'phishing',
-          'atm_skimming',
-          'other_fraud'
+          'card_not_present',
+          'account_takeover',
+          'identity_theft'
         ]
       },
       description: { type: 'string', minLength: 10, maxLength: 1000 }
@@ -422,9 +428,15 @@ const INTENT_DATA_REQUIREMENTS = {
   check_fraud_alerts: {
     required: [],
     optional: ['status', 'severity', 'dateFrom', 'dateTo'],
+    validation: {
+      status: {
+        type: 'enum',
+        values: ['pending', 'investigating', 'confirmed', 'false_positive', 'resolved']
+      },
+      severity: { type: 'enum', values: ['low', 'medium', 'high', 'critical'] }
+    },
     defaults: {
-      limit: 10,
-      status: 'all'
+      limit: 10
     }
   },
   
@@ -449,11 +461,8 @@ const INTENT_DATA_REQUIREMENTS = {
   },
 
   account_statement: {
-    required: [],
-    optional: ['accountId', 'period', 'fromDate', 'toDate'],
-    defaults: {
-      period: 'last_30_days'
-    }
+    required: ['accountId', 'startDate', 'endDate'],
+    optional: ['period']
   },
 
   payment_inquiry: {
@@ -477,7 +486,7 @@ const INTENT_DATA_REQUIREMENTS = {
     optional: ['replacementAddress'],
     validation: {
       cardId: { type: 'string', minLength: 4, maxLength: 40 },
-      reason: { type: 'string', minLength: 3, maxLength: 200 }
+      reason: { type: 'enum', values: ['lost', 'stolen', 'damaged', 'expired', 'other'] }
     }
   },
 
@@ -505,8 +514,8 @@ const INTENT_DATA_REQUIREMENTS = {
 // flow (as the historical banking_transfer / *_details names did).
 const INTENT_TOOL_MAPPING = {
   balance_inquiry: [
-    'banking_get_balance',
-    'banking_get_account'
+    'banking_get_accounts',
+    'banking_get_balance'
   ],
 
   account_info: [
@@ -523,9 +532,7 @@ const INTENT_TOOL_MAPPING = {
   ],
 
   transfer_funds: [
-    'banking_create_transfer',
-    'banking_get_balance',
-    'banking_get_account'
+    'banking_create_transfer'
   ],
 
   payment_inquiry: [
@@ -534,29 +541,23 @@ const INTENT_TOOL_MAPPING = {
   ],
 
   card_management: [
+    'banking_get_card',
     'banking_get_cards',
     'banking_block_card',
-    'banking_unblock_card'
+    'banking_unblock_card',
+    'banking_replace_card'
   ],
 
   card_activation: [
-    'banking_get_cards',
     'banking_activate_card'
   ],
 
   card_replacement: [
-    'banking_get_cards',
     'banking_replace_card'
   ],
 
   dispute_transaction: [
-    'banking_get_transactions',
-    'banking_create_dispute',
-    'banking_get_disputes',
-    'banking_get_dispute',
-    'banking_add_dispute_evidence',
-    'banking_update_dispute',
-    'banking_withdraw_dispute'
+    'banking_create_dispute'
   ],
 
   // report_fraud is the URGENT fast path (no confirmation). Card blocking is a
@@ -564,13 +565,11 @@ const INTENT_TOOL_MAPPING = {
   // is intentionally NOT in the auto-executed tool set here — keeping the fast
   // path free of the sensitive-tool confirmation gate.
   report_fraud: [
-    'banking_create_fraud_alert',
-    'banking_get_transactions'
+    'banking_create_fraud_alert'
   ],
 
   check_fraud_alerts: [
-    'banking_get_fraud_alerts',
-    'banking_get_fraud_alert'
+    'banking_get_fraud_alerts'
   ],
 
   // verify_transaction makes a SINGLE deterministic decision: banking_verify_transaction
@@ -658,7 +657,7 @@ const INTENT_PROMPTS = {
   transfer_funds: {
     systemPromptTemplate: 'transfer_funds_system',
     userPromptTemplate: 'transfer_funds_user',
-    contextFields: ['userId', 'recipient', 'amount', 'purpose', 'transferResult']
+    contextFields: ['userId', 'fromAccountId', 'toAccountId', 'amount', 'purpose', 'transferResult']
   },
 
   payment_inquiry: {

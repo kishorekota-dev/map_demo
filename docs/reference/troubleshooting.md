@@ -207,9 +207,15 @@ grep ALLOWED_ORIGINS services/chat-backend/.env
 
 **Symptoms:** `OpenAI API error: 401`
 
+This applies only when optional remote generation or extraction was explicitly
+enabled. Tool-backed banking responses do not require OpenAI.
+
 **Solutions:**
 ```bash
-# Check API key is set
+# Confirm remote response generation was intentionally enabled
+echo $OPENAI_ENABLED
+
+# Check API key is set when OPENAI_ENABLED=true
 echo $OPENAI_API_KEY
 
 # Verify key is valid

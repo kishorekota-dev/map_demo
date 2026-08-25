@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const cardController = require('../controllers/cards');
 const { validators } = require('../middleware/validation');
-const { authorize, verifyAccountOwnership } = require('../middleware/auth');
+const { verifyAccountOwnership, verifyCardOwnership } = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply banking rate limiting to all card routes
@@ -25,6 +25,7 @@ router.get('/',
  */
 router.get('/:cardId',
   validators.validateId,
+  verifyCardOwnership,
   cardController.getCardById
 );
 
@@ -35,6 +36,7 @@ router.get('/:cardId',
  */
 router.post('/',
   validators.validateCreateCard,
+  verifyAccountOwnership,
   cardController.createCard
 );
 
@@ -46,6 +48,7 @@ router.post('/',
 router.put('/:cardId',
   validators.validateId,
   validators.validateUpdateCard,
+  verifyCardOwnership,
   cardController.updateCard
 );
 
@@ -56,6 +59,7 @@ router.put('/:cardId',
  */
 router.post('/:cardId/block',
   validators.validateId,
+  verifyCardOwnership,
   cardController.blockCard
 );
 
@@ -66,6 +70,7 @@ router.post('/:cardId/block',
  */
 router.post('/:cardId/unblock',
   validators.validateId,
+  verifyCardOwnership,
   cardController.activateCard
 );
 
@@ -76,6 +81,7 @@ router.post('/:cardId/unblock',
  */
 router.post('/:cardId/replace',
   validators.validateId,
+  verifyCardOwnership,
   cardController.replaceCard
 );
 
@@ -99,6 +105,7 @@ router.post('/:cardId/replace',
  */
 router.post('/:cardId/activate',
   validators.validateId,
+  verifyCardOwnership,
   cardController.activateCard
 );
 

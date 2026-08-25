@@ -5,7 +5,7 @@ Quick reference guide for running POC Chat Backend with Docker.
 ## 📦 What's Included
 
 This Docker setup includes:
-- **Chat Backend Service** - Node.js 18 with Express & Socket.IO
+- **Chat Backend Service** - Node.js 22 with Express & Socket.IO
 - **PostgreSQL 15** - Database for chat history and sessions
 - **Redis 7** - Cache for session storage and rate limiting
 

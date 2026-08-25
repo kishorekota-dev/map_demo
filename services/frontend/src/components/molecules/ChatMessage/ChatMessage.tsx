@@ -25,7 +25,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   const timeAgo = formatDistanceToNow(new Date(message.timestamp), { addSuffix: true });
 
   return (
-    <div className={messageClass}>
+    <article className={messageClass} aria-label={`${message.type === 'user' ? 'You' : 'Assistant'} said`}>
       <div className="chat-message__avatar">
         <Icon 
           name={message.type === 'user' ? 'user' : 'robot'} 
@@ -37,7 +37,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       <div className="chat-message__content">
         <div className="chat-message__header">
           <span className="chat-message__sender">
-            {message.type === 'user' ? 'You' : 'Bot'}
+            {message.type === 'user' ? 'You' : 'Assistant'}
           </span>
           <span className="chat-message__timestamp" title={message.timestamp.toLocaleString()}>
             {timeAgo}
@@ -47,6 +47,16 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         <div className="chat-message__text">
           {message.content}
         </div>
+
+        {message.status === 'sending' && (
+          <div className="chat-message__delivery">Sending…</div>
+        )}
+
+        {message.status === 'error' && (
+          <div className="chat-message__delivery chat-message__delivery--error">
+            Not sent — try again from the composer
+          </div>
+        )}
         
         {showIntent && message.intent && (
           <div className="chat-message__intent">
@@ -69,6 +79,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 };

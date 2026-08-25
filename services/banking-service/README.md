@@ -16,7 +16,7 @@ A comprehensive microservice for banking operations including account management
 
 ## Technology Stack
 
-- **Runtime**: Node.js >= 18.0.0
+- **Runtime**: Node.js >= 22.0.0
 - **Framework**: Express.js
 - **Database**: PostgreSQL >= 12.0
 - **Migrations**: Flyway
@@ -29,7 +29,7 @@ A comprehensive microservice for banking operations including account management
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - PostgreSQL 12+
 - npm or yarn
 

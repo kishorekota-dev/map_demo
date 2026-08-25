@@ -1,12 +1,34 @@
 import { useChat } from '@/hooks/useChat'
 import { ChatContainer } from '@organisms/ChatContainer/ChatContainer'
+import { useAuthStore } from '@/stores/authStore'
 
 export default function ChatPage() {
-  const { messages, loading, intent, sendMessage } = useChat()
+  const user = useAuthStore((state) => state.user)
+  const {
+    sessionId,
+    messages,
+    initializing,
+    sending,
+    intent,
+    error,
+    dismissError,
+    sendMessage,
+    startNewConversation,
+  } = useChat()
+  const displayName = user?.firstName || user?.name || user?.username || 'there'
 
   return (
-    <div style={{height:'100%'}}>
-      <ChatContainer messages={messages} onSend={sendMessage} loading={loading} intent={intent} />
-    </div>
+    <ChatContainer
+      messages={messages}
+      onSend={sendMessage}
+      onNewConversation={startNewConversation}
+      initializing={initializing}
+      sending={sending}
+      intent={intent}
+      error={error}
+      onDismissError={dismissError}
+      sessionId={sessionId}
+      displayName={displayName}
+    />
   )
 }

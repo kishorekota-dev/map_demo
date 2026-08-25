@@ -219,25 +219,6 @@ paths:
                     items:
                       $ref: '#/components/schemas/DialogFlowAgent'
 
-  /api/agents/{agentId}/train:
-    post:
-      tags: [Agent Management]
-      summary: Train DialogFlow agent
-      description: Trigger training for the DialogFlow agent
-      parameters:
-        - name: agentId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '202':
-          description: Training initiated successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TrainingResponse'
-
   /api/agents/{agentId}/intents:
     get:
       tags: [Agent Management]

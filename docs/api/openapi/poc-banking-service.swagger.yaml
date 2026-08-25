@@ -545,17 +545,33 @@ paths:
                       $ref: '#/components/schemas/Loan'
 
   # Fraud Detection
-  /api/fraud/alerts:
+  /api/v1/fraud/alerts:
     get:
       tags: [Fraud]
       summary: Get fraud alerts
       description: Retrieve fraud alerts for the authenticated user
+      operationId: getFraudAlerts
+      security:
+        - BearerAuth: []
       parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
         - name: status
           in: query
           schema:
             type: string
-            enum: [open, investigating, resolved, false_positive]
+            enum: [pending, investigating, confirmed, false_positive, resolved]
         - name: severity
           in: query
           schema:
@@ -568,29 +584,53 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [success, data]
                 properties:
-                  alerts:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
                     type: array
                     items:
                       $ref: '#/components/schemas/FraudAlert'
-
-  /api/fraud/report:
+        '401':
+          description: Authentication token is missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     post:
       tags: [Fraud]
-      summary: Report fraudulent activity
+      summary: Create a fraud alert
+      description: Report suspicious activity for the authenticated user
+      operationId: createFraudAlert
+      security:
+        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/FraudReportRequest'
+              $ref: '#/components/schemas/CreateFraudAlertRequest'
       responses:
         '201':
-          description: Fraud report submitted successfully
+          description: Fraud alert created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FraudReport'
+                $ref: '#/components/schemas/CreateFraudAlertResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication token is missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
   securitySchemes:
@@ -1220,101 +1260,144 @@ components:
     FraudAlert:
       type: object
       properties:
-        id:
+        alert_id:
           type: string
-        customerId:
+          format: uuid
+        user_id:
           type: string
-        alertType:
+          format: uuid
+        account_id:
           type: string
-          enum: [suspicious_transaction, unusual_location, high_amount, multiple_attempts]
+          format: uuid
+          nullable: true
+        transaction_id:
+          type: string
+          format: uuid
+          nullable: true
+        card_id:
+          type: string
+          format: uuid
+          nullable: true
+        alert_type:
+          type: string
+          enum: [unusual_activity, high_value_transaction, multiple_failed_attempts, location_mismatch, velocity_check, suspicious_merchant, card_not_present, account_takeover, identity_theft]
         severity:
           type: string
           enum: [low, medium, high, critical]
         status:
           type: string
-          enum: [open, investigating, resolved, false_positive]
+          enum: [pending, investigating, confirmed, false_positive, resolved]
         description:
           type: string
-        relatedTransactionId:
-          type: string
-        detectedAt:
-          type: string
-          format: date-time
-        resolvedAt:
-          type: string
-          format: date-time
-        resolution:
-          type: string
-        riskScore:
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+        amount:
           type: number
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        ip_address:
+          type: string
+          nullable: true
+        device_fingerprint:
+          type: string
+          nullable: true
+        action_taken:
+          type: string
+          enum: [none, blocked_transaction, blocked_card, frozen_account, notified_user, manual_review, escalated]
+          nullable: true
+        resolved_by:
+          type: string
+          format: uuid
+          nullable: true
+        resolution_notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        risk_score:
+          type: integer
           minimum: 0
           maximum: 100
+          nullable: true
 
-    FraudReportRequest:
+    CreateFraudAlertRequest:
       type: object
-      required: [reportType, description]
+      required: [alertType, description]
       properties:
-        reportType:
+        accountId:
           type: string
-          enum: [unauthorized_transaction, identity_theft, card_fraud, account_takeover]
+        transactionId:
+          type: string
+        cardId:
+          type: string
+        alertType:
+          type: string
+          enum: [unusual_activity, high_value_transaction, multiple_failed_attempts, location_mismatch, velocity_check, suspicious_merchant, card_not_present, account_takeover, identity_theft]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        riskScore:
+          type: integer
+          minimum: 0
+          maximum: 100
         description:
           type: string
-        relatedTransactionIds:
-          type: array
-          items:
-            type: string
-        relatedCardIds:
-          type: array
-          items:
-            type: string
-        incidentDate:
-          type: string
-          format: date-time
-        contactInfo:
+          minLength: 3
+          maxLength: 1000
+        details:
           type: object
-          properties:
-            phone:
-              type: string
-            email:
-              type: string
-            preferredMethod:
-              type: string
-              enum: [phone, email, mail]
+          additionalProperties: true
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        location:
+          type: string
+          maxLength: 255
+        ipAddress:
+          type: string
+        deviceFingerprint:
+          type: string
+          maxLength: 255
+        actionTaken:
+          type: string
+          enum: [none, blocked_transaction, blocked_card, frozen_account, notified_user, manual_review, escalated]
 
-    FraudReport:
+    CreateFraudAlertResponse:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Fraud alert created
+        data:
+          $ref: '#/components/schemas/FraudAlert'
+
+    ErrorResponse:
       type: object
       properties:
-        id:
+        error:
           type: string
-        customerId:
+        message:
           type: string
-        reportType:
+        code:
           type: string
-        status:
-          type: string
-          enum: [submitted, under_review, investigating, resolved]
-        caseNumber:
-          type: string
-        submittedAt:
-          type: string
-          format: date-time
-        assignedAgent:
-          type: string
-        estimatedResolutionDate:
-          type: string
-          format: date
-        updates:
-          type: array
-          items:
-            type: object
-            properties:
-              timestamp:
-                type: string
-                format: date-time
-              message:
-                type: string
-              updatedBy:
-                type: string
 
     Pagination:
       type: object

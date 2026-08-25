@@ -3,6 +3,7 @@ import { getRuntimeConfig } from '@/config/runtimeConfig';
 import { Input } from '@atoms/Input/Input';
 import { Button } from '@atoms/Button/Button';
 import { useAuthStore } from '@/stores/authStore';
+import authService from '@/services/authService';
 import type { UserProfile } from '@/types';
 import './TokenInput.css';
 
@@ -30,14 +31,12 @@ export function TokenInput({ onSuccess }: TokenInputProps) {
     }
 
     try {
-      // Basic JWT validation
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        setError('Invalid token format');
+      if (!authService.isTokenValid(token.trim())) {
+        setError('Enter a valid, unexpired JWT access token');
         return;
       }
 
-      setManualToken(token, {
+      setManualToken(token.trim(), {
         userId: userInfo.userId || 'manual-user',
         username: userInfo.username || 'API User',
       });
@@ -50,20 +49,15 @@ export function TokenInput({ onSuccess }: TokenInputProps) {
 
   return (
     <form className="token-input" onSubmit={handleSubmit}>
-      <div className="token-input__header">
-        <h2>Use API Token</h2>
-        <p>Enter your existing API token to authenticate</p>
-      </div>
-
       {error && (
-        <div className="token-input__error-banner">
+        <div className="token-input__error-banner" role="alert">
           {error}
         </div>
       )}
 
       <Input
         name="token"
-        type="text"
+        type="password"
         label="API Token"
         placeholder="Enter your JWT token"
         value={token}
@@ -73,7 +67,7 @@ export function TokenInput({ onSuccess }: TokenInputProps) {
       />
 
       <div className="token-input__optional">
-        <p className="token-input__optional-label">Optional Information</p>
+        <p className="token-input__optional-label">Profile details <span>(optional)</span></p>
         
         <Input
           name="username"
@@ -105,7 +99,7 @@ export function TokenInput({ onSuccess }: TokenInputProps) {
 
       <div className="token-input__footer">
         <p className="token-input__help-text">
-          Tokens should be issued by your enterprise identity or platform integration endpoint at {runtimeConfig.authBaseUrl}
+          Use an unexpired JWT issued by your organization. The configured identity endpoint is {runtimeConfig.authBaseUrl}.
         </p>
       </div>
     </form>

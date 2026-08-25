@@ -108,7 +108,8 @@ class DisputeRepository {
   async update(disputeId, updateData) {
     const {
       status, resolution, refundAmount, assignedTo, priority,
-      customerNotes, internalNotes, resolutionNotes
+      customerNotes, internalNotes, resolutionNotes, description,
+      reason, amountDisputed
     } = updateData;
 
     const resolvedAt = (status && ['resolved_in_favor', 'resolved_against', 'partially_resolved', 'withdrawn'].includes(status))
@@ -125,7 +126,9 @@ class DisputeRepository {
         customer_notes = COALESCE($7, customer_notes),
         internal_notes = COALESCE($8, internal_notes),
         resolution_notes = COALESCE($9, resolution_notes),
-        resolved_at = $10,
+        description = COALESCE($10, description),
+        amount_disputed = COALESCE($11, amount_disputed),
+        resolved_at = $12,
         updated_at = CURRENT_TIMESTAMP
       WHERE dispute_id = $1
       RETURNING *
@@ -133,7 +136,8 @@ class DisputeRepository {
 
     const values = [
       disputeId, status, resolution, refundAmount, assignedTo, priority,
-      customerNotes, internalNotes, resolutionNotes, resolvedAt
+      customerNotes || reason, internalNotes, resolutionNotes, description,
+      amountDisputed, resolvedAt
     ];
 
     const result = await db.query(query, values);

@@ -1,750 +1,761 @@
-// Dashboard Main JavaScript
 class AgentDashboard {
     constructor() {
         this.socket = null;
         this.agentId = null;
         this.agentData = null;
         this.currentChat = null;
+        this.pendingAssignment = null;
         this.activeChats = new Map();
-        this.queueItems = [];
         this.agents = new Map();
+        this.notifications = [];
         this.isConnected = false;
+        this.isAuthenticated = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
-        
+        this.activeModal = null;
+        this.chatManager = new ChatManager(this);
         this.init();
     }
 
     async init() {
-        try {
-            this.showLoadingOverlay('Initializing dashboard...');
-            
-            // Initialize UI components
-            this.initializeUI();
-            this.setupEventListeners();
-            
-            // Connect to socket
-            await this.connectSocket();
-            
-            // Initialize agent session
-            await this.initializeAgent();
-            
-            this.hideLoadingOverlay();
-            
-            console.log('Dashboard initialized successfully');
-        } catch (error) {
-            console.error('Failed to initialize dashboard:', error);
-            this.showToast('Failed to initialize dashboard', 'error');
-            this.hideLoadingOverlay();
-        }
-    }
-
-    initializeUI() {
-        // Update dashboard title and info
-        this.updateAgentInfo();
-        
-        // Initialize status
-        this.updateConnectionStatus('connecting');
-        
-        // Setup modal handlers
+        this.setupEventListeners();
         this.setupModals();
-        
-        // Setup keyboard shortcuts
         this.setupKeyboardShortcuts();
-        
-        // Initialize auto-refresh for queue
+        this.setupSettings();
         this.startQueueRefresh();
+        this.updateConnectionStatus('disconnected');
+
+        const stored = this.getStoredAgentData();
+        if (!stored) {
+            this.showLogin();
+            return;
+        }
+
+        try {
+            await this.startAuthenticatedSession(stored);
+        } catch (error) {
+            sessionStorage.removeItem('agentData');
+            this.showLogin('Your session expired. Please sign in again.');
+        }
     }
 
     setupEventListeners() {
-        // Status change
-        document.getElementById('agent-status').addEventListener('change', (e) => {
-            this.updateAgentStatus(e.target.value);
+        document.getElementById('login-form').addEventListener('submit', event => {
+            this.handleLogin(event);
         });
-
-        // Header buttons
-        document.getElementById('notifications-btn').addEventListener('click', () => {
-            this.toggleNotifications();
+        document.getElementById('agent-status').addEventListener('change', event => {
+            this.updateAgentStatus(event.target.value);
         });
-
-        document.getElementById('settings-btn').addEventListener('click', () => {
-            this.openModal('settings-modal');
+        document.getElementById('notifications-btn').addEventListener('click', () => this.toggleNotifications());
+        document.getElementById('settings-btn').addEventListener('click', () => this.openModal('settings-modal'));
+        document.getElementById('logout-btn').addEventListener('click', () => this.logout());
+        document.getElementById('refresh-queue-btn').addEventListener('click', () => this.refreshQueue());
+        document.getElementById('view-history-btn').addEventListener('click', () => this.viewChatHistory());
+        document.getElementById('transfer-chat-btn').addEventListener('click', () => this.openTransferModal());
+        document.getElementById('escalate-chat-btn').addEventListener('click', () => this.escalateChat());
+        document.getElementById('customer-info-btn').addEventListener('click', () => this.toggleCustomerInfo());
+        document.getElementById('end-chat-btn').addEventListener('click', () => this.openEndChatModal());
+        document.getElementById('accept-chat-btn').addEventListener('click', () => this.acceptChatAssignment());
+        document.getElementById('reject-chat-btn').addEventListener('click', () => this.rejectChatAssignment());
+        document.getElementById('confirm-end-chat-btn').addEventListener('click', () => {
+            this.chatManager.endChat(
+                document.getElementById('resolution-type').value,
+                document.getElementById('chat-summary').value
+            );
+            this.closeModal('end-chat-modal');
         });
-
-        document.getElementById('logout-btn').addEventListener('click', () => {
-            this.logout();
-        });
-
-        // Quick action buttons
-        document.getElementById('refresh-queue-btn').addEventListener('click', () => {
-            this.refreshQueue();
-        });
-
-        document.getElementById('view-history-btn').addEventListener('click', () => {
-            this.viewChatHistory();
-        });
-
-        // Chat action buttons
-        document.getElementById('transfer-chat-btn').addEventListener('click', () => {
-            this.openTransferModal();
-        });
-
-        document.getElementById('escalate-chat-btn').addEventListener('click', () => {
-            this.escalateChat();
-        });
-
-        document.getElementById('customer-info-btn').addEventListener('click', () => {
-            this.toggleCustomerInfo();
-        });
-
-        document.getElementById('end-chat-btn').addEventListener('click', () => {
-            this.openEndChatModal();
-        });
-
-        // Chat assignment modal
-        document.getElementById('accept-chat-btn').addEventListener('click', () => {
-            this.acceptChatAssignment();
-        });
-
-        document.getElementById('reject-chat-btn').addEventListener('click', () => {
-            this.rejectChatAssignment();
-        });
-    }
-
-    async connectSocket() {
-        return new Promise((resolve, reject) => {
-            try {
-                this.socket = io({
-                    transports: ['websocket'],
-                    timeout: 20000,
-                    reconnection: false
-                });
-
-                this.socket.on('connect', () => {
-                    console.log('Connected to server');
-                    this.isConnected = true;
-                    this.reconnectAttempts = 0;
-                    this.updateConnectionStatus('connected');
-                    this.setupSocketHandlers();
-                    resolve();
-                });
-
-                this.socket.on('connect_error', (error) => {
-                    console.error('Connection error:', error);
-                    this.updateConnectionStatus('disconnected');
-                    reject(error);
-                });
-
-                this.socket.on('disconnect', (reason) => {
-                    console.log('Disconnected:', reason);
-                    this.isConnected = false;
-                    this.updateConnectionStatus('disconnected');
-                    this.handleReconnection();
-                });
-
-            } catch (error) {
-                reject(error);
+        document.getElementById('confirm-transfer-btn').addEventListener('click', () => {
+            const agentId = document.getElementById('transfer-agent').value;
+            if (!agentId) {
+                this.showToast('Select an available agent first.', 'warning');
+                return;
             }
+            this.chatManager.transferChat(agentId, document.getElementById('transfer-reason').value);
+            this.closeModal('transfer-modal');
         });
     }
 
-    setupSocketHandlers() {
-        // Authentication
-        this.socket.on('authenticated', (data) => {
-            console.log('Agent authenticated:', data);
-            this.agentId = data.agentId;
-            this.showToast('Successfully connected to chat system', 'success');
-        });
+    async handleLogin(event) {
+        event.preventDefault();
+        const submit = document.getElementById('login-submit');
+        const errorElement = document.getElementById('login-error');
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
 
-        this.socket.on('authError', (error) => {
-            console.error('Authentication error:', error);
-            this.showToast('Authentication failed', 'error');
-        });
-
-        // Chat assignments
-        this.socket.on('chatAssignment', (assignment) => {
-            console.log('New chat assignment:', assignment);
-            this.showChatAssignment(assignment);
-        });
-
-        // Chat events
-        this.socket.on('chatAccepted', (data) => {
-            console.log('Chat accepted:', data);
-            this.handleChatAccepted(data);
-        });
-
-        this.socket.on('chatEnded', (data) => {
-            console.log('Chat ended:', data);
-            this.handleChatEnded(data);
-        });
-
-        this.socket.on('messageReceived', (message) => {
-            console.log('Message received:', message);
-            this.handleMessageReceived(message);
-        });
-
-        this.socket.on('messageSent', (data) => {
-            console.log('Message sent:', data);
-            this.handleMessageSent(data);
-        });
-
-        // Queue updates
-        this.socket.on('queueUpdate', (update) => {
-            console.log('Queue update:', update);
-            this.updateQueueDisplay(update);
-        });
-
-        this.socket.on('queueStatus', (status) => {
-            console.log('Queue status:', status);
-            this.updateQueueStats(status);
-        });
-
-        // Agent updates
-        this.socket.on('agentList', (agents) => {
-            console.log('Agent list:', agents);
-            this.updateAgentsList(agents);
-        });
-
-        this.socket.on('agentStatusChanged', (data) => {
-            console.log('Agent status changed:', data);
-            this.updateAgentStatus(data.agentId, data.status);
-        });
-
-        // System notifications
-        this.socket.on('systemNotification', (notification) => {
-            console.log('System notification:', notification);
-            this.showSystemNotification(notification);
-        });
-
-        // Typing indicators
-        this.socket.on('customerTyping', (data) => {
-            this.showTypingIndicator(data.isTyping);
-        });
-
-        // Error handling
-        this.socket.on('error', (error) => {
-            console.error('Socket error:', error);
-            this.showToast('Connection error occurred', 'error');
-        });
-    }
-
-    async initializeAgent() {
-        // Get agent info from session or prompt for login
-        this.agentData = this.getStoredAgentData() || await this.promptAgentLogin();
-        
-        if (this.agentData) {
-            // Authenticate with server
-            this.socket.emit('authenticate', {
-                agentId: this.agentData.agentId,
-                token: this.agentData.token,
-                agentInfo: this.agentData
-            });
-
-            // Update UI with agent info
-            this.updateAgentInfo();
-            
-            // Request initial data
-            this.requestInitialData();
-        }
-    }
-
-    getStoredAgentData() {
-        try {
-            const stored = localStorage.getItem('agentData');
-            return stored ? JSON.parse(stored) : null;
-        } catch (error) {
-            console.error('Error reading stored agent data:', error);
-            return null;
-        }
-    }
-
-    async promptAgentLogin() {
-        // SECURITY: the browser must NOT mint its own token. It collects
-        // credentials and exchanges them for a REAL, server-issued JWT via the
-        // server login endpoint (/api/auth/login), which proxies to the
-        // upstream authentication service. The socket layer then verifies that
-        // JWT against the shared JWT_SECRET before granting agent access.
-        // TODO: replace these prompt() dialogs with a proper login form/modal
-        // for credential capture.
-        const email = prompt('Enter your email:');
-        const password = prompt('Enter your password:');
-
-        if (!email || !password) {
-            this.showToast('Login cancelled', 'warning');
-            return null;
-        }
+        submit.disabled = true;
+        submit.textContent = 'Signing in…';
+        errorElement.classList.add('hidden');
 
         try {
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ email, password })
+                body: JSON.stringify({ username, password })
             });
-
             const data = await response.json();
-
-            if (!response.ok || !data.success || !data.token) {
-                this.showToast(data.error || 'Authentication failed', 'error');
-                return null;
+            if (!response.ok || !data.success || !data.token || !data.userId) {
+                throw new Error(data.error || 'Authentication failed');
             }
 
             const profile = data.agent || {};
             const agentData = {
-                agentId: profile.agentId || profile.id || email,
-                token: data.token, // real, server-issued JWT
-                name: profile.name || email,
-                email: profile.email || email,
+                agentId: data.userId,
+                token: data.token,
+                name: profile.name || username,
+                email: profile.email || username,
                 department: profile.department || 'customer-service',
                 role: profile.role || 'agent',
                 capabilities: profile.capabilities || ['general-support']
             };
-
-            // Cache profile for this session (the token is the source of trust;
-            // it is re-verified server-side on every socket authenticate).
-            localStorage.setItem('agentData', JSON.stringify(agentData));
-
-            return agentData;
+            sessionStorage.setItem('agentData', JSON.stringify(agentData));
+            document.getElementById('login-password').value = '';
+            await this.startAuthenticatedSession(agentData);
         } catch (error) {
-            console.error('Agent login failed:', error);
-            this.showToast('Unable to reach authentication service', 'error');
+            errorElement.textContent = error.message || 'Unable to sign in';
+            errorElement.classList.remove('hidden');
+            document.getElementById('login-password').focus();
+        } finally {
+            submit.disabled = false;
+            submit.textContent = 'Sign in';
+        }
+    }
+
+    async startAuthenticatedSession(agentData) {
+        try {
+            this.agentData = agentData;
+            this.agentId = agentData.agentId;
+            this.showLoadingOverlay('Connecting to the chat system…');
+            await this.connectSocket();
+            await this.authenticateSocket();
+            this.updateAgentInfo();
+            this.hideLogin();
+            this.hideLoadingOverlay();
+            this.requestInitialData();
+            this.showToast('Signed in and ready for chats.', 'success');
+        } catch (error) {
+            this.agentData = null;
+            this.agentId = null;
+            this.isAuthenticated = false;
+            sessionStorage.removeItem('agentData');
+            this.socket?.disconnect();
+            this.hideLoadingOverlay();
+            throw error;
+        }
+    }
+
+    getStoredAgentData() {
+        try {
+            const stored = sessionStorage.getItem('agentData');
+            return stored ? JSON.parse(stored) : null;
+        } catch (error) {
+            sessionStorage.removeItem('agentData');
             return null;
         }
     }
 
-    updateAgentInfo() {
-        if (this.agentData) {
-            document.getElementById('agent-name').textContent = this.agentData.name;
-            document.getElementById('agent-department').textContent = this.agentData.department;
-        }
-    }
+    connectSocket() {
+        if (this.socket?.connected) return Promise.resolve();
+        this.socket?.disconnect();
+        this.socket = io({ transports: ['websocket', 'polling'], timeout: 20000, reconnection: false });
+        this.setupSocketHandlers();
+        this.updateConnectionStatus('connecting');
 
-    updateConnectionStatus(status) {
-        const indicator = document.getElementById('connection-indicator');
-        const text = document.getElementById('connection-text');
-        
-        indicator.className = `connection-indicator ${status}`;
-        
-        switch (status) {
-            case 'connected':
-                text.textContent = 'Connected';
-                break;
-            case 'connecting':
-                text.textContent = 'Connecting...';
-                break;
-            case 'disconnected':
-                text.textContent = 'Disconnected';
-                break;
-            default:
-                text.textContent = 'Unknown';
-        }
-    }
-
-    requestInitialData() {
-        // Request queue status
-        this.socket.emit('getQueueStatus');
-        
-        // Request agent list
-        this.socket.emit('getAgentList');
-        
-        // Request chat history
-        this.socket.emit('getChatHistory', { limit: 10 });
-    }
-
-    updateAgentStatus(status, details = {}) {
-        if (this.socket && this.isConnected) {
-            this.socket.emit('updateStatus', { status, details });
-            
-            // Update UI
-            document.getElementById('agent-status').value = status;
-            this.showToast(`Status updated to ${status}`, 'info');
-        }
-    }
-
-    showChatAssignment(assignment) {
-        // Show assignment modal
-        document.getElementById('assignment-customer-name').textContent = assignment.customerName;
-        document.getElementById('assignment-issue-type').textContent = assignment.escalationReason || 'General inquiry';
-        document.getElementById('assignment-wait-time').textContent = `Wait Time: ${this.formatDuration(assignment.estimatedWaitTime)}`;
-        document.getElementById('assignment-priority').textContent = assignment.priority;
-        document.getElementById('assignment-department').textContent = assignment.customerData?.department || 'Customer Service';
-        document.getElementById('assignment-language').textContent = 'English';
-        
-        // Store assignment data
-        this.pendingAssignment = assignment;
-        
-        // Show modal
-        this.openModal('chat-assignment-modal');
-        
-        // Play notification sound
-        this.playNotificationSound();
-        
-        // Show desktop notification if enabled
-        this.showDesktopNotification('New Chat Assignment', {
-            body: `${assignment.customerName} is waiting for assistance`,
-            icon: '/favicon.ico'
+        return new Promise((resolve, reject) => {
+            this.socket.once('connect', () => {
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                resolve();
+            });
+            this.socket.once('connect_error', reject);
         });
     }
 
+    authenticateSocket() {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Authentication timed out')), 10000);
+            this.socket.once('authenticated', data => {
+                clearTimeout(timer);
+                this.agentId = data.agentId;
+                this.isAuthenticated = true;
+                this.updateConnectionStatus('connected');
+                resolve(data);
+            });
+            this.socket.once('authError', error => {
+                clearTimeout(timer);
+                reject(new Error(error?.message || 'Authentication failed'));
+            });
+            this.socket.emit('authenticate', {
+                agentId: this.agentData.agentId,
+                token: this.agentData.token,
+                agentInfo: this.agentData
+            });
+        });
+    }
+
+    setupSocketHandlers() {
+        this.socket.on('disconnect', reason => {
+            this.isConnected = false;
+            this.isAuthenticated = false;
+            this.updateConnectionStatus('disconnected');
+            if (reason !== 'io client disconnect' && this.agentData) this.handleReconnection();
+        });
+        this.socket.on('chatAssignment', assignment => this.showChatAssignment(assignment));
+        this.socket.on('chatAccepted', data => this.handleChatAccepted(data));
+        this.socket.on('chatRejected', () => this.showToast('Assignment returned to the queue.', 'info'));
+        this.socket.on('chatEnded', data => this.chatManager.handleChatEnded(data));
+        this.socket.on('messageReceived', message => this.handleMessageReceived(message));
+        this.socket.on('messageSent', data => this.chatManager.updateMessageStatus(data.messageId, 'sent'));
+        this.socket.on('messageError', data => {
+            this.chatManager.updateMessageStatus(data.messageId, 'error');
+            this.showToast(data.error || 'Message could not be sent.', 'error');
+        });
+        this.socket.on('chatHistory', data => {
+            this.chatManager.handleChatHistoryReceived(data);
+            this.renderRecentActivity(data.chats || []);
+        });
+        this.socket.on('customerInfo', data => this.showCustomerInfoPanel(data.info || {}));
+        this.socket.on('queueUpdate', update => this.updateQueueDisplay(update));
+        this.socket.on('queueStatus', status => this.updateQueueStats(status));
+        this.socket.on('agentList', agents => this.updateAgentsList(agents));
+        this.socket.on('agentStatusChanged', data => {
+            const agent = this.agents.get(data.agentId);
+            if (agent) agent.status = data.status;
+            this.updateAgentsList(Array.from(this.agents.values()));
+        });
+        this.socket.on('systemNotification', notification => this.showSystemNotification(notification));
+        this.socket.on('customerTyping', data => this.chatManager.showTypingIndicator(data.isTyping));
+        this.socket.on('preferencesUpdated', () => {
+            this.closeModal('settings-modal');
+            this.showToast('Settings saved.', 'success');
+        });
+        this.socket.on('preferencesError', data => this.showToast(data.message || 'Settings were not saved.', 'error'));
+        this.socket.on('chatError', data => this.showToast(data.error || 'Chat action failed.', 'error'));
+        this.socket.on('transferError', data => this.showToast(data.error || 'Transfer failed.', 'error'));
+        this.socket.on('error', error => this.showToast(error?.message || 'A connection error occurred.', 'error'));
+    }
+
+    showLogin(message = '') {
+        const panel = document.getElementById('login-panel');
+        const app = document.getElementById('app');
+        panel.classList.remove('hidden');
+        app.setAttribute('inert', '');
+        app.setAttribute('aria-hidden', 'true');
+        const error = document.getElementById('login-error');
+        error.textContent = message;
+        error.classList.toggle('hidden', !message);
+        document.getElementById('login-username').focus();
+        this.hideLoadingOverlay();
+    }
+
+    hideLogin() {
+        document.getElementById('login-panel').classList.add('hidden');
+        const app = document.getElementById('app');
+        app.removeAttribute('inert');
+        app.setAttribute('aria-hidden', 'false');
+    }
+
+    requestInitialData() {
+        this.socket.emit('getQueueStatus');
+        this.socket.emit('getAgentList');
+        this.socket.emit('getChatHistory', { limit: 10 });
+    }
+
+    updateAgentInfo() {
+        document.getElementById('agent-name').textContent = this.agentData?.name || this.agentId || 'Agent';
+        document.getElementById('agent-department').textContent = this.agentData?.department || '';
+    }
+
+    updateConnectionStatus(status) {
+        const allowed = ['connected', 'connecting', 'disconnected'];
+        const safeStatus = allowed.includes(status) ? status : 'disconnected';
+        document.getElementById('connection-indicator').className = `connection-indicator ${safeStatus}`;
+        document.getElementById('connection-text').textContent = {
+            connected: 'Connected', connecting: 'Connecting…', disconnected: 'Disconnected'
+        }[safeStatus];
+    }
+
+    updateAgentStatus(status, details = {}) {
+        if (!this.isAuthenticated) return;
+        this.socket.emit('updateStatus', { status, details });
+        document.getElementById('agent-status').value = status;
+    }
+
+    showChatAssignment(assignment) {
+        this.pendingAssignment = assignment;
+        document.getElementById('assignment-customer-name').textContent = assignment.customerName || 'Customer';
+        document.getElementById('assignment-issue-type').textContent = assignment.escalationReason || 'General inquiry';
+        document.getElementById('assignment-wait-time').textContent = `Wait Time: ${this.formatDuration(assignment.estimatedWaitTime)}`;
+        document.getElementById('assignment-priority').textContent = assignment.priority || 'medium';
+        document.getElementById('assignment-department').textContent = assignment.requirements?.department || 'Customer Service';
+        document.getElementById('assignment-language').textContent = assignment.requirements?.language || 'English';
+        this.notifications.push(assignment);
+        this.updateNotificationCount();
+        this.renderNotifications();
+        this.openModal('chat-assignment-modal');
+        this.showDesktopNotification('New Chat Assignment', `${assignment.customerName || 'A customer'} is waiting.`);
+    }
+
     acceptChatAssignment() {
-        if (this.pendingAssignment && this.socket) {
-            this.socket.emit('acceptChat', this.pendingAssignment);
-            this.closeModal('chat-assignment-modal');
-            this.pendingAssignment = null;
-            this.showToast('Chat assignment accepted', 'success');
-        }
+        if (!this.pendingAssignment) return;
+        this.socket.emit('acceptChat', this.pendingAssignment);
+        this.closeModal('chat-assignment-modal');
+        this.pendingAssignment = null;
     }
 
     rejectChatAssignment() {
-        if (this.pendingAssignment && this.socket) {
-            const reason = prompt('Reason for rejection (optional):') || 'unavailable';
-            this.socket.emit('rejectChat', {
-                ...this.pendingAssignment,
-                reason
-            });
-            this.closeModal('chat-assignment-modal');
-            this.pendingAssignment = null;
-            this.showToast('Chat assignment rejected', 'info');
-        }
+        if (!this.pendingAssignment) return;
+        this.socket.emit('rejectChat', { ...this.pendingAssignment, reason: 'unavailable' });
+        this.closeModal('chat-assignment-modal');
+        this.pendingAssignment = null;
     }
 
     handleChatAccepted(data) {
-        // Create new active chat
         const chat = {
-            sessionId: data.sessionId,
-            customerId: data.customerId,
-            customerName: data.customerName,
-            priority: data.priority,
+            ...data,
+            customerName: data.customerName || 'Customer',
+            priority: this.safePriority(data.priority),
             startTime: new Date(),
             messages: []
         };
-
-        this.activeChats.set(data.sessionId, chat);
+        this.activeChats.set(chat.sessionId, chat);
         this.currentChat = chat;
-
-        // Update UI
         this.showChatWindow(chat);
         this.updateActiveChatsList();
         this.updateChatStats();
-
-        // Request customer info
-        this.socket.emit('getCustomerInfo', { customerId: data.customerId });
+        this.chatManager.loadChatHistory(chat.sessionId);
+        if (chat.customerId) this.socket.emit('getCustomerInfo', { customerId: chat.customerId });
     }
 
     showChatWindow(chat) {
-        // Hide no-chat state
         document.getElementById('no-chat-selected').style.display = 'none';
-        
-        // Show chat window
-        const chatWindow = document.getElementById('chat-window');
-        chatWindow.classList.remove('hidden');
-
-        // Update chat header
-        document.getElementById('customer-name').textContent = chat.customerName;
-        document.getElementById('customer-initial').textContent = chat.customerName.charAt(0).toUpperCase();
-        document.getElementById('chat-priority').textContent = chat.priority;
-        document.getElementById('chat-priority').className = `chat-priority ${chat.priority}`;
-
-        // Clear messages
-        document.getElementById('chat-messages').innerHTML = '';
-
-        // Start chat timer
+        document.getElementById('chat-window').classList.remove('hidden');
+        document.getElementById('customer-name').textContent = chat.customerName || 'Customer';
+        document.getElementById('customer-initial').textContent = (chat.customerName || 'C').charAt(0).toUpperCase();
+        const priority = this.safePriority(chat.priority);
+        const priorityElement = document.getElementById('chat-priority');
+        priorityElement.textContent = priority;
+        priorityElement.className = `chat-priority ${priority}`;
+        this.chatManager.clearMessages();
+        chat.messages.forEach(message => this.chatManager.addMessageToUI(message, false));
         this.startChatTimer(chat);
-
-        // Show customer info panel
         this.showCustomerInfoPanel(chat);
     }
 
     handleMessageReceived(message) {
-        if (this.currentChat && message.sessionId === this.currentChat.sessionId) {
-            // Add message to current chat
-            this.addMessageToChat(message);
-            
-            // Hide typing indicator
-            this.showTypingIndicator(false);
-        }
-        
-        // Update chat in active chats
         const chat = this.activeChats.get(message.sessionId);
-        if (chat) {
-            chat.messages.push(message);
-            chat.lastMessage = message;
-            this.updateActiveChatsList();
+        if (!chat) return;
+        if (!chat.messages.some(item => item.messageId === message.messageId)) chat.messages.push(message);
+        chat.lastMessage = message;
+        if (this.currentChat?.sessionId === message.sessionId) {
+            this.chatManager.addMessageToUI(message, false);
+            this.chatManager.showTypingIndicator(false);
         }
+        this.updateActiveChatsList();
     }
 
-    updateQueueStats(status) {
-        document.getElementById('queue-waiting').textContent = status.totalInQueue || 0;
-        document.getElementById('my-chats-count').textContent = this.activeChats.size;
+    updateQueueStats(status = {}) {
+        document.getElementById('queue-waiting').textContent = Number(status.totalInQueue) || 0;
         document.getElementById('avg-wait-time').textContent = this.formatDuration(status.averageWaitTime || 0);
+        this.updateChatStats();
+    }
+
+    updateChatStats() {
+        document.getElementById('my-chats-count').textContent = this.activeChats.size;
+    }
+
+    updateQueueDisplay(update) {
+        if (update?.message) this.showToast(update.message, 'info');
+        this.refreshQueue();
     }
 
     updateActiveChatsList() {
         const container = document.getElementById('active-chats-list');
-        
+        container.replaceChildren();
         if (this.activeChats.size === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <span class="icon">💬</span>
-                    <p>No active chats</p>
-                </div>
-            `;
+            container.appendChild(this.makeEmptyState('💬', 'No active chats'));
             return;
         }
 
-        const chatItems = Array.from(this.activeChats.values()).map(chat => {
-            const isActive = this.currentChat && this.currentChat.sessionId === chat.sessionId;
-            const lastMessage = chat.lastMessage;
-            const preview = lastMessage ? 
-                (lastMessage.content || lastMessage.message || 'No message') : 
-                'Chat started';
+        for (const chat of this.activeChats.values()) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `chat-item${this.currentChat?.sessionId === chat.sessionId ? ' active' : ''}`;
+            button.addEventListener('click', () => this.chatManager.switchToChat(chat));
 
-            return `
-                <div class="chat-item ${isActive ? 'active' : ''}" data-session-id="${chat.sessionId}">
-                    <div class="chat-customer">${chat.customerName}</div>
-                    <div class="chat-preview">${preview}</div>
-                    <div class="chat-meta">
-                        <span class="chat-priority ${chat.priority}">${chat.priority}</span>
-                        <span class="chat-time">${this.formatTime(chat.startTime)}</span>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        container.innerHTML = chatItems;
-
-        // Add click handlers
-        container.querySelectorAll('.chat-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const sessionId = item.dataset.sessionId;
-                const chat = this.activeChats.get(sessionId);
-                if (chat) {
-                    this.switchToChat(chat);
-                }
-            });
-        });
+            const customer = document.createElement('span');
+            customer.className = 'chat-customer';
+            customer.textContent = chat.customerName || 'Customer';
+            const preview = document.createElement('span');
+            preview.className = 'chat-preview';
+            preview.textContent = chat.lastMessage?.content || 'Chat started';
+            const meta = document.createElement('span');
+            meta.className = 'chat-meta';
+            const priority = document.createElement('span');
+            const safePriority = this.safePriority(chat.priority);
+            priority.className = `chat-priority ${safePriority}`;
+            priority.textContent = safePriority;
+            const time = document.createElement('span');
+            time.className = 'chat-time';
+            time.textContent = this.formatTime(chat.startTime);
+            meta.append(priority, time);
+            button.append(customer, preview, meta);
+            container.appendChild(button);
+        }
     }
 
-    updateAgentsList(agents) {
+    updateAgentsList(agents = []) {
         const container = document.getElementById('agents-list');
-        
-        if (!agents || agents.length === 0) {
-            container.innerHTML = '<div class="loading">No agents online</div>';
+        container.replaceChildren();
+        this.agents.clear();
+        if (agents.length === 0) {
+            container.appendChild(this.makeEmptyState('👥', 'No agents online'));
             return;
         }
-
-        const agentItems = agents.map(agent => {
+        for (const agent of agents) {
             this.agents.set(agent.agentId, agent);
-            
-            return `
-                <div class="agent-item">
-                    <div class="agent-status-dot ${agent.status}"></div>
-                    <div class="agent-details">
-                        <div class="agent-name">${agent.name}</div>
-                        <div class="agent-stats">${agent.currentChats}/${agent.maxChats} chats</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+            const item = document.createElement('div');
+            item.className = 'agent-item';
+            const dot = document.createElement('span');
+            const safeStatus = ['available', 'busy', 'away', 'break', 'offline'].includes(agent.status)
+                ? agent.status : 'offline';
+            dot.className = `agent-status-dot ${safeStatus}`;
+            const details = document.createElement('div');
+            details.className = 'agent-details';
+            const name = document.createElement('div');
+            name.className = 'agent-name';
+            name.textContent = agent.name || agent.agentId;
+            const stats = document.createElement('div');
+            stats.className = 'agent-stats';
+            stats.textContent = `${agent.currentChats || 0}/${agent.maxChats || 0} chats`;
+            details.append(name, stats);
+            item.append(dot, details);
+            container.appendChild(item);
+        }
+    }
 
-        container.innerHTML = agentItems;
+    makeEmptyState(iconText, message) {
+        const state = document.createElement('div');
+        state.className = 'empty-state';
+        const icon = document.createElement('span');
+        icon.className = 'icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = iconText;
+        const text = document.createElement('p');
+        text.textContent = message;
+        state.append(icon, text);
+        return state;
     }
 
     refreshQueue() {
-        if (this.socket && this.isConnected) {
-            this.socket.emit('getQueueStatus');
-            this.showToast('Queue refreshed', 'info');
+        if (!this.isAuthenticated) return;
+        this.socket.emit('getQueueStatus');
+    }
+
+    viewChatHistory() {
+        if (!this.isAuthenticated) return;
+        document.getElementById('chat-history-panel').classList.remove('hidden');
+        this.socket.emit('getChatHistory', { limit: 10 });
+        document.getElementById('chat-history-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    renderRecentActivity(chats) {
+        const container = document.getElementById('recent-activity');
+        container.replaceChildren();
+        if (!chats.length) {
+            container.appendChild(this.makeEmptyState('📝', 'No recent activity'));
+            return;
+        }
+        for (const chat of chats.slice(0, 10)) {
+            const item = document.createElement('div');
+            item.className = 'activity-item';
+            const title = document.createElement('strong');
+            title.textContent = chat.customerName || 'Customer';
+            const detail = document.createElement('span');
+            detail.textContent = `${chat.status || 'completed'} · ${this.formatTime(chat.startTime)}`;
+            item.append(title, detail);
+            container.appendChild(item);
         }
     }
 
-    // Utility methods
-    formatDuration(ms) {
-        if (!ms || ms < 1000) return '0m';
-        
-        const minutes = Math.floor(ms / 60000);
-        const hours = Math.floor(minutes / 60);
-        
-        if (hours > 0) {
-            return `${hours}h ${minutes % 60}m`;
-        }
-        return `${minutes}m`;
-    }
-
-    formatTime(date) {
-        return new Intl.DateTimeFormat('en-US', {
-            hour: '2-digit',
-            minute: '2-digit'
-        }).format(new Date(date));
-    }
-
-    showLoadingOverlay(message = 'Loading...') {
-        const overlay = document.getElementById('loading-overlay');
-        overlay.querySelector('p').textContent = message;
-        overlay.style.display = 'flex';
-    }
-
-    hideLoadingOverlay() {
-        document.getElementById('loading-overlay').style.display = 'none';
-    }
-
-    showToast(message, type = 'info') {
-        // This will be implemented in notifications.js
-        if (window.showToast) {
-            window.showToast(message, type);
-        } else {
-            console.log(`Toast: ${type} - ${message}`);
+    toggleNotifications() {
+        const container = document.getElementById('queue-notifications');
+        const button = document.getElementById('notifications-btn');
+        const willShow = container.classList.contains('hidden');
+        this.renderNotifications();
+        container.classList.toggle('hidden', !willShow);
+        button.setAttribute('aria-expanded', String(willShow));
+        if (willShow) {
+            this.notifications = [];
+            this.updateNotificationCount();
         }
     }
 
-    playNotificationSound() {
-        try {
-            const audio = document.getElementById('notification-sound');
-            if (audio) {
-                audio.play().catch(console.error);
+    updateNotificationCount() {
+        const count = document.getElementById('notification-count');
+        count.textContent = this.notifications.length;
+        count.classList.toggle('hidden', this.notifications.length === 0);
+    }
+
+    renderNotifications() {
+        const container = document.getElementById('queue-notifications');
+        container.replaceChildren();
+        if (this.notifications.length === 0) {
+            container.appendChild(this.makeEmptyState('🔔', 'No new notifications'));
+            return;
+        }
+
+        for (const notification of this.notifications.slice(-5).reverse()) {
+            const item = document.createElement('div');
+            item.className = 'queue-notification';
+            const title = document.createElement('strong');
+            title.textContent = notification.customerName || notification.type || 'System notification';
+            const message = document.createElement('p');
+            message.textContent = notification.message
+                || notification.escalationReason
+                || 'A chat is ready for review.';
+            item.append(title, message);
+            container.appendChild(item);
+        }
+    }
+
+    showSystemNotification(notification = {}) {
+        this.notifications.push(notification);
+        this.updateNotificationCount();
+        this.renderNotifications();
+        this.showToast(notification.message || 'New system notification', notification.severity || 'info');
+    }
+
+    toggleCustomerInfo() {
+        document.getElementById('customer-info-panel').classList.toggle('hidden');
+    }
+
+    showCustomerInfoPanel(info = {}) {
+        const chat = this.currentChat || {};
+        const name = info.name || chat.customerName || 'Customer';
+        document.getElementById('customer-info-panel').classList.remove('hidden');
+        document.getElementById('profile-name').textContent = name;
+        document.getElementById('profile-initial').textContent = name.charAt(0).toUpperCase();
+        document.getElementById('profile-email').textContent = info.email || 'Not available';
+        document.getElementById('account-type').textContent = info.accountType || chat.customerData?.accountType || 'Standard';
+        document.getElementById('member-since').textContent = info.memberSince || 'Not available';
+        document.getElementById('total-chats').textContent = info.totalChats || 0;
+        document.getElementById('last-contact').textContent = info.lastContact || 'Not available';
+        document.getElementById('issue-description').textContent = chat.escalationReason || 'No issue description available';
+        document.getElementById('issue-priority').textContent = this.safePriority(chat.priority);
+        document.getElementById('issue-category').textContent = chat.customerData?.issueType || 'General';
+        document.getElementById('wait-time').textContent = this.formatDuration(chat.estimatedWaitTime || 0);
+    }
+
+    openEndChatModal() {
+        if (this.currentChat) this.openModal('end-chat-modal');
+    }
+
+    openTransferModal() {
+        if (!this.currentChat) return;
+        const select = document.getElementById('transfer-agent');
+        select.replaceChildren(new Option('Choose an agent…', ''));
+        for (const [agentId, agent] of this.agents) {
+            if (agentId !== this.agentId && agent.status === 'available') {
+                select.appendChild(new Option(`${agent.name} (${agent.department})`, agentId));
             }
-        } catch (error) {
-            console.error('Error playing notification sound:', error);
         }
+        this.openModal('transfer-modal');
     }
 
-    showDesktopNotification(title, options = {}) {
-        if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification(title, options);
-        }
+    escalateChat() {
+        if (!this.currentChat) return;
+        this.socket.emit('escalateChat', {
+            ...this.currentChat,
+            reason: 'agent_request'
+        });
+        this.showToast('Chat returned to the priority queue.', 'info');
     }
 
-    // Modal management
+    setupSettings() {
+        document.querySelectorAll('.tab-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(item => item.classList.toggle('active', item === button));
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.toggle('hidden', pane.id !== `${button.dataset.tab}-tab`);
+                    pane.classList.toggle('active', pane.id === `${button.dataset.tab}-tab`);
+                });
+            });
+        });
+        document.getElementById('save-settings-btn').addEventListener('click', async () => {
+            if (document.getElementById('desktop-notifications').checked
+                && 'Notification' in window
+                && Notification.permission === 'default') {
+                await Notification.requestPermission();
+            }
+            this.socket.emit('updatePreferences', {
+                maxConcurrentChats: Number(document.getElementById('max-chats').value),
+                autoAcceptChats: document.getElementById('auto-accept').checked,
+                notificationSound: document.getElementById('sound-notifications').checked,
+                defaultStatus: document.getElementById('default-status').value
+            });
+        });
+    }
+
     setupModals() {
-        // Close modal when clicking outside
+        document.querySelectorAll('.modal-close').forEach(button => {
+            button.addEventListener('click', () => this.closeModal(button.dataset.modal));
+        });
+        document.querySelectorAll('[id^="cancel-"]').forEach(button => {
+            button.addEventListener('click', () => this.closeModal(button.closest('.modal').id));
+        });
         document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    this.closeModal(modal.id);
-                }
-            });
-        });
-
-        // Close modal buttons
-        document.querySelectorAll('.modal-close').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const modalId = btn.dataset.modal;
-                this.closeModal(modalId);
-            });
-        });
-
-        // Cancel buttons
-        document.querySelectorAll('[id$="-cancel-btn"], [id^="cancel-"]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const modal = btn.closest('.modal');
-                if (modal) {
-                    this.closeModal(modal.id);
-                }
+            modal.addEventListener('click', event => {
+                if (event.target === modal) this.closeModal(modal.id);
             });
         });
     }
 
     openModal(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
+        if (!modal) return;
+        this.lastFocused = document.activeElement;
+        this.activeModal = modal;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        (modal.querySelector('button, input, select, textarea') || modal.querySelector('.modal-content')).focus();
     }
 
     closeModal(modalId) {
         const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.add('hidden');
-            document.body.style.overflow = '';
-        }
+        if (!modal) return;
+        modal.classList.add('hidden');
+        this.activeModal = null;
+        document.body.style.overflow = '';
+        this.lastFocused?.focus();
     }
 
     setupKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                switch (e.key.toLowerCase()) {
-                    case 'enter':
-                        if (e.target.id === 'message-input') {
-                            e.preventDefault();
-                            this.sendMessage();
-                        }
-                        break;
-                    case 'e':
-                        if (!e.target.matches('input, textarea')) {
-                            e.preventDefault();
-                            this.openEndChatModal();
-                        }
-                        break;
-                    case 't':
-                        if (!e.target.matches('input, textarea')) {
-                            e.preventDefault();
-                            this.openTransferModal();
-                        }
-                        break;
-                    case 'r':
-                        if (!e.target.matches('input, textarea')) {
-                            e.preventDefault();
-                            this.refreshQueue();
-                        }
-                        break;
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Tab' && this.activeModal) {
+                const focusable = Array.from(this.activeModal.querySelectorAll(
+                    'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+                )).filter(element => element.offsetParent !== null);
+                if (focusable.length) {
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus();
+                    }
                 }
+            }
+            if (event.key === 'Escape' && this.activeModal) {
+                this.closeModal(this.activeModal.id);
+                return;
+            }
+            if (!(event.ctrlKey || event.metaKey)) return;
+            if (event.key === 'Enter' && event.target.id === 'message-input') {
+                event.preventDefault();
+                this.chatManager.sendMessage();
+            } else if (!event.target.matches('input, textarea, select') && event.key.toLowerCase() === 'e') {
+                event.preventDefault();
+                this.openEndChatModal();
+            } else if (!event.target.matches('input, textarea, select') && event.key.toLowerCase() === 't') {
+                event.preventDefault();
+                this.openTransferModal();
             }
         });
     }
 
     startQueueRefresh() {
-        // Refresh queue every 30 seconds
-        setInterval(() => {
-            if (this.socket && this.isConnected) {
-                this.socket.emit('getQueueStatus');
-            }
-        }, 30000);
+        this.queueTimer = setInterval(() => this.refreshQueue(), 30000);
     }
 
-    handleReconnection() {
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            this.updateConnectionStatus('connecting');
-            
-            setTimeout(() => {
-                this.connectSocket().catch(() => {
-                    // Retry failed, will be handled by the retry logic
-                });
-            }, 5000 * this.reconnectAttempts);
-        } else {
-            this.showToast('Connection lost. Please refresh the page.', 'error');
+    async handleReconnection() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            this.showToast('Connection lost. Sign in again to continue.', 'error');
+            this.logout(false);
+            return;
         }
+        this.reconnectAttempts += 1;
+        this.updateConnectionStatus('connecting');
+        setTimeout(async () => {
+            try {
+                await this.connectSocket();
+                await this.authenticateSocket();
+                this.requestInitialData();
+            } catch (error) {
+                this.handleReconnection();
+            }
+        }, 1000 * this.reconnectAttempts);
     }
 
     startChatTimer(chat) {
-        // Update chat duration every second
-        const updateDuration = () => {
-            if (this.currentChat && this.currentChat.sessionId === chat.sessionId) {
-                const duration = Date.now() - chat.startTime.getTime();
-                document.getElementById('chat-duration').textContent = this.formatDuration(duration);
+        if (chat.timer) clearInterval(chat.timer);
+        const update = () => {
+            if (this.currentChat?.sessionId === chat.sessionId) {
+                document.getElementById('chat-duration').textContent = this.formatDuration(Date.now() - chat.startTime.getTime());
             }
         };
-
-        chat.timer = setInterval(updateDuration, 1000);
+        update();
+        chat.timer = setInterval(update, 1000);
     }
 
-    logout() {
-        if (confirm('Are you sure you want to logout?')) {
-            // Clear stored data
-            localStorage.removeItem('agentData');
-            
-            // Disconnect socket
-            if (this.socket) {
-                this.socket.disconnect();
-            }
-            
-            // Redirect to login or reload
-            window.location.reload();
+    showLoadingOverlay(message) {
+        const overlay = document.getElementById('loading-overlay');
+        overlay.querySelector('p').textContent = message;
+        overlay.classList.remove('hidden');
+    }
+
+    hideLoadingOverlay() {
+        document.getElementById('loading-overlay').classList.add('hidden');
+    }
+
+    showToast(message, type = 'info') {
+        const allowed = ['info', 'success', 'warning', 'error'];
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${allowed.includes(type) ? type : 'info'}`;
+        toast.textContent = message;
+        document.getElementById('toast-container').appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
+    }
+
+    showDesktopNotification(title, body) {
+        if (document.getElementById('desktop-notifications').checked
+            && 'Notification' in window
+            && Notification.permission === 'granted') {
+            new Notification(title, { body });
         }
+    }
+
+    safePriority(priority) {
+        return ['low', 'medium', 'high', 'critical'].includes(priority) ? priority : 'medium';
+    }
+
+    formatDuration(ms) {
+        const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        if (hours) return `${hours}h ${minutes}m`;
+        if (minutes) return `${minutes}m ${seconds}s`;
+        return `${seconds}s`;
+    }
+
+    formatTime(date) {
+        const value = new Date(date || Date.now());
+        return Number.isNaN(value.getTime()) ? '' : value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    logout(showLogin = true) {
+        sessionStorage.removeItem('agentData');
+        localStorage.removeItem('agentData');
+        this.agentData = null;
+        this.agentId = null;
+        this.isAuthenticated = false;
+        this.socket?.disconnect();
+        if (showLogin) this.showLogin();
     }
 }
 
-// Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.dashboard = new AgentDashboard();
 });

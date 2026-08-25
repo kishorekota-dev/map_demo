@@ -137,9 +137,14 @@ logger.agent = (event, agentId, details = {}) => {
 };
 
 // Queue activity logging utility
-logger.queue = (event, details = {}) => {
+logger.queue = (event, queueId, details = {}) => {
+    if (queueId && typeof queueId === 'object') {
+        details = queueId;
+        queueId = details.queueId;
+    }
     componentLoggers.queue.info(`Queue Event: ${event}`, {
         queueEvent: event,
+        queueId,
         timestamp: new Date().toISOString(),
         ...details
     });
@@ -150,6 +155,15 @@ logger.chat = (event, sessionId, details = {}) => {
     componentLoggers.chat.info(`Chat Event: ${event}`, {
         chatEvent: event,
         sessionId,
+        timestamp: new Date().toISOString(),
+        ...details
+    });
+};
+
+logger.socket = (event, socketId, details = {}) => {
+    componentLoggers.socket.info(`Socket Event: ${event}`, {
+        socketEvent: event,
+        socketId,
         timestamp: new Date().toISOString(),
         ...details
     });

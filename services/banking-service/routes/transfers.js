@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const transferController = require('../controllers/transfers');
 const { validators, businessValidators } = require('../middleware/validation');
-const { authorize, verifyAccountOwnership } = require('../middleware/auth');
+const { verifyAccountOwnership, verifyTransferOwnership } = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply banking rate limiting to all transfer routes
@@ -26,6 +26,7 @@ router.get('/',
  */
 router.get('/:transferId',
   validators.validateId,
+  verifyTransferOwnership,
   transferController.getTransferById
 );
 
@@ -36,6 +37,7 @@ router.get('/:transferId',
  */
 router.post('/',
   validators.validateCreateTransfer,
+  verifyAccountOwnership,
   businessValidators.validateSufficientFunds,
   businessValidators.validateDailyLimits,
   transferController.createTransfer
@@ -59,6 +61,7 @@ router.post('/',
  */
 router.post('/:transferId/cancel',
   validators.validateId,
+  verifyTransferOwnership,
   transferController.cancelTransfer
 );
 

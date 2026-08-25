@@ -34,6 +34,13 @@ class SocketHandler {
                 socket,
                 sessionId: null,
                 userId: null,
+                principalId: null,
+                role: null,
+                service: null,
+                verifiedPrincipal: null,
+                isAgentPrincipal: false,
+                canRelayAgent: false,
+                agentAssignments: new Map(),
                 connectedAt: new Date(),
                 lastActivity: new Date(),
                 isAuthenticated: false,
@@ -137,11 +144,23 @@ class SocketHandler {
             if (!clientInfo || !clientInfo.isAuthenticated) {
                 return respond(false, 'Not authenticated');
             }
+            if (!clientInfo.isAgentPrincipal) {
+                return respond(false, 'Agent authorization required');
+            }
 
             switch (type) {
                 case 'getSessionHistory': {
                     const session = await this.sessionManager.getSession(data.sessionId);
                     if (!session) return respond(false, 'Session not found');
+                    const requestedAgentId = this.getRequestedAgentId(data)
+                        || clientInfo.agentAssignments?.get(data.sessionId);
+                    const access = this.getAssignedSessionAccess(
+                        clientInfo,
+                        session,
+                        requestedAgentId,
+                        { requireActive: false }
+                    );
+                    if (!access.authorized) return respond(false, 'Access denied');
                     const history = await this.chatService.getMessageHistory?.(data.sessionId)
                         ?? session.messages
                         ?? session.state?.conversationHistory
@@ -150,36 +169,87 @@ class SocketHandler {
                 }
 
                 case 'sendMessage': {
-                    // An agent posting a message into a customer session.
+                    if (!data.sessionId) return respond(false, 'Session ID required');
+                    if (typeof data.content !== 'string' || !data.content.trim()) {
+                        return respond(false, 'Message content required');
+                    }
+                    const maxLength = parseInt(process.env.MAX_MESSAGE_LENGTH, 10) || 2000;
+                    if (data.content.length > maxLength) return respond(false, 'Message too long');
+
+                    const session = await this.sessionManager.getSession(data.sessionId);
+                    if (!session) return respond(false, 'Session not found');
+                    // Agent UI historically nested this field in metadata. It is
+                    // still treated only as an assertion and must match the live
+                    // session assignment before it can affect attribution.
+                    const requestedAgentId = this.getRequestedAgentId(data, true);
+                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
+                    if (!access.authorized) return respond(false, 'Access denied');
+
                     await this.chatService.sendResponse(
                         data.sessionId,
                         { content: data.content, type: data.type || 'text' },
-                        { agentId: clientInfo.userId, agentType: 'human' }
+                        { agentId: access.agentId, agentType: 'human' }
                     );
-                    return respond(true, { sessionId: data.sessionId, delivered: true });
+                    return respond(true, {
+                        sessionId: data.sessionId,
+                        agentId: access.agentId,
+                        delivered: true
+                    });
                 }
 
                 case 'assignAgent': {
+                    const session = await this.sessionManager.getSession(data.sessionId);
+                    if (!session) return respond(false, 'Session not found');
+                    const requestedAgentId = this.getRequestedAgentId(data)
+                        || (!clientInfo.canRelayAgent ? clientInfo.principalId : null);
+                    if (!requestedAgentId) return respond(false, 'Agent ID required');
+                    if (!clientInfo.canRelayAgent && requestedAgentId !== clientInfo.principalId) {
+                        return respond(false, 'Access denied');
+                    }
+                    const currentAgentId = this.getAssignedAgentId(session);
+                    if (this.hasActiveAssignment(session) && currentAgentId !== requestedAgentId) {
+                        return respond(false, 'Session already assigned');
+                    }
                     await this.sessionManager.updateSession(data.sessionId, {
-                        state: { assignedAgentId: data.agentId || clientInfo.userId, assignmentStatus: 'assigned' }
+                        state: { assignedAgentId: requestedAgentId, assignmentStatus: 'assigned' }
                     });
+                    clientInfo.agentAssignments.set(data.sessionId, requestedAgentId);
                     this.broadcastToSession(data.sessionId, 'agentAssigned', {
-                        sessionId: data.sessionId, agentId: data.agentId || clientInfo.userId
+                        sessionId: data.sessionId, agentId: requestedAgentId
                     });
-                    return respond(true, { sessionId: data.sessionId, assigned: true });
+                    return respond(true, {
+                        sessionId: data.sessionId,
+                        agentId: requestedAgentId,
+                        assigned: true
+                    });
                 }
 
                 case 'transferSession': {
+                    const destinationAgentId = this.getRequestedAgentId({ agentId: data.toAgentId });
+                    if (!destinationAgentId) return respond(false, 'Destination agent ID required');
+                    const session = await this.sessionManager.getSession(data.sessionId);
+                    if (!session) return respond(false, 'Session not found');
+                    const requestedAgentId = this.getRequestedAgentId({ agentId: data.fromAgentId })
+                        || clientInfo.agentAssignments?.get(data.sessionId);
+                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
+                    if (!access.authorized) return respond(false, 'Access denied');
                     await this.sessionManager.updateSession(data.sessionId, {
-                        state: { assignedAgentId: data.toAgentId, assignmentStatus: 'transferred' }
+                        state: { assignedAgentId: destinationAgentId, assignmentStatus: 'transferred' }
                     });
+                    clientInfo.agentAssignments.set(data.sessionId, destinationAgentId);
                     this.broadcastToSession(data.sessionId, 'agentAssigned', {
-                        sessionId: data.sessionId, agentId: data.toAgentId, transferred: true
+                        sessionId: data.sessionId, agentId: destinationAgentId, transferred: true
                     });
                     return respond(true, { sessionId: data.sessionId, transferred: true });
                 }
 
                 case 'endSession': {
+                    const session = await this.sessionManager.getSession(data.sessionId);
+                    if (!session) return respond(false, 'Session not found');
+                    const requestedAgentId = this.getRequestedAgentId(data)
+                        || clientInfo.agentAssignments?.get(data.sessionId);
+                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
+                    if (!access.authorized) return respond(false, 'Access denied');
                     await this.sessionManager.updateSession(data.sessionId, {
                         state: { assignmentStatus: 'ended' }
                     });
@@ -188,9 +258,15 @@ class SocketHandler {
                 }
 
                 case 'updateAgentStatus': {
+                    const requestedAgentId = this.getRequestedAgentId(data)
+                        || (!clientInfo.canRelayAgent ? clientInfo.principalId : null);
+                    if (!requestedAgentId) return respond(false, 'Agent ID required');
+                    if (!clientInfo.canRelayAgent && requestedAgentId !== clientInfo.principalId) {
+                        return respond(false, 'Access denied');
+                    }
                     // Agent presence is owned by agent-ui; acknowledge so the
                     // client promise resolves deterministically.
-                    return respond(true, { agentId: clientInfo.userId, status: data.status });
+                    return respond(true, { agentId: requestedAgentId, status: data.status });
                 }
 
                 default:
@@ -200,6 +276,82 @@ class SocketHandler {
             logger.error('Agent request failed', { type, error: error.message });
             return respond(false, error.message);
         }
+    }
+
+    /**
+     * Build an authorization context exclusively from verified, top-level JWT
+     * claims. Handshake fields and sessionData are caller-controlled hints and
+     * must not grant agent or service privileges.
+     */
+    getPrincipalContext(decoded = {}) {
+        const rawSubject = decoded.userId || decoded.sub || decoded.id;
+        const principalId = typeof rawSubject === 'string' || typeof rawSubject === 'number'
+            ? String(rawSubject).trim()
+            : '';
+        const role = typeof decoded.role === 'string' ? decoded.role.trim().toLowerCase() : null;
+        const service = typeof decoded.service === 'string' ? decoded.service.trim().toLowerCase() : null;
+        const canRelayAgent = Boolean(
+            principalId
+            && role === 'service'
+            && service === 'agent-ui'
+        );
+        const isAgentPrincipal = Boolean(principalId && (role === 'agent' || canRelayAgent));
+
+        return {
+            principalId: principalId || null,
+            role,
+            service,
+            isAgentPrincipal,
+            canRelayAgent
+        };
+    }
+
+    getRequestedAgentId(data = {}, includeMetadata = false) {
+        const value = data.agentId ?? (includeMetadata ? data.metadata?.agentId : null);
+        if (typeof value !== 'string' && typeof value !== 'number') return null;
+        const normalized = String(value).trim();
+        return normalized || null;
+    }
+
+    getAssignedAgentId(session) {
+        const value = session?.state?.assignedAgentId ?? session?.assignedAgentId;
+        if (typeof value !== 'string' && typeof value !== 'number') return null;
+        const normalized = String(value).trim();
+        return normalized || null;
+    }
+
+    hasActiveAssignment(session) {
+        if (!this.getAssignedAgentId(session)) return false;
+        const rawStatus = session?.state?.assignmentStatus ?? session?.assignmentStatus;
+        if (rawStatus === undefined || rawStatus === null || rawStatus === '') return true;
+        const status = String(rawStatus).trim().toLowerCase();
+        return ['assigned', 'transferred', 'active', 'in_progress', 'in-progress'].includes(status);
+    }
+
+    getAssignedSessionAccess(
+        clientInfo,
+        session,
+        requestedAgentId = null,
+        { requireActive = true } = {}
+    ) {
+        const assignedAgentId = this.getAssignedAgentId(session);
+        if (!clientInfo?.isAgentPrincipal
+            || !assignedAgentId
+            || (requireActive && !this.hasActiveAssignment(session))) {
+            return { authorized: false, agentId: null };
+        }
+
+        if (clientInfo.canRelayAgent) {
+            return requestedAgentId && requestedAgentId === assignedAgentId
+                ? { authorized: true, agentId: assignedAgentId }
+                : { authorized: false, agentId: null };
+        }
+
+        const assertedIdentityMatches = !requestedAgentId
+            || requestedAgentId === clientInfo.principalId;
+        return assertedIdentityMatches && clientInfo.principalId === assignedAgentId
+            ? { authorized: true, agentId: assignedAgentId }
+            : { authorized: false, agentId: null };
     }
 
     /**
@@ -248,7 +400,7 @@ class SocketHandler {
     /**
      * Handle client authentication
      */
-    async handleAuthentication(socket, data) {
+    async handleAuthentication(socket, data = {}) {
         try {
             const clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo) {
@@ -270,10 +422,15 @@ class SocketHandler {
                         data.token,
                         process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
                     );
+                    const principal = this.getPrincipalContext(decoded);
+                    if (!principal.principalId) {
+                        throw new Error('Token subject required');
+                    }
 
                     authResult = {
                         authenticated: true,
-                        userId: decoded.userId || decoded.id || data.userId || 'anonymous',
+                        userId: principal.principalId,
+                        ...principal,
                         // Retain the verified JWT so it can be propagated to the AI
                         // orchestrator and on to authenticated banking tool calls.
                         authToken: data.token
@@ -283,24 +440,49 @@ class SocketHandler {
                 }
             } else if (data.credentials) {
                 const validation = await this.validateUserCredentials(data.credentials);
-                if (validation.valid) {
+                if (validation.valid && validation.userId !== undefined && validation.userId !== null) {
                     authResult = { authenticated: true, userId: validation.userId };
                 }
             }
 
             if (authResult.authenticated) {
+                const previousPrincipalId = clientInfo.principalId;
+                if (authResult.isAgentPrincipal) {
+                    await socket.join('agents');
+                } else if (clientInfo.isAgentPrincipal) {
+                    await socket.leave('agents');
+                }
+
                 clientInfo.isAuthenticated = true;
                 clientInfo.userId = authResult.userId;
+                clientInfo.principalId = authResult.principalId || authResult.userId;
+                clientInfo.role = authResult.role || null;
+                clientInfo.service = authResult.service || null;
+                clientInfo.verifiedPrincipal = {
+                    subject: clientInfo.principalId,
+                    role: clientInfo.role,
+                    service: clientInfo.service
+                };
+                clientInfo.isAgentPrincipal = authResult.isAgentPrincipal === true;
+                clientInfo.canRelayAgent = authResult.canRelayAgent === true;
+                clientInfo.agentAssignments = previousPrincipalId
+                    && previousPrincipalId !== clientInfo.principalId
+                    ? new Map()
+                    : clientInfo.agentAssignments || new Map();
                 clientInfo.authToken = authResult.authToken || null;
                 clientInfo.authenticationTime = new Date();
 
                 logger.info('Client authenticated', {
                     socketId: socket.id,
-                    userId: authResult.userId
+                    userId: authResult.userId,
+                    role: clientInfo.role,
+                    service: clientInfo.service
                 });
 
                 socket.emit('authenticationSuccess', {
                     userId: authResult.userId,
+                    role: clientInfo.role,
+                    service: clientInfo.service,
                     authenticated: true,
                     timestamp: new Date().toISOString()
                 });
@@ -314,7 +496,7 @@ class SocketHandler {
             logger.error('Authentication error', {
                 error: error.message,
                 socketId: socket.id,
-                data: Object.keys(data)
+                data: Object.keys(data || {})
             });
             socket.emit('authenticationError', { error: 'Authentication error' });
         }
@@ -360,8 +542,9 @@ class SocketHandler {
      * Handle session creation
      */
     async handleCreateSession(socket, data) {
+        let clientInfo;
         try {
-            const clientInfo = this.connectedClients.get(socket.id);
+            clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo || !clientInfo.isAuthenticated) {
                 socket.emit('sessionError', { error: 'Authentication required' });
                 return;
@@ -373,33 +556,34 @@ class SocketHandler {
                 socketId: socket.id
             };
 
-            // Create chat session
-            const chatSession = await this.chatService.createChatSession(
-                clientInfo.userId,
-                null, // Let service generate sessionId
-                data.userData || {}
-            );
-
-            // Create session manager session
+            // SessionManager owns ID generation. Use that same canonical ID in
+            // ChatService so the socket room, history, and session state cannot
+            // diverge (ChatService does not generate IDs itself).
             const session = await this.sessionManager.createSession(
                 clientInfo.userId,
                 sessionMetadata
             );
 
+            const chatSession = await this.chatService.createChatSession(
+                clientInfo.userId,
+                session.sessionId,
+                data.userData || {}
+            );
+
             // Update client info
-            clientInfo.sessionId = chatSession.sessionId;
+            clientInfo.sessionId = session.sessionId;
 
             // Join socket room for this session
-            socket.join(`session:${chatSession.sessionId}`);
+            socket.join(`session:${session.sessionId}`);
 
             logger.info('Session created and joined', {
                 socketId: socket.id,
                 userId: clientInfo.userId,
-                sessionId: chatSession.sessionId
+                sessionId: session.sessionId
             });
 
             socket.emit('sessionCreated', {
-                sessionId: chatSession.sessionId,
+                sessionId: session.sessionId,
                 session: {
                     ...chatSession,
                     ...session
@@ -440,8 +624,24 @@ class SocketHandler {
                 return;
             }
 
-            // Verify user owns this session
-            if (session.userId !== clientInfo.userId) {
+            const ownsSession = session.userId !== undefined
+                && session.userId !== null
+                && clientInfo.userId !== undefined
+                && clientInfo.userId !== null
+                && String(session.userId) === String(clientInfo.userId);
+            const requestedAgentId = this.getRequestedAgentId(data)
+                || clientInfo.agentAssignments?.get(data.sessionId);
+            const agentAccess = this.getAssignedSessionAccess(
+                clientInfo,
+                session,
+                requestedAgentId
+            );
+
+            // Customers may join their own session. A direct agent must be the
+            // active assignee; the trusted Agent UI service must identify the
+            // active assignee it is relaying for (or have just assigned it on
+            // this socket).
+            if (!ownsSession && !agentAccess.authorized) {
                 socket.emit('sessionError', { error: 'Access denied' });
                 return;
             }
@@ -453,7 +653,7 @@ class SocketHandler {
             socket.join(`session:${data.sessionId}`);
 
             // Get conversation history
-            const history = this.chatService.getConversationHistory(data.sessionId);
+            const history = await this.chatService.getConversationHistory(data.sessionId);
 
             logger.info('Session joined', {
                 socketId: socket.id,
@@ -482,8 +682,9 @@ class SocketHandler {
      * Handle incoming message
      */
     async handleSendMessage(socket, data) {
+        let clientInfo;
         try {
-            const clientInfo = this.connectedClients.get(socket.id);
+            clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo || !clientInfo.sessionId) {
                 socket.emit('messageError', { error: 'No active session' });
                 return;
@@ -525,8 +726,9 @@ class SocketHandler {
                 data.metadata || {}
             );
 
-            // Update session statistics
-            await this.sessionManager.updateSessionStatistics(clientInfo.sessionId, {
+            // Increment under the session mutex so simultaneous messages cannot
+            // overwrite the canonical count.
+            await this.sessionManager.incrementSessionStatistics(clientInfo.sessionId, {
                 messageCount: 1
             });
 
@@ -564,8 +766,9 @@ class SocketHandler {
                 clientInfo.sessionId,
                 agentResult.finalResponse,
                 {
-                    agentId: 'orchestrator',
-                    agentType: 'ai',
+                    agentId: agentResult.finalResponse?.source || 'orchestrator',
+                    agentType: agentResult.finalResponse?.source || 'ai',
+                    confidence: agentResult.finalResponse?.confidence,
                     processingTime: agentResult.processingTime
                 }
             );
@@ -697,21 +900,24 @@ class SocketHandler {
      * Handle session end
      */
     async handleEndSession(socket, data) {
+        let clientInfo;
         try {
-            const clientInfo = this.connectedClients.get(socket.id);
+            clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo || !clientInfo.sessionId) {
                 socket.emit('sessionError', { error: 'No active session' });
                 return;
             }
 
+            const endedSessionId = clientInfo.sessionId;
+
             // End chat session
-            await this.chatService.endSession(clientInfo.sessionId, 'user_initiated');
+            await this.chatService.endSession(endedSessionId, 'user_initiated');
 
             // End session manager session
-            await this.sessionManager.endSession(clientInfo.sessionId, 'user_initiated');
+            await this.sessionManager.endSession(endedSessionId, 'user_initiated');
 
             // Leave socket room
-            socket.leave(`session:${clientInfo.sessionId}`);
+            socket.leave(`session:${endedSessionId}`);
 
             // Clear client session
             clientInfo.sessionId = null;
@@ -719,7 +925,7 @@ class SocketHandler {
             logger.info('Session ended', {
                 socketId: socket.id,
                 userId: clientInfo.userId,
-                sessionId: clientInfo.sessionId
+                sessionId: endedSessionId
             });
 
             socket.emit('sessionEnded', {

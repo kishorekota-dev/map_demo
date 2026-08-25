@@ -27,6 +27,26 @@ describe('MCP banking tool contract', () => {
     const missing = orchestrator.CANONICAL_BANKING_TOOLS.filter(n => !defined.has(n));
     expect(missing).toEqual([]);
   });
+
+  test('balance inquiry can resolve accounts without a caller-supplied account id', () => {
+    const orchestrator = require(path.join(
+      __dirname, '..', '..', '..', '..', 'ai-orchestrator', 'config', 'intentConfig'
+    ));
+    expect(orchestrator.getToolsForIntent('balance_inquiry')).toContain('banking_get_accounts');
+
+    const accountListTool = tools.getToolDefinitions()
+      .find(t => t.name === 'banking_get_accounts');
+    expect(accountListTool.inputSchema.required).toEqual(['authToken']);
+  });
+
+  test.each([
+    ['http://banking.local', 'http://banking.local/api/v1'],
+    ['http://banking.local/', 'http://banking.local/api/v1'],
+    ['http://banking.local/api', 'http://banking.local/api/v1'],
+    ['http://banking.local/api/v1', 'http://banking.local/api/v1']
+  ])('normalizes banking service URL %s', (input, expected) => {
+    expect(new CompleteBankingTools(input).bankingServiceUrl).toBe(expected);
+  });
 });
 
 describe('MCP argument validation', () => {

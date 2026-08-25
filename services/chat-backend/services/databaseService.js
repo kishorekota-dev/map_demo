@@ -99,7 +99,8 @@ class DatabaseService {
             const allowedFields = [
                 'is_active', 'is_resolved', 'status', 'last_activity',
                 'message_count', 'metadata', 'conversation_context',
-                'state', 'statistics', 'security', 'resolution_notes'
+                'state', 'statistics', 'security', 'resolution_notes',
+                'expires_at', 'ended_at', 'ended_reason'
             ];
 
             allowedFields.forEach(field => {
@@ -135,7 +136,15 @@ class DatabaseService {
                 throw new Error('Session not found');
             }
 
-            await session.endSession(reason);
+            if (reason === 'expired') {
+                session.is_active = false;
+                session.status = 'expired';
+                session.ended_at = new Date();
+                session.ended_reason = reason;
+                await session.save();
+            } else {
+                await session.endSession(reason);
+            }
 
             logger.info('Session ended in database', {
                 sessionId,
@@ -157,34 +166,40 @@ class DatabaseService {
      */
     async saveMessage(messageData) {
         try {
-            // Get current message count for sequence number
-            const messageCount = await ChatMessage.count({
-                where: { session_id: messageData.sessionId }
-            });
+            const message = await sequelize.transaction(async (transaction) => {
+                const session = await ChatSession.findByPk(messageData.sessionId, {
+                    transaction,
+                    lock: transaction.LOCK.UPDATE
+                });
+                if (!session) {
+                    throw new Error('Session not found');
+                }
 
-            const message = await ChatMessage.create({
-                message_id: messageData.id,
-                session_id: messageData.sessionId,
-                user_id: messageData.userId,
-                direction: messageData.direction,
-                content: messageData.content,
-                message_type: messageData.type || 'text',
-                metadata: messageData.metadata || {},
-                processing: messageData.processing || {},
-                agent_info: messageData.agentInfo || {},
-                intent: messageData.intent,
-                entities: messageData.entities || {},
-                sentiment: messageData.sentiment,
-                confidence_score: messageData.confidenceScore,
-                processing_time_ms: messageData.processingTimeMs,
-                parent_message_id: messageData.parentMessageId,
-                sequence_number: messageCount
-            });
+                const sequenceNumber = session.message_count || 0;
+                const persistedMessage = await ChatMessage.create({
+                    message_id: messageData.id,
+                    session_id: messageData.sessionId,
+                    user_id: messageData.userId,
+                    direction: messageData.direction,
+                    content: messageData.content,
+                    message_type: messageData.type || 'text',
+                    metadata: messageData.metadata || {},
+                    processing: messageData.processing || {},
+                    agent_info: messageData.agentInfo || {},
+                    intent: messageData.intent,
+                    entities: messageData.entities || {},
+                    sentiment: messageData.sentiment,
+                    confidence_score: messageData.confidenceScore,
+                    processing_time_ms: messageData.processingTimeMs,
+                    parent_message_id: messageData.parentMessageId,
+                    sequence_number: sequenceNumber
+                }, { transaction });
 
-            // Update session message count and last activity
-            await this.updateSession(messageData.sessionId, {
-                message_count: messageCount + 1,
-                last_activity: new Date()
+                session.message_count = sequenceNumber + 1;
+                session.last_activity = new Date();
+                await session.save({ transaction });
+
+                return persistedMessage;
             });
 
             logger.debug('Message saved to database', {
@@ -193,7 +208,7 @@ class DatabaseService {
                 direction: message.direction
             });
 
-            return message;
+            return this.toMessageData(message);
         } catch (error) {
             logger.error('Failed to save message to database', {
                 error: error.message,
@@ -212,14 +227,10 @@ class DatabaseService {
                 where: { session_id: sessionId },
                 order: [['sequence_number', 'ASC']],
                 limit,
-                offset,
-                attributes: [
-                    'message_id', 'direction', 'content', 'message_type',
-                    'intent', 'confidence_score', 'created_at', 'sequence_number'
-                ]
+                offset
             });
 
-            return messages;
+            return messages.map(message => this.toMessageData(message));
         } catch (error) {
             logger.error('Failed to get conversation history', {
                 error: error.message,
@@ -440,6 +451,39 @@ class DatabaseService {
                 error: error.message
             };
         }
+    }
+
+    async close() {
+        if (this.initialized) {
+            await sequelize.close();
+            this.initialized = false;
+        }
+    }
+
+    toMessageData(message) {
+        const value = typeof message?.get === 'function'
+            ? message.get({ plain: true })
+            : message;
+
+        return {
+            id: value.message_id,
+            sessionId: value.session_id,
+            userId: value.user_id,
+            direction: value.direction,
+            content: value.content,
+            type: value.message_type,
+            metadata: value.metadata || {},
+            processing: value.processing || {},
+            agentInfo: value.agent_info || {},
+            intent: value.intent,
+            entities: value.entities || {},
+            sentiment: value.sentiment,
+            confidenceScore: value.confidence_score,
+            processingTimeMs: value.processing_time_ms,
+            parentMessageId: value.parent_message_id,
+            sequenceNumber: value.sequence_number,
+            timestamp: new Date(value.created_at)
+        };
     }
 }
 

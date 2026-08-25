@@ -1,77 +1,104 @@
--- Create AI Orchestrator database
-CREATE DATABASE ai_orchestrator;
+-- AI Orchestrator database bootstrap
+--
+-- Older releases created sessions/workflow_executions/human_feedbacks with a
+-- schema that did not match the Sequelize models (snake_case columns, missing
+-- fields, incompatible foreign-key types). Keep those legacy tables intact so
+-- an existing volume is never destructively altered. The active models use
+-- the namespaced ai_* tables below, whose physical schema exactly matches the
+-- model contract. Every statement is safe to run more than once.
 
--- Connect to ai_orchestrator database
-\c ai_orchestrator;
+SELECT 'CREATE DATABASE ai_orchestrator'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ai_orchestrator')\gexec
 
--- Create sessions table
-CREATE TABLE IF NOT EXISTS sessions (
+\connect ai_orchestrator
+
+CREATE TABLE IF NOT EXISTS ai_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id VARCHAR(255) NOT NULL,
-    session_id VARCHAR(255) UNIQUE NOT NULL,
-    workflow_state JSONB DEFAULT '{}'::jsonb,
-    conversation_history JSONB DEFAULT '[]'::jsonb,
-    collected_data JSONB DEFAULT '{}'::jsonb,
-    required_data JSONB DEFAULT '[]'::jsonb,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    status VARCHAR(50) DEFAULT 'active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP WITH TIME ZONE
+    session_id VARCHAR(255) NOT NULL UNIQUE,
+    status VARCHAR(50) NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'waiting_human_input', 'completed', 'failed', 'expired')),
+    intent VARCHAR(255),
+    current_step VARCHAR(255),
+    workflow_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    conversation_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+    collected_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    required_data JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_activity_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create workflow_executions table
-CREATE TABLE IF NOT EXISTS workflow_executions (
+CREATE TABLE IF NOT EXISTS ai_workflow_executions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
-    workflow_id VARCHAR(255) NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending',
-    input JSONB,
+    session_id VARCHAR(255) NOT NULL
+        REFERENCES ai_sessions(session_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    execution_id VARCHAR(255) NOT NULL UNIQUE,
+    intent VARCHAR(255) NOT NULL,
+    input JSONB NOT NULL,
     output JSONB,
+    status VARCHAR(50) NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+    current_node VARCHAR(255),
+    execution_path JSONB NOT NULL DEFAULT '[]'::jsonb,
+    checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,
     error JSONB,
-    execution_path TEXT[],
-    checkpoints JSONB DEFAULT '[]'::jsonb,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE,
-    duration_ms INTEGER
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create human_feedbacks table
-CREATE TABLE IF NOT EXISTS human_feedbacks (
+CREATE TABLE IF NOT EXISTS ai_human_feedback (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
-    execution_id UUID REFERENCES workflow_executions(id) ON DELETE CASCADE,
-    request_type VARCHAR(50) NOT NULL,
-    request_message TEXT NOT NULL,
-    required_fields JSONB DEFAULT '[]'::jsonb,
-    response TEXT,
-    response_data JSONB,
-    status VARCHAR(50) DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    responded_at TIMESTAMP WITH TIME ZONE
+    session_id VARCHAR(255) NOT NULL
+        REFERENCES ai_sessions(session_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    execution_id VARCHAR(255) NOT NULL
+        REFERENCES ai_workflow_executions(execution_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    feedback_type VARCHAR(50) NOT NULL
+        CHECK (feedback_type IN ('data_collection', 'confirmation', 'clarification', 'approval')),
+    question TEXT NOT NULL,
+    required_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+    context JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response JSONB,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'received', 'timeout', 'cancelled')),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    responded_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create indexes
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_session_id ON sessions(session_id);
-CREATE INDEX idx_sessions_status ON sessions(status);
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-CREATE INDEX idx_sessions_last_activity ON sessions(last_activity_at);
+CREATE INDEX IF NOT EXISTS ai_sessions_user_id ON ai_sessions(user_id);
+CREATE INDEX IF NOT EXISTS ai_sessions_session_id ON ai_sessions(session_id);
+CREATE INDEX IF NOT EXISTS ai_sessions_status ON ai_sessions(status);
+CREATE INDEX IF NOT EXISTS ai_sessions_expires_at ON ai_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS ai_sessions_last_activity_at ON ai_sessions(last_activity_at);
 
-CREATE INDEX idx_workflow_executions_session_id ON workflow_executions(session_id);
-CREATE INDEX idx_workflow_executions_workflow_id ON workflow_executions(workflow_id);
-CREATE INDEX idx_workflow_executions_status ON workflow_executions(status);
-CREATE INDEX idx_workflow_executions_started_at ON workflow_executions(started_at);
+CREATE INDEX IF NOT EXISTS ai_workflow_executions_session_id
+    ON ai_workflow_executions(session_id);
+CREATE INDEX IF NOT EXISTS ai_workflow_executions_execution_id
+    ON ai_workflow_executions(execution_id);
+CREATE INDEX IF NOT EXISTS ai_workflow_executions_status
+    ON ai_workflow_executions(status);
+CREATE INDEX IF NOT EXISTS ai_workflow_executions_intent
+    ON ai_workflow_executions(intent);
+CREATE INDEX IF NOT EXISTS ai_workflow_executions_started_at
+    ON ai_workflow_executions(started_at);
 
-CREATE INDEX idx_human_feedbacks_session_id ON human_feedbacks(session_id);
-CREATE INDEX idx_human_feedbacks_execution_id ON human_feedbacks(execution_id);
-CREATE INDEX idx_human_feedbacks_status ON human_feedbacks(status);
-CREATE INDEX idx_human_feedbacks_created_at ON human_feedbacks(created_at);
+CREATE INDEX IF NOT EXISTS ai_human_feedback_session_id
+    ON ai_human_feedback(session_id);
+CREATE INDEX IF NOT EXISTS ai_human_feedback_execution_id
+    ON ai_human_feedback(execution_id);
+CREATE INDEX IF NOT EXISTS ai_human_feedback_status
+    ON ai_human_feedback(status);
+CREATE INDEX IF NOT EXISTS ai_human_feedback_expires_at
+    ON ai_human_feedback(expires_at);
 
--- Create function to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
+CREATE OR REPLACE FUNCTION ai_orchestrator_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
@@ -79,22 +106,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create trigger for sessions table
-CREATE TRIGGER update_sessions_updated_at
-    BEFORE UPDATE ON sessions
+DROP TRIGGER IF EXISTS ai_sessions_set_updated_at ON ai_sessions;
+CREATE TRIGGER ai_sessions_set_updated_at
+    BEFORE UPDATE ON ai_sessions
     FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+    EXECUTE FUNCTION ai_orchestrator_set_updated_at();
 
--- Grant permissions (if needed)
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
+DROP TRIGGER IF EXISTS ai_workflow_executions_set_updated_at ON ai_workflow_executions;
+CREATE TRIGGER ai_workflow_executions_set_updated_at
+    BEFORE UPDATE ON ai_workflow_executions
+    FOR EACH ROW
+    EXECUTE FUNCTION ai_orchestrator_set_updated_at();
 
--- Insert sample data for testing (optional)
--- INSERT INTO sessions (user_id, session_id, status) 
--- VALUES ('test-user', 'test-session-123', 'active');
+DROP TRIGGER IF EXISTS ai_human_feedback_set_updated_at ON ai_human_feedback;
+CREATE TRIGGER ai_human_feedback_set_updated_at
+    BEFORE UPDATE ON ai_human_feedback
+    FOR EACH ROW
+    EXECUTE FUNCTION ai_orchestrator_set_updated_at();
 
--- Display table information
-\dt
-\di
-
-SELECT 'AI Orchestrator database initialized successfully!' as message;
+SELECT 'AI Orchestrator database initialized successfully!' AS message;

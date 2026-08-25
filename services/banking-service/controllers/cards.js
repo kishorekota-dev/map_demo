@@ -1,5 +1,30 @@
 const { CardRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
+const {
+  generateCardNumber,
+  generateCVV,
+  generateExpirationDate,
+  hashData
+} = require('../utils/helpers');
+
+const protectCardSecret = (value) => {
+  const { hash, salt } = hashData(value);
+  return `${salt}:${hash}`;
+};
+
+const generateIssuedCardData = (cardType = 'debit') => {
+  const cardNumber = generateCardNumber(cardType).replace(/\s/g, '');
+  const cvv = generateCVV();
+  const [expiryMonth, shortYear] = generateExpirationDate().split('/').map(Number);
+
+  return {
+    cardNumberEncrypted: protectCardSecret(cardNumber),
+    cardNumberLast4: cardNumber.slice(-4),
+    expiryMonth,
+    expiryYear: 2000 + shortYear,
+    cvvEncrypted: protectCardSecret(cvv)
+  };
+};
 
 class CardController {
   async getAllCards(req, res, next) {
@@ -49,7 +74,11 @@ class CardController {
   async createCard(req, res, next) {
     try {
       const userId = req.user.userId;
-      const cardData = { ...req.body, userId };
+      const cardData = {
+        ...req.body,
+        ...generateIssuedCardData(req.body.cardType),
+        userId
+      };
 
       const card = await CardRepository.create(cardData);
 
@@ -123,7 +152,10 @@ class CardController {
   async replaceCard(req, res, next) {
     try {
       const { cardId } = req.params;
-      const newCardData = req.body;
+      const newCardData = {
+        ...req.body,
+        ...generateIssuedCardData(req.ownedCard?.card_type || 'debit')
+      };
 
       const newCard = await CardRepository.replace(cardId, newCardData);
 

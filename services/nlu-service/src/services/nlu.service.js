@@ -4,7 +4,9 @@
  */
 
 const axios = require('axios');
-const natural = require('natural');
+const { WordTokenizer } = require('natural/lib/natural/tokenizers/regexp_tokenizer');
+const { words: stopwords } = require('natural/lib/natural/util/stopwords');
+const Sentiment = require('sentiment');
 const NodeCache = require('node-cache');
 const logger = require('../utils/logger');
 const config = require('../config/config');
@@ -23,8 +25,8 @@ class NLUService {
     this.dialogflowService = dialogflowService;
     this.bankingNLU = bankingNLU;
     this.contexts = new Map();
-    this.tokenizer = new natural.WordTokenizer();
-    this.sentimentAnalyzer = new natural.SentimentAnalyzer('English', natural.PorterStemmer, 'afinn');
+    this.tokenizer = new WordTokenizer();
+    this.sentimentAnalyzer = new Sentiment();
     
     this.initializeIntents();
     logger.info('NLU Service initialized');
@@ -87,7 +89,11 @@ class NLUService {
       }
 
       const normalizedMessage = message.toLowerCase().trim();
-      const cacheKey = `intent_${Buffer.from(normalizedMessage).toString('base64')}`;
+      // The response contains session context and caller identity, so a global
+      // message-only key can leak one user's metadata into another user's
+      // response. Scope cached entries to the complete caller context.
+      const cacheScope = JSON.stringify([String(userId), String(sessionId), normalizedMessage]);
+      const cacheKey = `intent_${Buffer.from(cacheScope).toString('base64')}`;
       
       // Check cache first
       const cachedResult = this.cache.get(cacheKey);
@@ -341,7 +347,7 @@ class NLUService {
     const filteredTokens = tokens.filter((token) => (
       token.length > 2 &&
       /^[a-z0-9]+$/.test(token) &&
-      !natural.stopwords.includes(token)
+      !stopwords.includes(token)
     ));
 
     const keywordCounts = filteredTokens.reduce((counts, token) => {
@@ -354,7 +360,9 @@ class NLUService {
       .slice(0, 5)
       .map(([keyword]) => keyword);
 
-    const sentimentScore = tokens.length > 0 ? this.sentimentAnalyzer.getSentiment(tokens) : 0;
+    const sentimentScore = tokens.length > 0
+      ? this.sentimentAnalyzer.analyze(message).comparative
+      : 0;
     const sentiment = {
       label: sentimentScore > 0.1 ? 'positive' : sentimentScore < -0.1 ? 'negative' : 'neutral',
       score: Number(sentimentScore.toFixed(3))
@@ -414,7 +422,18 @@ class NLUService {
    * Get context for session
    */
   getContext(sessionId) {
-    return this.contexts.get(sessionId) || {};
+    const context = this.contexts.get(sessionId);
+    if (!context) {
+      return {};
+    }
+
+    const updatedAt = Date.parse(context.timestamp);
+    if (Number.isFinite(updatedAt) && Date.now() - updatedAt > config.nlu.context.maxAge) {
+      this.contexts.delete(sessionId);
+      return {};
+    }
+
+    return context;
   }
 
   /**
@@ -453,32 +472,6 @@ class NLUService {
 
     intents.total = intents.general.length + intents.banking.length;
     return intents;
-  }
-
-  /**
-   * Train intent model (placeholder for future ML integration)
-   */
-  async trainModel(trainingData) {
-    try {
-      logger.info('Training model with data', {
-        samples: trainingData.length
-      });
-
-      // Placeholder for actual training logic
-      // This would integrate with ML frameworks or DialogFlow training API
-
-      return {
-        success: true,
-        message: 'Model training initiated',
-        samples: trainingData.length
-      };
-    } catch (error) {
-      logger.error('Error training model', { error: error.message });
-      return {
-        success: false,
-        error: error.message
-      };
-    }
   }
 
   /**

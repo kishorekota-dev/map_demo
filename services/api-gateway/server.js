@@ -68,7 +68,13 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Session-ID',
+    'X-Request-ID'
+  ]
 }));
 
 app.use(compression());
@@ -81,6 +87,15 @@ app.use(morgan('combined', {
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Attach a correlation ID and start time before any proxied request. The proxy
+// layer uses both values for tracing, response headers, and latency metrics.
+app.use((req, res, next) => {
+  req.startTime = Date.now();
+  req.id = req.get('X-Request-ID') || require('uuid').v4();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
 
 // Security middleware
 app.use(securityMiddleware);
@@ -121,7 +136,7 @@ app.get('/api', (req, res) => {
 // Service names below match the registry's standardized names (chat-backend,
 // banking, nlp, nlu, mcp, ai-orchestrator) so routes resolve correctly.
 app.use('/api/chat',
-  rateLimitMiddleware,
+  authMiddleware,
   createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/chat': '/api/chat' },
@@ -130,7 +145,7 @@ app.use('/api/chat',
 );
 
 app.use('/api/sessions',
-  rateLimitMiddleware,
+  authMiddleware,
   createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/sessions': '/api/sessions' },
@@ -148,6 +163,17 @@ app.use('/api/health',
 );
 
 // Banking Service Routes
+// Authentication must be reachable before a caller has a token. The banking
+// service still protects authenticated auth endpoints such as /me itself.
+app.use('/api/banking/v1/auth',
+  rateLimitMiddleware.authLimiter,
+  createServiceProxy({
+    serviceName: 'banking',
+    pathRewrite: { '^/api/banking': '/api' },
+    changeOrigin: true
+  })
+);
+
 app.use('/api/banking',
   authMiddleware,
   createServiceProxy({
@@ -172,7 +198,6 @@ app.use('/api/nlu',
   authMiddleware,
   createServiceProxy({
     serviceName: 'nlu',
-    pathRewrite: { '^/api/nlu': '/api' },
     changeOrigin: true
   })
 );

@@ -1,5 +1,4 @@
 const EventEmitter = require('events');
-const axios = require('axios');
 const logger = require('./logger');
 const { getRedisClient } = require('./redisClient');
 
@@ -115,6 +114,22 @@ class AgentService extends EventEmitter {
         try {
             const agentId = agentData.agentId || this.generateAgentId();
             const now = new Date();
+
+            const existing = this.agents.get(agentId);
+            if (existing) {
+                existing.name = agentData.name || existing.name;
+                existing.email = agentData.email || existing.email;
+                existing.department = agentData.department || existing.department;
+                existing.role = agentData.role || existing.role;
+                existing.capabilities = agentData.capabilities || existing.capabilities;
+                existing.isOnline = true;
+                existing.status = 'available';
+                existing.lastActivity = now;
+                existing.lastStatusUpdate = now;
+                this.agentCapabilities.set(agentId, new Set(existing.capabilities));
+                await this.persistAgent(agentId);
+                return existing;
+            }
 
             const agent = {
                 agentId,
@@ -413,13 +428,18 @@ class AgentService extends EventEmitter {
                 }
 
                 // Check skill level if specified
-                if (requirements.minSkillLevel) {
+                const requestedSkillLevel = requirements.minSkillLevel || requirements.skillLevel;
+                if (requestedSkillLevel) {
                     const skillLevels = { 'basic': 1, 'intermediate': 2, 'advanced': 3, 'expert': 4 };
                     const agentLevel = skillLevels[agent.skillLevel] || 1;
-                    const requiredLevel = skillLevels[requirements.minSkillLevel] || 1;
+                    const requiredLevel = skillLevels[requestedSkillLevel] || 1;
                     if (agentLevel < requiredLevel) {
                         continue;
                     }
+                }
+
+                if (requirements.excludeAgentIds?.includes(agentId)) {
+                    continue;
                 }
 
                 // Check language if specified
@@ -510,6 +530,27 @@ class AgentService extends EventEmitter {
         return Array.from(this.agents.values());
     }
 
+    async updateAgentPreferences(agentId, preferences = {}) {
+        const agent = this.agents.get(agentId);
+        if (!agent) throw new Error('Agent not found');
+
+        const maxConcurrentChats = Number(preferences.maxConcurrentChats);
+        if (Number.isFinite(maxConcurrentChats)) {
+            agent.preferences.maxConcurrentChats = Math.min(10, Math.max(1, maxConcurrentChats));
+        }
+        for (const key of ['autoAcceptChats', 'notificationSound']) {
+            if (typeof preferences[key] === 'boolean') {
+                agent.preferences[key] = preferences[key];
+            }
+        }
+        if (['available', 'away'].includes(preferences.defaultStatus)) {
+            agent.preferences.defaultStatus = preferences.defaultStatus;
+        }
+
+        await this.persistAgent(agentId);
+        return { ...agent.preferences };
+    }
+
     /**
      * Update agent activity
      */
@@ -573,7 +614,7 @@ class AgentService extends EventEmitter {
      * Setup status monitoring
      */
     setupStatusMonitoring() {
-        setInterval(() => {
+        this.statusMonitor = setInterval(() => {
             try {
                 const now = Date.now();
                 
@@ -608,6 +649,10 @@ class AgentService extends EventEmitter {
      */
     async cleanup() {
         try {
+            if (this.statusMonitor) {
+                clearInterval(this.statusMonitor);
+                this.statusMonitor = null;
+            }
             // Mark all agents as offline
             for (const [agentId, agent] of this.agents) {
                 if (agent.isOnline) {

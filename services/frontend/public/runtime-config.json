@@ -3,8 +3,6 @@
   "productName": "Enterprise Conversational Platform",
   "tagline": "Configurable AI assistants for secure enterprise workflows",
   "supportEmail": "support@example.com",
-  "apiBaseUrl": "http://localhost:3001/api",
-  "authBaseUrl": "http://localhost:3005/api/v1",
   "features": {
     "allowTokenAuth": true
   }

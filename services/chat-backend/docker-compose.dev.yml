@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -7,7 +5,7 @@ services:
     container_name: poc-chat-postgres-dev
     restart: unless-stopped
     environment:
-      POSTGRES_DB: poc_banking
+      POSTGRES_DB: poc_chat
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -16,7 +14,7 @@ services:
       - postgres-dev-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d poc_banking"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d poc_chat"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,13 +59,14 @@ services:
       # Database
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: poc_banking
+      DB_NAME: poc_chat
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_POOL_MAX: 10
       DB_POOL_MIN: 2
       DB_LOGGING: true
       DB_SSL: false
+      CHAT_PERSISTENCE_ENABLED: "true"
       
       # Redis
       REDIS_URL: redis://redis:6379

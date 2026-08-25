@@ -69,14 +69,19 @@ const Session = sequelize.define('Session', {
     defaultValue: DataTypes.NOW
   }
 }, {
-  tableName: 'sessions',
+  // Keep orchestrator persistence isolated from the legacy bootstrap tables.
+  // Existing Compose volumes may already contain `public.sessions` with an
+  // incompatible, older shape; a dedicated table lets Sequelize safely create
+  // its complete contract without altering or destroying legacy data.
+  tableName: 'ai_sessions',
+  underscored: true,
   timestamps: true,
   indexes: [
-    { fields: ['userId'] },
-    { fields: ['sessionId'] },
+    { fields: ['user_id'] },
+    { fields: ['session_id'] },
     { fields: ['status'] },
-    { fields: ['expiresAt'] },
-    { fields: ['lastActivityAt'] }
+    { fields: ['expires_at'] },
+    { fields: ['last_activity_at'] }
   ]
 });
 

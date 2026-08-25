@@ -6,6 +6,7 @@ const config = require('../../config');
 const { getCheckpointer } = require('../utils/checkpointer');
 const intentMapper = require('../services/intentMapper');
 const slmDataExtractor = require('../services/poc-slm-data-extractor');
+const { formatDeterministicResponse } = require('../services/deterministicResponseFormatter');
 
 /**
  * Banking Chat Workflow using LangGraph
@@ -23,12 +24,13 @@ class BankingChatWorkflow {
     // Determinism: temperature/top_p default to 0 and the seed is pinned so the
     // same intent + collected data + tool results produce the same response.
     this.llm = new ChatOpenAI({
-      openAIApiKey: config.openai.apiKey,
-      modelName: config.openai.model,
+      apiKey: config.openai.apiKey,
+      model: config.openai.model,
       temperature: config.openai.temperature,
       topP: config.openai.topP,
       maxTokens: config.openai.maxTokens,
-      modelKwargs: Number.isFinite(config.openai.seed) ? { seed: config.openai.seed } : {}
+      modelKwargs: Number.isFinite(config.openai.seed) ? { seed: config.openai.seed } : {},
+      useResponsesApi: false
     });
     
     // Get checkpointer instance
@@ -155,7 +157,7 @@ class BankingChatWorkflow {
       });
 
       // Get required data for this intent
-      const requiredData = intentMapper.getRequiredData(state.intent);
+      const requiredData = this.getRequiredDataForState(state.intent, state.collectedData);
       
       return {
         ...state,
@@ -184,12 +186,11 @@ class BankingChatWorkflow {
       // Get session to check collected data
       const session = await this.sessionManager.getSession(state.sessionId);
       const baseCollected = {
+        ...intentMapper.getDefaults(state.intent),
         ...(session?.collectedData || {}),
         ...(state.collectedData || {})
       };
-      const requiredFields = state.requiredData?.length
-        ? state.requiredData
-        : intentMapper.getRequiredData(state.intent);
+      const previouslyRequiredFields = state.requiredData || [];
 
       // Try SLM-based extraction before prompting the human
       let slmResult = null;
@@ -203,11 +204,32 @@ class BankingChatWorkflow {
       }
 
       const collectedData = slmResult?.extractedData || baseCollected;
-      const validationResult = slmResult?.validationResult || intentMapper.validateData(state.intent, collectedData);
-      const missingData = validationResult.missing?.length
-        ? validationResult.missing
-        : requiredFields.filter(field => !collectedData[field]);
-      const invalidFields = validationResult.invalid || [];
+      const baseValidation = slmResult?.validationResult || intentMapper.validateData(state.intent, collectedData);
+      const requiredFields = [...new Set([
+        ...previouslyRequiredFields,
+        ...this.getRequiredDataForState(state.intent, collectedData)
+      ])];
+      const missingData = [...new Set([
+        ...(baseValidation.missing || []),
+        ...requiredFields.filter(field => {
+          const value = collectedData[field];
+          return value === undefined || value === null || value === '';
+        })
+      ])];
+      const invalidFields = [
+        ...(baseValidation.invalid || []),
+        ...this.getValidationIssuesForState(state.intent, collectedData)
+      ].filter((issue, index, issues) => (
+        issues.findIndex(candidate => (
+          candidate.field === issue.field && candidate.reason === issue.reason
+        )) === index
+      ));
+      const validationResult = {
+        ...baseValidation,
+        valid: missingData.length === 0 && invalidFields.length === 0,
+        missing: missingData,
+        invalid: invalidFields
+      };
       const pendingFields = [...new Set([
         ...missingData,
         ...invalidFields
@@ -331,7 +353,7 @@ class BankingChatWorkflow {
     });
 
     try {
-      const tools = intentMapper.getToolsForIntent(state.intent);
+      const tools = this.getToolsForState(state);
 
       // Deterministic auth guard: banking tools require a propagated session
       // token. Fail fast with a stable block (routed through the same terminal
@@ -405,6 +427,7 @@ class BankingChatWorkflow {
       }
 
       const toolResults = {};
+      const failedTools = [];
 
       // Execute each tool using Enhanced MCP Client
       // Tries MCP Protocol first, falls back to HTTP automatically
@@ -422,7 +445,7 @@ class BankingChatWorkflow {
           logger.info('Tool executed successfully', {
             sessionId: state.sessionId,
             tool,
-            success: result.success || true
+            success: result.success !== false
           });
         } catch (error) {
           logger.error('Tool execution failed', {
@@ -431,6 +454,7 @@ class BankingChatWorkflow {
             error: error.message
           });
           toolResults[tool] = { success: false, error: error.message };
+          failedTools.push({ tool, error: error.message });
         }
       }
 
@@ -450,6 +474,9 @@ class BankingChatWorkflow {
         pendingTools: tools,
         policyTrace,
         policyDecision: null,
+        error: failedTools.length > 0
+          ? `Tool execution failed for ${failedTools.map(({ tool }) => tool).join(', ')}`
+          : null,
         currentStep: 'execute_tools'
       };
     } catch (error) {
@@ -482,28 +509,57 @@ class BankingChatWorkflow {
         ...sanitizedToolResults
       };
 
-      // Build messages
-      const systemMessage = new SystemMessage(intentMapper.buildSystemMessage(state.intent));
-      const userMessage = new HumanMessage(intentMapper.buildUserMessage(state.intent, context));
+      let generatedResponse = null;
+      let generationSource = 'deterministic-formatter';
+      const isToolBacked = Object.keys(state.toolResults || {}).length > 0
+        || this.getToolsForState(state).length > 0;
 
-      // Add conversation history
-      const messages = [systemMessage];
-      
-      state.conversationHistory.forEach(msg => {
-        if (msg.role === 'user') {
-          messages.push(new HumanMessage(msg.content));
-        } else if (msg.role === 'assistant') {
-          messages.push(new AIMessage(msg.content));
+      // Tool-backed banking responses must be grounded exclusively in the raw
+      // tool result. Remote generation is reserved for intents with no tool
+      // path, where there is no authoritative banking payload to contradict.
+      if (!isToolBacked && config.openai.enabled) {
+        const systemMessage = new SystemMessage(intentMapper.buildSystemMessage(state.intent));
+        const userMessage = new HumanMessage(intentMapper.buildUserMessage(state.intent, context));
+        const messages = [systemMessage];
+
+        (state.conversationHistory || []).forEach(msg => {
+          if (msg.role === 'user') {
+            messages.push(new HumanMessage(msg.content));
+          } else if (msg.role === 'assistant') {
+            messages.push(new AIMessage(msg.content));
+          }
+        });
+
+        messages.push(userMessage);
+
+        try {
+          const response = await this.llm.invoke(messages);
+          generatedResponse = response.content;
+          generationSource = 'openai';
+        } catch (error) {
+          logger.warn('LLM response generation failed; using deterministic formatter', {
+            sessionId: state.sessionId,
+            error: error.message
+          });
         }
-      });
-      
-      messages.push(userMessage);
+      }
 
-      // Generate response using LLM
-      const response = await this.llm.invoke(messages);
+      if (!generatedResponse) {
+        generatedResponse = formatDeterministicResponse({
+          intent: state.intent,
+          question: state.question,
+          collectedData: state.collectedData,
+          // The formatter reveals only deliberately selected fields (for
+          // example, the last four account digits). Feeding it redaction
+          // markers would turn "[REDACTED_ACCOUNT]" into the bogus "OUNT]".
+          // LLM context and persisted metadata remain fully sanitized.
+          toolResults: state.toolResults
+        });
+      }
+
       const responsePolicy = this.policyEngine.evaluateResponse({
         intent: state.intent,
-        response: response.content,
+        response: generatedResponse,
         toolResults: sanitizedToolResults
       });
       const policyTrace = responsePolicy.audit
@@ -547,7 +603,8 @@ class BankingChatWorkflow {
           type: 'complete',
           response: finalResponse,
           intent: state.intent,
-          policy: responsePolicy.audit
+          policy: responsePolicy.audit,
+          generationSource
         },
         currentStep: 'generate_response'
       };
@@ -573,7 +630,7 @@ class BankingChatWorkflow {
       const question = state.policyDecision?.question || this.buildConfirmationQuestion(state);
       const details = {
         ...state.collectedData,
-        tools: state.pendingTools?.length ? state.pendingTools : intentMapper.getToolsForIntent(state.intent),
+        tools: state.pendingTools?.length ? state.pendingTools : this.getToolsForState(state),
         policy: state.policyDecision?.audit || null
       };
 
@@ -671,7 +728,7 @@ class BankingChatWorkflow {
       return 'need_input';
     }
     
-    const tools = intentMapper.getToolsForIntent(state.intent);
+    const tools = this.getToolsForState(state);
     if (tools.length > 0) {
       return 'execute';
     }
@@ -700,7 +757,19 @@ class BankingChatWorkflow {
    * Build tool parameters from state
    */
   buildToolParameters(tool, state) {
-    const params = { ...state.collectedData };
+    const params = {
+      ...intentMapper.getDefaults(state.intent),
+      ...state.collectedData
+    };
+
+    // Normalize the small vocabulary differences between intent fields and
+    // the canonical MCP argument contract at this boundary.
+    if (state.intent === 'report_fraud' && !params.alertType && params.fraudType) {
+      params.alertType = params.fraudType;
+    }
+    if (state.intent === 'verify_transaction' && !params.notes && params.additionalInfo) {
+      params.notes = params.additionalInfo;
+    }
 
     // Add session + authenticated context. The banking tools require authToken
     // (Authorization: Bearer <jwt>); without it every call 401s. Propagate the
@@ -717,11 +786,82 @@ class BankingChatWorkflow {
   }
 
   /**
+   * Resolve fields that are conditional on an action-specific MCP schema.
+   * Card listing needs no card id, while block/replace also require a reason.
+   */
+  getRequiredDataForState(intent, collectedData = {}) {
+    const required = [...intentMapper.getRequiredData(intent)];
+
+    if (intent === 'card_management') {
+      const action = String(collectedData.cardAction || '').toLowerCase();
+      if (['block', 'unblock', 'replace'].includes(action)) {
+        required.push('cardId');
+      }
+      if (['block', 'replace'].includes(action)) {
+        required.push('reason');
+      }
+    }
+
+    return [...new Set(required)];
+  }
+
+  /**
+   * Enforce the narrower reason enums of the selected card MCP operation.
+   */
+  getValidationIssuesForState(intent, collectedData = {}) {
+    if (intent !== 'card_management' || !collectedData.reason) {
+      return [];
+    }
+
+    const action = String(collectedData.cardAction || '').toLowerCase();
+    const allowedReasons = {
+      block: ['lost', 'stolen', 'suspected_fraud', 'damaged', 'other'],
+      replace: ['lost', 'stolen', 'damaged', 'expired', 'other']
+    }[action];
+
+    if (allowedReasons && !allowedReasons.includes(collectedData.reason)) {
+      return [{
+        field: 'reason',
+        reason: `Must be one of: ${allowedReasons.join(', ')}`
+      }];
+    }
+
+    return [];
+  }
+
+  /**
+   * Select a deterministic tool path for intents that can list a collection or
+   * act on one item. The intent mapping remains the allow-list, while this
+   * method prevents blindly executing every related tool.
+   */
+  getToolsForState(state) {
+    const data = state.collectedData || {};
+
+    switch (state.intent) {
+      case 'balance_inquiry':
+        return data.accountId ? ['banking_get_balance'] : ['banking_get_accounts'];
+      case 'account_info':
+        return data.accountId ? ['banking_get_account'] : ['banking_get_accounts'];
+      case 'payment_inquiry':
+        return data.transferId ? ['banking_get_transfer'] : ['banking_get_transfers'];
+      case 'card_management': {
+        const action = String(data.cardAction || '').toLowerCase();
+        if (action === 'block') return ['banking_block_card'];
+        if (action === 'unblock') return ['banking_unblock_card'];
+        if (action === 'replace') return ['banking_replace_card'];
+        return data.cardId ? ['banking_get_card'] : ['banking_get_cards'];
+      }
+      default:
+        return intentMapper.getToolsForIntent(state.intent);
+    }
+  }
+
+  /**
    * Build confirmation question
    */
   buildConfirmationQuestion(state) {
     const intentDescriptions = {
-      transfer_funds: `transfer $${state.collectedData.amount} to ${state.collectedData.recipient}`,
+      transfer_funds: `transfer $${state.collectedData.amount} from ${state.collectedData.fromAccountId} to ${state.collectedData.toAccountId}`,
       card_management: `${state.collectedData.cardAction} your card`,
       dispute_transaction: `file a dispute for transaction ${state.collectedData.transactionId}`
     };

@@ -10,7 +10,10 @@
 # - Banking Service (port 3005)
 # - NLU Service (port 3003)
 # - MCP Service (port 3004)
+# - AI Orchestrator (port 3007)
 # - Chat Backend (port 3006)
+# - API Gateway (port 3001)
+# - Agent UI (port 8081)
 # - Frontend (port 3000)
 ###############################################################################
 
@@ -113,20 +116,22 @@ ELAPSED=0
 INTERVAL=5
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    # Check service health
-    POSTGRES_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps postgres | grep -c "healthy" || echo "0")
-    REDIS_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps redis | grep -c "healthy" || echo "0")
-    BANKING_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps banking-service | grep -c "healthy" || echo "0")
-    NLU_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps nlu-service | grep -c "healthy" || echo "0")
-    MCP_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps mcp-service | grep -c "healthy" || echo "0")
-    CHAT_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps chat-backend | grep -c "healthy" || echo "0")
-    FRONTEND_HEALTHY=$(docker compose -f "$COMPOSE_FILE" ps frontend | grep -c "healthy" || echo "0")
-    
-    TOTAL_HEALTHY=$((POSTGRES_HEALTHY + REDIS_HEALTHY + BANKING_HEALTHY + NLU_HEALTHY + MCP_HEALTHY + CHAT_HEALTHY + FRONTEND_HEALTHY))
-    
-    echo -ne "\r${BLUE}Services healthy: ${TOTAL_HEALTHY}/7${NC} (${ELAPSED}s/${TIMEOUT}s)"
-    
-    if [ $TOTAL_HEALTHY -eq 7 ]; then
+    SERVICES=(
+        postgres redis banking-service nlu-service mcp-service
+        ai-orchestrator chat-backend api-gateway agent-ui frontend
+    )
+    TOTAL_SERVICES=${#SERVICES[@]}
+    TOTAL_HEALTHY=0
+
+    for service in "${SERVICES[@]}"; do
+        if docker compose -f "$COMPOSE_FILE" ps "$service" | grep -q "(healthy)"; then
+            TOTAL_HEALTHY=$((TOTAL_HEALTHY + 1))
+        fi
+    done
+
+    echo -ne "\r${BLUE}Services healthy: ${TOTAL_HEALTHY}/${TOTAL_SERVICES}${NC} (${ELAPSED}s/${TIMEOUT}s)"
+
+    if [ "$TOTAL_HEALTHY" -eq "$TOTAL_SERVICES" ]; then
         echo ""
         print_success "All services are healthy!"
         break
@@ -153,10 +158,13 @@ echo -e "${GREEN}=========================================${NC}"
 echo ""
 print_info "Service URLs:"
 echo "  • Frontend:        http://localhost:3000"
+echo "  • Agent UI:        http://localhost:8081"
+echo "  • API Gateway:     http://localhost:3001"
 echo "  • Chat Backend:    http://localhost:3006"
 echo "  • Banking Service: http://localhost:3005"
 echo "  • NLU Service:     http://localhost:3003"
 echo "  • MCP Service:     http://localhost:3004"
+echo "  • AI Orchestrator: http://localhost:3007"
 echo "  • PostgreSQL:      localhost:5432"
 echo "  • Redis:           localhost:6379"
 echo ""
@@ -166,10 +174,13 @@ echo "  • Banking Service: http://localhost:3005/api"
 echo ""
 print_info "Health Checks:"
 echo "  • Frontend:        http://localhost:3000"
+echo "  • Agent UI:        http://localhost:8081/health"
+echo "  • API Gateway:     http://localhost:3001/health"
 echo "  • Chat Backend:    http://localhost:3006/health"
 echo "  • Banking Service: http://localhost:3005/health"
 echo "  • NLU Service:     http://localhost:3003/health"
 echo "  • MCP Service:     http://localhost:3004/health"
+echo "  • AI Orchestrator: http://localhost:3007/health"
 echo ""
 print_info "Useful Commands:"
 echo "  • View all logs:        docker compose -f docker/docker-compose.local.yml logs -f"
@@ -184,7 +195,10 @@ echo "  • redis"
 echo "  • banking-service"
 echo "  • nlu-service"
 echo "  • mcp-service"
+echo "  • ai-orchestrator"
 echo "  • chat-backend"
+echo "  • api-gateway"
+echo "  • agent-ui"
 echo "  • frontend"
 echo ""
 print_success "Happy coding! 🚀"

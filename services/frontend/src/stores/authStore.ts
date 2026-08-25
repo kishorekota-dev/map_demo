@@ -30,11 +30,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       
       set({
         isAuthenticated: true,
-        user: response.data?.user || response.user || null,
+        user: authService.getUserProfile() || response.data?.user || response.user || null,
         isLoading: false,
         error: null,
       });
     } catch (error: any) {
+      authService.logout();
       set({
         isAuthenticated: false,
         user: null,
@@ -61,17 +62,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({
       isAuthenticated: false,
       user: null,
+      isLoading: false,
       error: null,
     });
   },
 
   checkAuth: () => {
     const isAuthenticated = authService.isAuthenticated() && authService.isTokenValid();
-    const user = authService.getUserProfile();
+    if (!isAuthenticated) {
+      authService.logout();
+    }
+    const user = isAuthenticated ? authService.getUserProfile() : null;
     
     set({
       isAuthenticated,
-      user: isAuthenticated ? user : null,
+      user,
     });
   },
 

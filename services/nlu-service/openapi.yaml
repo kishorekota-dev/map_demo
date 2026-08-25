@@ -474,8 +474,10 @@ paths:
     post:
       tags:
         - Training
-      summary: Train NLU model
-      description: Train the NLU model with new training data
+      summary: NLU model training (not implemented)
+      description: |
+        Model training is not supported by this service. The endpoint is
+        reserved for a future training implementation and returns 501.
       operationId: trainModel
       requestBody:
         required: true
@@ -503,21 +505,18 @@ paths:
                         items:
                           $ref: '#/components/schemas/Entity'
       responses:
-        '200':
-          description: Training started successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '501':
+          description: NLU model training is not implemented
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  message:
-                    type: string
-                  trainingId:
-                    type: string
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/Error'
+              example:
+                success: false
+                code: NLU_TRAINING_UNSUPPORTED
+                error: Runtime NLU model training is not supported by this service.
         '500':
           $ref: '#/components/responses/InternalError'
 

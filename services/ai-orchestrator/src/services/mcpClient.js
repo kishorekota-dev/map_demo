@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
  */
 class MCPClient {
   constructor() {
-    this.baseUrl = config.mcp.serviceUrl;
+    this.baseUrl = MCPClient.normalizeServiceUrl(config.mcp.serviceUrl);
     this.timeout = config.mcp.timeout;
     this.retryAttempts = config.mcp.retryAttempts;
     this.retryDelay = config.mcp.retryDelay;
@@ -23,6 +23,21 @@ class MCPClient {
     });
     
     logger.info('MCP Client initialized', { baseUrl: this.baseUrl });
+  }
+
+  static normalizeServiceUrl(serviceUrl) {
+    let normalized = String(serviceUrl || '').trim().replace(/\/+$/, '');
+    for (const suffix of ['/api/mcp/execute', '/api/mcp', '/api/tools']) {
+      if (normalized.toLowerCase().endsWith(suffix)) {
+        normalized = normalized.slice(0, -suffix.length).replace(/\/+$/, '');
+        break;
+      }
+    }
+    return normalized;
+  }
+
+  static isRetrySafeTool(toolName) {
+    return /^banking_get_/.test(toolName);
   }
 
   /**
@@ -71,7 +86,10 @@ class MCPClient {
     try {
       return await this.executeTool(toolName, parameters, sessionId);
     } catch (error) {
-      if (attempt < this.retryAttempts) {
+      // A timeout after a state-changing banking operation is ambiguous: the
+      // service may have committed even though the response was lost. Retrying
+      // transfers/card/dispute/fraud mutations can duplicate financial actions.
+      if (MCPClient.isRetrySafeTool(toolName) && attempt < this.retryAttempts) {
         logger.warn(`Retrying MCP tool execution (attempt ${attempt + 1})`, {
           toolName,
           sessionId

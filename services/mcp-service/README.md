@@ -245,7 +245,7 @@ For production deployment:
 ## Dependencies
 
 **Runtime:**
-- Node.js 18+
+- Node.js 22+
 - Banking Service (required)
 
 **Docker:**

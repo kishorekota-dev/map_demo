@@ -4,7 +4,6 @@ const http = require('http');
 const socketIo = require('socket.io');
 const helmet = require('helmet');
 const cors = require('cors');
-const morgan = require('morgan');
 const compression = require('compression');
 const jwt = require('jsonwebtoken');
 
@@ -14,11 +13,12 @@ const ChatService = require('./services/chatService');
 const AgentOrchestrator = require('./services/agentOrchestrator');
 const SessionManager = require('./services/sessionManager');
 const SocketHandler = require('./services/socketHandler');
+const DatabaseService = require('./services/databaseService');
 
 // Import routes
 const healthRoutes = require('./routes/health');
 const apiRoutes = require('./routes/api');
-const { router: authRoutes, verifyToken } = require('./routes/auth');
+const { router: authRoutes } = require('./routes/auth');
 
 // Initialize Express app and HTTP server
 const app = express();
@@ -180,15 +180,23 @@ io.use(async (socket, next) => {
 });
 
 // Initialize services
-let chatService, agentOrchestrator, sessionManager, socketHandler;
+let chatService, agentOrchestrator, sessionManager, socketHandler, databaseService;
 
 async function initializeServices() {
     try {
         logger.info('Initializing chat backend services...');
 
-        // Initialize core services
-        sessionManager = new SessionManager();
-        chatService = new ChatService();
+        const persistenceEnabled = process.env.CHAT_PERSISTENCE_ENABLED === 'true';
+        if (persistenceEnabled) {
+            databaseService = new DatabaseService();
+            await databaseService.initialize();
+        }
+
+        // Initialize core services. The database adapter is optional for
+        // standalone development, but Compose enables it and fails fast when
+        // PostgreSQL is unavailable so persistence is never silently lost.
+        sessionManager = new SessionManager(databaseService);
+        chatService = new ChatService(databaseService);
         agentOrchestrator = new AgentOrchestrator();
         
         // Initialize socket handler with services
@@ -199,14 +207,16 @@ async function initializeServices() {
             chatService,
             agentOrchestrator,
             sessionManager,
-            socketHandler
+            socketHandler,
+            databaseService
         };
         
         logger.info('Chat backend services initialized successfully', {
             chatService: 'active',
             agentOrchestrator: 'active',
             sessionManager: 'active',
-            socketHandler: 'active'
+            socketHandler: 'active',
+            database: persistenceEnabled ? 'active' : 'disabled'
         });
 
     } catch (error) {
@@ -290,6 +300,11 @@ const gracefulShutdown = async (signal) => {
         
         if (agentOrchestrator) {
             logger.info('Cleaning up agent orchestrator...');
+        }
+
+        if (databaseService) {
+            logger.info('Closing database connection...');
+            await databaseService.close();
         }
 
         logger.info('Graceful shutdown completed');

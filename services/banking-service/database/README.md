@@ -27,7 +27,7 @@ This module provides:
 
 ### Prerequisites
 
-- Node.js >= 18.0.0
+- Node.js >= 22.0.0
 - PostgreSQL >= 12.0
 - npm or yarn
 

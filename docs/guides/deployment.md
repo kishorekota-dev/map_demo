@@ -59,8 +59,16 @@ Create `.env.production`:
 NODE_ENV=production
 JWT_SECRET=your-secure-secret-key
 DATABASE_URL=postgresql://user:pass@postgres:5432/banking
+OPENAI_ENABLED=false
 OPENAI_API_KEY=your-openai-key
+SLM_ENABLED=false
+SLM_BASE_URL=
 ```
+
+Remote generation and extraction are disabled unless explicitly enabled. Set
+`OPENAI_ENABLED=true` with a usable key for optional no-tool responses, or set
+`SLM_ENABLED=true` with a usable key for remote extraction. A local
+`SLM_BASE_URL` enables local extraction without a key.
 
 ## PM2 Deployment
 

@@ -1,8 +1,7 @@
 const EventEmitter = require('events');
-const http = require('http');
 const socketIo = require('socket.io');
-const jwt = require('jsonwebtoken');
 const logger = require('./logger');
+const { validateAgentToken } = require('./authClient');
 
 class SocketManager extends EventEmitter {
     constructor(server) {
@@ -26,9 +25,13 @@ class SocketManager extends EventEmitter {
      * Setup Socket.IO server
      */
     setupSocketServer() {
+        const configuredOrigins = process.env.CORS_ORIGIN || process.env.ALLOWED_ORIGINS;
+        const allowedOrigins = configuredOrigins
+            ? configuredOrigins.split(',').map(origin => origin.trim()).filter(Boolean)
+            : ['http://localhost:3000', 'http://localhost:8081'];
         this.io = socketIo(this.server, {
             cors: {
-                origin: process.env.CORS_ORIGIN || "*",
+                origin: allowedOrigins,
                 methods: ["GET", "POST"],
                 credentials: true
             },
@@ -59,24 +62,25 @@ class SocketManager extends EventEmitter {
                 const { agentId, token, agentInfo } = authData;
                 
                 // Validate agent authentication
-                const isValid = await this.validateAgentAuth(agentId, token);
-                if (!isValid) {
+                const validation = await this.validateAgentAuth(agentId, token);
+                if (!validation.valid) {
                     socket.emit('authError', { message: 'Invalid authentication' });
                     socket.disconnect(true);
                     return;
                 }
 
                 // Register agent
-                await this.registerAgent(socket, agentId, agentInfo);
+                const canonicalAgentId = validation.userId || agentId;
+                await this.registerAgent(socket, canonicalAgentId, agentInfo || {}, token);
                 
                 socket.emit('authenticated', {
-                    agentId,
+                    agentId: canonicalAgentId,
                     socketId: socket.id,
                     timestamp: new Date().toISOString()
                 });
 
                 logger.socket('agent_authenticated', socket.id, {
-                    agentId,
+                    agentId: canonicalAgentId,
                     agentName: agentInfo?.name
                 });
 
@@ -166,8 +170,10 @@ class SocketManager extends EventEmitter {
                 // Join chat room
                 socket.join(`chat_${chatData.sessionId}`);
                 
+                agent.activeChats.add(chatData.sessionId);
+
                 socket.emit('chatAccepted', {
-                    sessionId: chatData.sessionId,
+                    ...chatData,
                     timestamp: new Date().toISOString()
                 });
 
@@ -225,6 +231,7 @@ class SocketManager extends EventEmitter {
                 
                 // Leave chat room
                 socket.leave(`chat_${chatData.sessionId}`);
+                agent.activeChats.delete(chatData.sessionId);
                 
                 socket.emit('chatEnded', {
                     sessionId: chatData.sessionId,
@@ -274,9 +281,33 @@ class SocketManager extends EventEmitter {
             }
         });
 
+        socket.on('escalateChat', async (chatData) => {
+            try {
+                const agent = this.connectedAgents.get(socket.id);
+                if (!agent) {
+                    socket.emit('error', { message: 'Agent not authenticated' });
+                    return;
+                }
+                await this.runIntegration('escalateChat', { agentId: agent.agentId, chatData });
+                agent.activeChats.delete(chatData.sessionId);
+                socket.leave(`chat_${chatData.sessionId}`);
+                socket.emit('chatEnded', {
+                    sessionId: chatData.sessionId,
+                    reason: 'escalated',
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                socket.emit('chatError', { sessionId: chatData?.sessionId, error: error.message });
+            }
+        });
+
         // Queue management
         socket.on('getQueueStatus', async () => {
             try {
+                if (!this.connectedAgents.has(socket.id)) {
+                    socket.emit('error', { message: 'Agent not authenticated' });
+                    return;
+                }
                 const queueStatus = await this.getQueueStatus();
                 socket.emit('queueStatus', queueStatus);
 
@@ -357,6 +388,24 @@ class SocketManager extends EventEmitter {
             }
         });
 
+        socket.on('updatePreferences', async (preferences) => {
+            try {
+                const agent = this.connectedAgents.get(socket.id);
+                if (!agent) {
+                    socket.emit('error', { message: 'Agent not authenticated' });
+                    return;
+                }
+
+                const updated = await this.runIntegration('updatePreferences', {
+                    agentId: agent.agentId,
+                    preferences
+                });
+                socket.emit('preferencesUpdated', updated);
+            } catch (error) {
+                socket.emit('preferencesError', { message: error.message });
+            }
+        });
+
         // Typing indicators
         socket.on('typing', (typingData) => {
             const agent = this.connectedAgents.get(socket.id);
@@ -386,14 +435,15 @@ class SocketManager extends EventEmitter {
     /**
      * Register agent
      */
-    async registerAgent(socket, agentId, agentInfo) {
+    async registerAgent(socket, agentId, agentInfo, token) {
         const agent = {
             agentId,
             socketId: socket.id,
-            name: agentInfo.name,
-            email: agentInfo.email,
-            department: agentInfo.department,
-            role: agentInfo.role,
+            name: agentInfo.name || agentId,
+            email: agentInfo.email || '',
+            department: agentInfo.department || 'customer-service',
+            role: agentInfo.role || 'agent',
+            token,
             status: 'available',
             connectedAt: new Date(),
             lastActivity: new Date(),
@@ -410,7 +460,7 @@ class SocketManager extends EventEmitter {
         socket.join(`department_${agent.department}`);
 
         // Emit agent registration events
-        this.emit('agentRegistered', { agent, socket });
+        await this.runIntegration('agentRegistered', { agent, socket });
         
         // Broadcast to other agents/admins
         this.broadcastToAgents('agentOnline', {
@@ -479,6 +529,7 @@ class SocketManager extends EventEmitter {
             }
 
             const assignment = {
+                queueId: chatSession.queueId,
                 sessionId: chatSession.sessionId,
                 customerId: chatSession.customerId,
                 customerName: chatSession.customerName,
@@ -486,6 +537,7 @@ class SocketManager extends EventEmitter {
                 escalationReason: chatSession.escalationReason,
                 customerData: chatSession.customerData,
                 estimatedWaitTime: chatSession.estimatedWaitTime,
+                requirements: chatSession.requirements,
                 assignedAt: new Date().toISOString(),
                 autoAccept: false // Require manual acceptance
             };
@@ -652,94 +704,71 @@ class SocketManager extends EventEmitter {
      * Service integration methods (to be connected with other services)
      */
     async validateAgentAuth(agentId, token) {
-        // SECURITY: verify a real, server-issued JWT. Previously this always
-        // returned true, which let any browser self-issue an agent identity.
-        // The token must be signed with the shared JWT_SECRET used by the
-        // other services and must identify the same agent that is connecting.
-        try {
-            if (!token || typeof token !== 'string') {
-                logger.warn('Agent auth rejected: missing token', { agentId });
-                return false;
-            }
-
-            const secret = process.env.JWT_SECRET;
-            if (!secret) {
-                // Fail closed: without a secret we cannot verify anything.
-                logger.error('Agent auth rejected: JWT_SECRET is not configured');
-                return false;
-            }
-
-            const decoded = jwt.verify(token, secret);
-
-            // Bind the token to the connecting agentId. Accept common claim
-            // names used across the services (agentId / sub / id / userId).
-            const tokenAgentId =
-                decoded.agentId || decoded.sub || decoded.id || decoded.userId;
-
-            if (agentId && tokenAgentId && String(tokenAgentId) !== String(agentId)) {
-                logger.warn('Agent auth rejected: token/agentId mismatch', {
-                    agentId,
-                    tokenAgentId
-                });
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            logger.warn('Agent auth rejected: invalid token', {
-                agentId,
-                error: error.message
-            });
-            return false;
+        const validation = await validateAgentToken(token);
+        if (!validation.valid) {
+            logger.warn('Agent auth rejected: invalid token', { agentId });
+            return validation;
         }
+
+        if (agentId && String(validation.userId) !== String(agentId)) {
+            logger.warn('Agent auth rejected: token/agentId mismatch', {
+                agentId,
+                tokenAgentId: validation.userId
+            });
+            return { valid: false };
+        }
+
+        return validation;
     }
 
     async updateAgentStatus(agentId, statusData) {
-        this.emit('updateAgentStatus', { agentId, statusData });
+        return this.runIntegration('updateAgentStatus', { agentId, statusData });
     }
 
     async handleChatMessage(agentId, messageData) {
-        this.emit('chatMessage', { agentId, messageData });
+        return this.runIntegration('chatMessage', { agentId, messageData });
     }
 
     async acceptChatAssignment(agentId, chatData) {
-        this.emit('acceptChat', { agentId, chatData });
+        return this.runIntegration('acceptChat', { agentId, chatData });
     }
 
     async rejectChatAssignment(agentId, chatData) {
-        this.emit('rejectChat', { agentId, chatData });
+        return this.runIntegration('rejectChat', { agentId, chatData });
     }
 
     async endChatSession(agentId, chatData) {
-        this.emit('endChat', { agentId, chatData });
+        return this.runIntegration('endChat', { agentId, chatData });
     }
 
     async transferChatSession(agentId, transferData) {
-        this.emit('transferChat', { agentId, transferData });
+        return this.runIntegration('transferChat', { agentId, transferData });
     }
 
     async getQueueStatus() {
-        return new Promise((resolve) => {
-            this.emit('getQueueStatus', { callback: resolve });
-        });
+        return this.runIntegration('getQueueStatus', {});
     }
 
     async getAgentList() {
-        return new Promise((resolve) => {
-            this.emit('getAgentList', { callback: resolve });
-        });
+        return this.runIntegration('getAgentList', {});
     }
 
     async getChatHistory(agentId, historyRequest) {
-        return new Promise((resolve) => {
-            this.emit('getChatHistory', { agentId, historyRequest, callback: resolve });
-        });
+        return this.runIntegration('getChatHistory', { agentId, historyRequest });
     }
 
     async getCustomerInfo(customerId) {
-        return new Promise((resolve) => {
-            this.emit('getCustomerInfo', { customerId, callback: resolve });
-        });
+        return this.runIntegration('getCustomerInfo', { customerId });
+    }
+
+    async runIntegration(event, payload) {
+        const handlers = this.listeners(event);
+        if (handlers.length === 0) {
+            throw new Error(`No integration registered for ${event}`);
+        }
+
+        const results = await Promise.all(handlers.map(handler => handler(payload)));
+        return results[0];
     }
 
     async handleAgentChatsOnDisconnect(agent) {
@@ -773,7 +802,7 @@ class SocketManager extends EventEmitter {
     async cleanup() {
         try {
             // Disconnect all agents
-            for (const [socketId, agent] of this.connectedAgents) {
+            for (const socketId of this.connectedAgents.keys()) {
                 const socket = this.io.sockets.sockets.get(socketId);
                 if (socket) {
                     socket.emit('serverShutdown', { message: 'Server is shutting down' });

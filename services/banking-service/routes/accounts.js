@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const accountController = require('../controllers/accounts');
-const { validators, businessValidators } = require('../middleware/validation');
+const { validators } = require('../middleware/validation');
 const { authorize, verifyAccountOwnership } = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 

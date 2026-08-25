@@ -27,7 +27,6 @@ const healthRoutes = require('./routes/health');
 
 // Import middleware
 const authMiddleware = require('./middleware/auth');
-const validationMiddleware = require('./middleware/validation');
 const securityMiddleware = require('./middleware/security');
 const errorMiddleware = require('./middleware/error');
 

@@ -34,11 +34,18 @@ echo -e "${YELLOW}Setting up databases...${NC}"
 echo ""
 
 # Create databases
-DATABASES=("poc_banking" "poc_chat" "poc_ai_orchestrator")
+DATABASES=("poc_banking" "poc_chat" "ai_orchestrator")
 
 for db in "${DATABASES[@]}"; do
-  echo -e "${YELLOW}Creating database: $db${NC}"
-  PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -c "CREATE DATABASE $db;" 2>/dev/null || echo "  Database $db already exists"
+  exists=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -Atc \
+    "SELECT 1 FROM pg_database WHERE datname = '$db';")
+
+  if [ "$exists" = "1" ]; then
+    echo "  Database $db already exists"
+  else
+    echo -e "${YELLOW}Creating database: $db${NC}"
+    PGPASSWORD="$DB_PASSWORD" createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$db"
+  fi
 done
 
 echo ""
@@ -54,7 +61,8 @@ fi
 # AI Orchestrator migrations
 if [[ -f "$ROOT_DIR/scripts/init-ai-orchestrator-db.sql" ]]; then
   echo "Running AI orchestrator schema..."
-  PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d poc_ai_orchestrator -f "$ROOT_DIR/scripts/init-ai-orchestrator-db.sql" 2>/dev/null || echo "  Schema already exists"
+  PGPASSWORD="$DB_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
+    -d postgres -f "$ROOT_DIR/scripts/init-ai-orchestrator-db.sql"
 fi
 
 echo ""

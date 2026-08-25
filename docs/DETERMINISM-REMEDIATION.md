@@ -34,7 +34,12 @@ banking pipeline did not execute end-to-end and was not deterministic:
 
 ### Determinism
 - NaN-safe LLM config; **temperature/top_p default to 0**, pinned seed.
-- SLM extractor forced to temperature 0 + JSON mode.
+- Tool-backed replies always use the deterministic formatter over authoritative
+  raw banking results; optional response generation is limited to no-tool
+  intents and requires `OPENAI_ENABLED=true` plus a usable key.
+- Remote SLM extraction requires `SLM_ENABLED=true`; an explicit local
+  `SLM_BASE_URL` can enable extraction without a remote key. The extractor is
+  forced to temperature 0 + JSON mode when enabled.
 - Intent-prompt key mismatch fixed — all intents use their tailored prompts;
   startup assertion fails fast on any unresolved prompt.
 - Single **canonical intent vocabulary**; NLU maps every classifier name to it;
@@ -63,10 +68,15 @@ banking pipeline did not execute end-to-end and was not deterministic:
 - Contract + determinism + concurrency regression tests added across services.
 - `.github/workflows/ci.yml` runs them as a gate.
 
+### Durable chat state
+- `chat-backend` now writes sessions and messages through `DatabaseService` to
+  its dedicated `poc_chat` PostgreSQL database and lazily restores active
+  sessions plus full message metadata after a service restart.
+- Database health participates in the service health check when persistence is
+  enabled; the Compose profiles fail fast instead of silently falling back to
+  process memory.
+
 ## Known follow-ups (not done in this pass)
-- **Durable persistence:** `chat-backend` session/message state is in-memory
-  (serialized, but lost on restart). Wiring `DatabaseService` to PostgreSQL and
-  the session-resume flow is a follow-up; until then, treat resume as unsupported.
 - **OIDC/SAML:** the enterprise generator emits OIDC/SAML config but no
   token-issuer validation is implemented (local JWT only).
 - **`packages/*` legacy track** and `docker-compose-enterprise.yml` are separate
@@ -74,5 +84,3 @@ banking pipeline did not execute end-to-end and was not deterministic:
 - **Per-service docs** (e.g. some `ARCHITECTURE.md` persistence/DialogFlow
   claims) may still over-state; the canonical references are this document, the
   [determinism doc](architecture/determinism.md), and the root `README.md`.
-- **api-gateway packaging:** `rate-limit-redis` is referenced but not in
-  `package.json` dependencies (pre-existing).

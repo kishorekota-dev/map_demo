@@ -19,13 +19,13 @@
     "dotenv": "^16.3.1",
     "http-proxy-middleware": "^2.0.6",
     "express-rate-limit": "^7.1.5",
+    "rate-limit-redis": "^4.3.1",
     "jsonwebtoken": "^9.0.2",
     "winston": "^3.11.0",
     "node-cache": "^5.1.2",
-    "axios": "^1.6.0",
+    "axios": "^1.15.2",
     "lodash": "^4.17.21",
-    "uuid": "^9.0.1",
-    "consul": "^0.46.0",
+    "uuid": "^11.1.1",
     "redis": "^4.6.10",
     "compression": "^1.7.4",
     "express-validator": "^7.0.1"
@@ -37,7 +37,7 @@
     "eslint": "^8.55.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "author": "POC Development Team",
   "license": "ISC",

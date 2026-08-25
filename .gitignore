@@ -155,8 +155,11 @@ dist/
 public/build/
 
 # Docker (selective exclusion)
-# Exclude .dockerignore but allow Docker Compose and Dockerfile
+# Keep Docker build manifests while excluding runtime/cache directories.
 .dockerignore
+# Docker build manifests are source files and must be available in clean clones.
+!.dockerignore
+!**/.dockerignore
 # Allow Docker Compose files and Dockerfiles for deployment
 !docker-compose*.yml
 !Dockerfile*

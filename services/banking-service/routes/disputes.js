@@ -2,7 +2,11 @@ const express = require('express');
 const router = express.Router();
 const disputeController = require('../controllers/disputes');
 const { validators } = require('../middleware/validation');
-const { authorize } = require('../middleware/auth');
+const {
+  authorize,
+  verifyTransactionOwnership,
+  verifyDisputeOwnership
+} = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply rate limiting to dispute routes
@@ -25,6 +29,7 @@ router.get('/',
  */
 router.get('/:disputeId',
   validators.validateId,
+  verifyDisputeOwnership,
   disputeController.getDisputeById
 );
 
@@ -35,6 +40,7 @@ router.get('/:disputeId',
  */
 router.post('/',
   validators.validateCreateDispute,
+  verifyTransactionOwnership,
   disputeController.createDispute
 );
 
@@ -46,6 +52,7 @@ router.post('/',
 router.put('/:disputeId',
   validators.validateId,
   validators.validateUpdateDispute,
+  verifyDisputeOwnership,
   disputeController.updateDispute
 );
 
@@ -56,6 +63,7 @@ router.put('/:disputeId',
  */
 router.post('/:disputeId/evidence',
   validators.validateId,
+  verifyDisputeOwnership,
   disputeController.addEvidence
 );
 
@@ -120,6 +128,7 @@ router.post('/:disputeId/resolve',
  */
 router.post('/:disputeId/withdraw',
   validators.validateId,
+  verifyDisputeOwnership,
   disputeController.withdrawDispute
 );
 

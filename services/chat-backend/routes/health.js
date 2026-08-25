@@ -6,7 +6,7 @@ const router = express.Router();
  * @desc Get service health status
  * @access Public
  */
-router.get('/health', async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const health = {
             status: 'healthy',
@@ -20,17 +20,25 @@ router.get('/health', async (req, res) => {
 
         // Check service dependencies health
         if (req.app.locals.services) {
-            const { chatService, agentOrchestrator, sessionManager, socketHandler } = req.app.locals.services;
+            const { chatService, agentOrchestrator, sessionManager, socketHandler, databaseService } = req.app.locals.services;
+            const databaseHealth = databaseService
+                ? await databaseService.getHealthStatus()
+                : { status: 'disabled', connected: false };
             
             health.services = {
                 chatService: chatService ? chatService.getHealthStatus() : { status: 'unavailable' },
                 agentOrchestrator: agentOrchestrator ? agentOrchestrator.getHealthStatus() : { status: 'unavailable' },
                 sessionManager: sessionManager ? sessionManager.getHealthStatus() : { status: 'unavailable' },
-                socketHandler: socketHandler ? socketHandler.getHealthStatus() : { status: 'unavailable' }
+                socketHandler: socketHandler ? socketHandler.getHealthStatus() : { status: 'unavailable' },
+                database: databaseHealth
             };
+
+            if (databaseService && databaseHealth.status !== 'healthy') {
+                health.status = 'unhealthy';
+            }
         }
 
-        res.status(200).json(health);
+        res.status(health.status === 'healthy' ? 200 : 503).json(health);
     } catch (error) {
         res.status(500).json({
             status: 'unhealthy',
@@ -61,7 +69,7 @@ router.get('/metrics', async (req, res) => {
 
         // Add service-specific metrics if available
         if (req.app.locals.services) {
-            const { chatService, agentOrchestrator, sessionManager, socketHandler } = req.app.locals.services;
+            const { chatService, agentOrchestrator, sessionManager, socketHandler, databaseService } = req.app.locals.services;
             
             metrics.services = {};
             
@@ -79,6 +87,10 @@ router.get('/metrics', async (req, res) => {
             
             if (socketHandler) {
                 metrics.services.websockets = socketHandler.getHealthStatus();
+            }
+
+            if (databaseService) {
+                metrics.services.database = await databaseService.getHealthStatus();
             }
         }
 
@@ -117,7 +129,7 @@ router.get('/status', async (req, res) => {
 
         // Add detailed service information
         if (req.app.locals.services) {
-            const { chatService, agentOrchestrator, sessionManager, socketHandler } = req.app.locals.services;
+            const { chatService, agentOrchestrator, sessionManager, socketHandler, databaseService } = req.app.locals.services;
             
             status.services = {
                 chat: {
@@ -135,6 +147,10 @@ router.get('/status', async (req, res) => {
                 websockets: {
                     status: socketHandler ? 'running' : 'stopped',
                     details: socketHandler ? socketHandler.getHealthStatus() : null
+                },
+                database: {
+                    status: databaseService ? 'running' : 'disabled',
+                    details: databaseService ? await databaseService.getHealthStatus() : null
                 }
             };
         }

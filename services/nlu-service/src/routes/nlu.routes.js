@@ -4,7 +4,7 @@
  */
 
 const express = require('express');
-const { body, param, query } = require('express-validator');
+const { body, param } = require('express-validator');
 const NLUController = require('../controllers/nlu.controller');
 const { validateRequest } = require('../middleware/validation');
 
@@ -189,7 +189,7 @@ router.delete('/context/:sessionId',
 
 /**
  * POST /api/nlu/train
- * Train NLU model with new data
+ * Reserved training endpoint; returns 501 after request validation
  */
 router.post('/train',
   [

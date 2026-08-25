@@ -10,7 +10,7 @@ const config = require('../../config');
  */
 class CheckpointerManager {
   constructor() {
-    this.enabled = config.workflow?.checkpointEnabled !== false;
+    this.enabled = config.langgraph?.checkpointEnabled !== false;
     
     if (this.enabled) {
       // Initialize MemorySaver for in-memory state persistence

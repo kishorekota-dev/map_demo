@@ -213,12 +213,12 @@ User Question
          │
          ▼
 ┌─────────────────┐
-│ Build Prompts   │ System + User prompts with context
+│ Format Tool Data│ Deterministic authoritative response
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Generate Reply  │ LLM generates response
+│ Optional LLM    │ No-tool intents only; explicit opt-in
 └────────┬────────┘
          │
          ▼

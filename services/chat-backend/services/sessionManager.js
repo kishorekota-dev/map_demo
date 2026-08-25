@@ -1,10 +1,12 @@
 const EventEmitter = require('events');
+const { randomUUID } = require('crypto');
 const logger = require('./logger');
 const KeyedMutex = require('./keyedMutex');
 
 class SessionManager extends EventEmitter {
-    constructor() {
+    constructor(databaseService = null) {
         super();
+        this.databaseService = databaseService;
         this.sessions = new Map();
         this.userSessions = new Map(); // userId -> Set of sessionIds
         // Serializes per-session read-modify-write so concurrent updates on the
@@ -13,7 +15,9 @@ class SessionManager extends EventEmitter {
         this.sessionTTL = parseInt(process.env.SESSION_TTL) || 3600000; // 1 hour
         this.cleanupInterval = parseInt(process.env.SESSION_CLEANUP_INTERVAL) || 300000; // 5 minutes
         this.maxSessionsPerUser = parseInt(process.env.MAX_SESSIONS_PER_USER) || 5;
-        this.sessionStorage = process.env.SESSION_STORAGE_TYPE || 'memory';
+        this.sessionStorage = databaseService
+            ? 'postgres'
+            : process.env.SESSION_STORAGE_TYPE || 'memory';
         
         this.setupCleanupScheduler();
         
@@ -74,7 +78,13 @@ class SessionManager extends EventEmitter {
                 }
             };
 
-            // Store session
+            if (this.databaseService) {
+                await this.databaseService.createSession(
+                    this.toPersistenceData(session)
+                );
+            }
+
+            // Store session after the durable write succeeds.
             this.sessions.set(sessionId, session);
 
             // Update user sessions mapping
@@ -108,8 +118,16 @@ class SessionManager extends EventEmitter {
      */
     async getSession(sessionId) {
         try {
-            const session = this.sessions.get(sessionId);
+            let session = this.sessions.get(sessionId);
             
+            if (!session && this.databaseService) {
+                const persistedSession = await this.databaseService.getSession(sessionId);
+                if (persistedSession?.is_active) {
+                    session = this.fromPersistenceData(persistedSession);
+                    this.cacheSession(session);
+                }
+            }
+
             if (!session) {
                 return null;
             }
@@ -160,22 +178,23 @@ class SessionManager extends EventEmitter {
             }
             
             if (updates.statistics) {
+                const statisticsUpdates = { ...updates.statistics };
                 // Handle Set types properly
-                if (updates.statistics.agentsUsed) {
-                    updates.statistics.agentsUsed.forEach(agent => 
+                if (statisticsUpdates.agentsUsed) {
+                    statisticsUpdates.agentsUsed.forEach(agent =>
                         session.statistics.agentsUsed.add(agent)
                     );
-                    delete updates.statistics.agentsUsed;
+                    delete statisticsUpdates.agentsUsed;
                 }
                 
-                if (updates.statistics.intentsProcessed) {
-                    updates.statistics.intentsProcessed.forEach(intent => 
+                if (statisticsUpdates.intentsProcessed) {
+                    statisticsUpdates.intentsProcessed.forEach(intent =>
                         session.statistics.intentsProcessed.add(intent)
                     );
-                    delete updates.statistics.intentsProcessed;
+                    delete statisticsUpdates.intentsProcessed;
                 }
                 
-                session.statistics = { ...session.statistics, ...updates.statistics };
+                session.statistics = { ...session.statistics, ...statisticsUpdates };
             }
             
             if (updates.security) {
@@ -184,6 +203,13 @@ class SessionManager extends EventEmitter {
 
             // Update last access time
             session.lastAccessTime = new Date();
+
+            if (this.databaseService) {
+                await this.databaseService.updateSession(
+                    sessionId,
+                    this.toPersistenceUpdates(session)
+                );
+            }
 
             logger.debug('Session updated', { 
                 sessionId, 
@@ -218,6 +244,13 @@ class SessionManager extends EventEmitter {
             const extension = extensionMs || this.sessionTTL;
             session.expiresAt = new Date(Date.now() + extension);
             session.lastAccessTime = new Date();
+
+            if (this.databaseService) {
+                await this.databaseService.updateSession(
+                    sessionId,
+                    this.toPersistenceUpdates(session)
+                );
+            }
 
             logger.debug('Session extended', { 
                 sessionId, 
@@ -257,6 +290,10 @@ class SessionManager extends EventEmitter {
             // Calculate total interaction time
             if (session.createdAt) {
                 session.statistics.totalInteractionTime = session.endedAt - session.createdAt;
+            }
+
+            if (this.databaseService) {
+                await this.databaseService.endSession(sessionId, reason);
             }
 
             logger.info('Session ended', { 
@@ -319,6 +356,14 @@ class SessionManager extends EventEmitter {
      */
     async getUserSessions(userId) {
         try {
+            if (this.databaseService) {
+                const persistedSessions = await this.databaseService.getUserActiveSessions(userId);
+                for (const persistedSession of persistedSessions) {
+                    const session = this.fromPersistenceData(persistedSession);
+                    this.cacheSession(session);
+                }
+            }
+
             const sessionIds = this.userSessions.get(userId) || new Set();
             const sessions = [];
 
@@ -367,6 +412,15 @@ class SessionManager extends EventEmitter {
             
             if (authData.authMethod) {
                 session.security.authMethod = authData.authMethod;
+            }
+
+            session.lastAccessTime = new Date();
+
+            if (this.databaseService) {
+                await this.databaseService.updateSession(
+                    sessionId,
+                    this.toPersistenceUpdates(session)
+                );
             }
 
             logger.info('Session authenticated', { 
@@ -421,6 +475,41 @@ class SessionManager extends EventEmitter {
         }
     }
 
+    async incrementSessionStatistics(sessionId, increments) {
+        return this.mutex.runExclusive(sessionId, async () => {
+            const session = this.sessions.get(sessionId);
+            if (!session) {
+                throw new Error('Session not found');
+            }
+            if (this.isSessionExpired(session)) {
+                await this.expireSession(sessionId);
+                throw new Error('Session expired');
+            }
+
+            for (const [key, amount] of Object.entries(increments)) {
+                if (!Number.isFinite(amount)) {
+                    throw new Error(`Invalid statistics increment: ${key}`);
+                }
+                session.statistics[key] = (Number(session.statistics[key]) || 0) + amount;
+            }
+            session.lastAccessTime = new Date();
+
+            if (this.databaseService) {
+                await this.databaseService.updateSession(
+                    sessionId,
+                    this.toPersistenceUpdates(session)
+                );
+            }
+
+            this.emit('sessionUpdated', {
+                sessionId,
+                session,
+                updates: { statistics: increments }
+            });
+            return session;
+        });
+    }
+
     /**
      * Check if session is expired
      */
@@ -432,9 +521,84 @@ class SessionManager extends EventEmitter {
      * Generate unique session ID
      */
     generateSessionId() {
-        const timestamp = Date.now().toString(36);
-        const randomPart = Math.random().toString(36).substr(2, 9);
-        return `sess_${timestamp}_${randomPart}`;
+        return randomUUID();
+    }
+
+    cacheSession(session) {
+        this.sessions.set(session.sessionId, session);
+        if (!this.userSessions.has(session.userId)) {
+            this.userSessions.set(session.userId, new Set());
+        }
+        this.userSessions.get(session.userId).add(session.sessionId);
+    }
+
+    toPersistenceData(session) {
+        return {
+            sessionId: session.sessionId,
+            userId: session.userId,
+            expiresAt: session.expiresAt,
+            metadata: session.metadata || {},
+            conversationContext: session.conversationContext || {},
+            state: session.state || {},
+            statistics: this.serializeStatistics(session.statistics),
+            security: session.security || {}
+        };
+    }
+
+    toPersistenceUpdates(session) {
+        return {
+            is_active: session.isActive,
+            status: session.isActive
+                ? 'active'
+                : session.endReason === 'expired' ? 'expired' : 'terminated',
+            last_activity: session.lastAccessTime || new Date(),
+            expires_at: session.expiresAt,
+            metadata: session.metadata || {},
+            conversation_context: session.conversationContext || {},
+            state: session.state || {},
+            statistics: this.serializeStatistics(session.statistics),
+            security: session.security || {},
+            ended_at: session.endedAt || null,
+            ended_reason: session.endReason || null
+        };
+    }
+
+    serializeStatistics(statistics = {}) {
+        return {
+            ...statistics,
+            agentsUsed: Array.from(statistics.agentsUsed || []),
+            intentsProcessed: Array.from(statistics.intentsProcessed || [])
+        };
+    }
+
+    fromPersistenceData(persistedSession) {
+        const value = typeof persistedSession?.get === 'function'
+            ? persistedSession.get({ plain: true })
+            : persistedSession;
+        const statistics = value.statistics || {};
+
+        return {
+            sessionId: value.session_id,
+            userId: value.user_id,
+            createdAt: new Date(value.created_at),
+            lastAccessTime: new Date(value.last_activity),
+            expiresAt: value.expires_at ? new Date(value.expires_at) : null,
+            isActive: value.is_active,
+            metadata: value.metadata || {},
+            conversationContext: value.conversation_context || {},
+            state: value.state || {},
+            statistics: {
+                ...statistics,
+                messageCount: value.message_count ?? statistics.messageCount ?? 0,
+                totalInteractionTime: statistics.totalInteractionTime || 0,
+                agentsUsed: new Set(statistics.agentsUsed || []),
+                intentsProcessed: new Set(statistics.intentsProcessed || []),
+                errorsEncountered: statistics.errorsEncountered || 0
+            },
+            security: value.security || {},
+            endedAt: value.ended_at ? new Date(value.ended_at) : null,
+            endReason: value.ended_reason || null
+        };
     }
 
     /**
@@ -442,6 +606,13 @@ class SessionManager extends EventEmitter {
      */
     async enforceSessionLimits(userId) {
         try {
+            if (this.databaseService) {
+                const persistedSessions = await this.databaseService.getUserActiveSessions(userId);
+                for (const persistedSession of persistedSessions) {
+                    this.cacheSession(this.fromPersistenceData(persistedSession));
+                }
+            }
+
             const userSessionIds = this.userSessions.get(userId);
             
             if (!userSessionIds || userSessionIds.size < this.maxSessionsPerUser) {
@@ -524,6 +695,10 @@ class SessionManager extends EventEmitter {
                 await this.expireSession(sessionId);
             }
 
+            if (this.databaseService) {
+                await this.databaseService.cleanupExpiredSessions();
+            }
+
             if (expiredSessions.length > 0) {
                 logger.info('Expired sessions cleaned up', { 
                     count: expiredSessions.length,
@@ -563,7 +738,6 @@ class SessionManager extends EventEmitter {
      * Get manager health status
      */
     getHealthStatus() {
-        const now = new Date();
         const activeSessions = Array.from(this.sessions.values()).filter(s => s.isActive);
         const expiredSessions = Array.from(this.sessions.values()).filter(s => this.isSessionExpired(s));
 

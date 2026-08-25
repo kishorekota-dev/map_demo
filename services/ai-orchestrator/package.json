@@ -19,17 +19,16 @@
     "morgan": "^1.10.0",
     "dotenv": "^16.3.1",
     "winston": "^3.10.0",
-    "axios": "^1.5.0",
-    "uuid": "^9.0.0",
+    "axios": "^1.15.2",
     "joi": "^17.9.2",
     "express-validator": "^7.0.1",
     "express-rate-limit": "^6.10.0",
-    "@langchain/core": "^0.2.0",
-    "@langchain/openai": "^0.2.0",
-    "@langchain/community": "^0.2.0",
-    "@langchain/langgraph": "^0.0.20",
-    "@modelcontextprotocol/sdk": "^0.5.0",
+    "@langchain/core": "^1.2.9",
+    "@langchain/openai": "^1.5.8",
+    "@langchain/langgraph": "^1.4.12",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "eventsource": "^2.0.2",
+    "ws": "^8.21.0",
     "pg": "^8.11.0",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.35.0",
@@ -46,8 +45,13 @@
     "eslint": "^8.55.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "overrides": {
+    "sequelize": {
+      "uuid": "11.1.1"
+    }
   },
   "keywords": [
     "ai",

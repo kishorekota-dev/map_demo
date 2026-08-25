@@ -1,3 +1,7 @@
+require('dotenv').config({
+    path: process.env.NODE_ENV === 'production' ? '.env' : '.env.development'
+});
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -5,9 +9,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const session = require('express-session');
-const RedisStore = require('connect-redis').default;
-const redis = require('redis');
 
 // Import services
 const logger = require('./services/logger');
@@ -16,40 +17,23 @@ const QueueService = require('./services/queueService');
 const ChatClientService = require('./services/chatClientService');
 const SocketManager = require('./services/socketManager');
 const { closeRedisClient } = require('./services/redisClient');
+const requireAgentAuth = require('./middleware/requireAgentAuth');
 
 // Import routes
 const agentsRoutes = require('./routes/agents');
 const queueRoutes = require('./routes/queue');
 const authRoutes = require('./routes/auth');
 
-// Load environment variables
-require('dotenv').config({ path: '.env.development' });
-
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 8081;
-
-// Redis client for sessions
-const redisClient = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || undefined
-});
-
-redisClient.on('error', (err) => {
-    logger.error('Redis connection error', { error: err.message });
-});
-
-redisClient.on('connect', () => {
-    logger.info('Connected to Redis for sessions');
-});
 
 // Middleware
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "https:"],
             connectSrc: ["'self'", "ws:", "wss:"]
@@ -58,8 +42,12 @@ app.use(helmet({
 }));
 
 app.use(compression());
+const configuredOrigins = process.env.CORS_ORIGIN || process.env.ALLOWED_ORIGINS;
+const allowedOrigins = configuredOrigins
+    ? configuredOrigins.split(',').map(origin => origin.trim()).filter(Boolean)
+    : ['http://localhost:3000', 'http://localhost:8081'];
 app.use(cors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:8081'],
+    origin: allowedOrigins,
     credentials: true
 }));
 
@@ -74,23 +62,6 @@ app.use('/api', limiter);
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Session middleware
-app.use(session({
-    store: new RedisStore({ 
-        client: redisClient,
-        prefix: 'agent-ui:'
-    }),
-    secret: process.env.SESSION_SECRET || 'agent-ui-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    rolling: true,
-    cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: parseInt(process.env.SESSION_MAX_AGE) || 86400000 // 24 hours
-    }
-}));
 
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -109,6 +80,16 @@ app.use((req, res, next) => {
 // Initialize services
 let agentService, queueService, chatClientService, socketManager;
 
+function connectChatBackendAtStartup(client) {
+    return client.connect().catch(error => {
+        logger.warn('Chat backend not available, continuing without connection', {
+            error: error.message,
+            url: process.env.CHAT_BACKEND_URL || 'http://localhost:3006'
+        });
+        return false;
+    });
+}
+
 async function initializeServices() {
     try {
         logger.info('Initializing services...');
@@ -118,6 +99,8 @@ async function initializeServices() {
         queueService = new QueueService();
         chatClientService = new ChatClientService();
         socketManager = new SocketManager(server);
+
+        await Promise.all([agentService.ready, queueService.ready]);
         
         // Store services in app for route access
         app.set('agentService', agentService);
@@ -128,13 +111,10 @@ async function initializeServices() {
         // Setup service integrations
         await setupServiceIntegrations();
         
-        // Connect to chat backend (non-blocking)
-        chatClientService.connect().catch(error => {
-            logger.warn('Chat backend not available, continuing without connection', {
-                error: error.message,
-                url: process.env.CHAT_BACKEND_URL || 'http://localhost:3006'
-            });
-        });
+        // Start the service-to-service connection immediately. ChatClientService
+        // uses a configured token when present, otherwise it signs a short-lived
+        // service-principal JWT from JWT_SECRET.
+        connectChatBackendAtStartup(chatClientService);
         
         logger.info('All services initialized successfully');
     } catch (error) {
@@ -144,150 +124,178 @@ async function initializeServices() {
 }
 
 async function setupServiceIntegrations() {
-    // Connect AgentService to QueueService
+    const ensureChatBackend = async () => {
+        if (chatClientService.isConnected) return;
+        await chatClientService.connect();
+    };
+
     queueService.on('getAvailableAgents', ({ requirements, callback }) => {
-        const agents = agentService.getAvailableAgents(requirements);
-        callback(agents);
+        callback(agentService.getAvailableAgents(requirements));
     });
 
     queueService.on('assignmentRequest', async ({ queueEntry, agentId, agent }) => {
-        try {
-            // Notify agent via socket
-            await socketManager.sendChatAssignment(agentId, {
-                sessionId: queueEntry.sessionId,
-                customerId: queueEntry.customerId,
-                customerName: queueEntry.customerName,
-                priority: queueEntry.priority,
-                escalationReason: queueEntry.escalationReason,
-                customerData: queueEntry.customerData,
-                estimatedWaitTime: queueEntry.estimatedWaitTime
-            });
-
-            logger.info('Chat assignment sent to agent', {
-                queueId: queueEntry.queueId,
-                agentId,
-                sessionId: queueEntry.sessionId
-            });
-        } catch (error) {
-            logger.error('Failed to send chat assignment', {
-                error: error.message,
-                queueId: queueEntry.queueId,
-                agentId
-            });
-        }
+        await socketManager.sendChatAssignment(agentId, {
+            ...queueEntry,
+            selectedAgent: agent
+        });
+        logger.info('Chat assignment sent to agent', {
+            queueId: queueEntry.queueId,
+            agentId,
+            sessionId: queueEntry.sessionId
+        });
     });
 
-    // Connect SocketManager to AgentService
-    socketManager.on('agentRegistered', ({ agent, socket }) => {
+    socketManager.on('agentRegistered', async ({ agent, socket }) => {
+        await agentService.registerAgent(agent);
+        await ensureChatBackend().catch(error => {
+            logger.warn('Agent authenticated but chat backend connection is unavailable', {
+                agentId: agent.agentId,
+                error: error.message
+            });
+        });
         logger.info('Agent registered via socket', {
             agentId: agent.agentId,
             socketId: socket.id
         });
+        await queueService.processQueue();
+    });
+
+    socketManager.on('agentDisconnected', async ({ agent }) => {
+        if (isShuttingDown) return;
+        const stored = agentService.getAgent(agent.agentId);
+        if (stored) {
+            await agentService.updateAgentStatus(agent.agentId, 'offline', {
+                reason: 'socket_disconnected'
+            });
+        }
     });
 
     socketManager.on('updateAgentStatus', async ({ agentId, statusData }) => {
-        try {
-            await agentService.updateAgentStatus(agentId, statusData.status, statusData.details);
+        const updated = await agentService.updateAgentStatus(
+            agentId,
+            statusData.status,
+            statusData.details
+        );
+        if (chatClientService.isConnected) {
             await chatClientService.updateAgentStatus(agentId, statusData.status, statusData.details);
-        } catch (error) {
-            logger.error('Failed to update agent status', {
-                error: error.message,
-                agentId,
-                status: statusData.status
-            });
         }
+        await queueService.processQueue();
+        return { status: updated.status };
     });
 
     socketManager.on('acceptChat', async ({ agentId, chatData }) => {
-        try {
-            // Assign chat to agent
-            const assignment = await agentService.assignChatToAgent(agentId, chatData);
-            
-            // Remove from queue
-            await queueService.removeFromQueue(chatData.queueId || chatData.sessionId, 'assigned');
-            
-            // Notify chat backend
-            await chatClientService.requestAgentAssignment(chatData.sessionId, agentId);
-            
-            logger.info('Chat accepted and assigned', {
-                agentId,
-                sessionId: chatData.sessionId,
-                assignment
-            });
-        } catch (error) {
-            logger.error('Failed to accept chat', {
-                error: error.message,
-                agentId,
-                sessionId: chatData.sessionId
-            });
+        const queueEntry = queueService.findBySession(chatData.sessionId);
+        if (!queueEntry || queueEntry.pendingAssignment?.agentId !== agentId) {
+            throw new Error('This assignment is no longer available');
         }
+
+        const assignment = await agentService.assignChatToAgent(agentId, queueEntry);
+        try {
+            await ensureChatBackend(agentId);
+            await chatClientService.requestAgentAssignment(chatData.sessionId, agentId);
+        } catch (error) {
+            await agentService.removeChatFromAgent(agentId, chatData.sessionId, 'assignment_failed');
+            throw error;
+        }
+
+        await queueService.acceptAssignment(chatData.sessionId, agentId);
+        return { ...queueEntry, assignment };
     });
 
     socketManager.on('rejectChat', async ({ agentId, chatData }) => {
-        try {
-            // Log rejection
-            logger.info('Chat rejected by agent', {
-                agentId,
-                sessionId: chatData.sessionId,
-                reason: chatData.reason
-            });
-            
-            // Process queue again to find another agent
-            await queueService.processQueue();
-        } catch (error) {
-            logger.error('Failed to handle chat rejection', {
-                error: error.message,
-                agentId,
-                sessionId: chatData.sessionId
-            });
-        }
+        await queueService.releaseAssignment(chatData.sessionId, agentId);
+        logger.info('Chat rejected by agent', {
+            agentId,
+            sessionId: chatData.sessionId,
+            reason: chatData.reason || 'unavailable'
+        });
+        await queueService.processQueue();
+        return true;
     });
 
     socketManager.on('endChat', async ({ agentId, chatData }) => {
-        try {
-            // Remove chat from agent
-            await agentService.removeChatFromAgent(agentId, chatData.sessionId, chatData.reason);
-            
-            // End session in chat backend
-            await chatClientService.endSession(chatData.sessionId, agentId, chatData.reason, chatData.summary);
-            
-            logger.info('Chat ended by agent', {
-                agentId,
-                sessionId: chatData.sessionId,
-                reason: chatData.reason
-            });
-        } catch (error) {
-            logger.error('Failed to end chat', {
-                error: error.message,
-                agentId,
-                sessionId: chatData.sessionId
-            });
-        }
+        await ensureChatBackend(agentId);
+        await chatClientService.endSession(
+            chatData.sessionId,
+            agentId,
+            chatData.reason,
+            chatData.summary
+        );
+        await agentService.removeChatFromAgent(agentId, chatData.sessionId, chatData.reason);
+        return true;
     });
 
     socketManager.on('chatMessage', async ({ agentId, messageData }) => {
-        try {
-            // Update agent activity
-            agentService.updateAgentActivity(agentId, 'message');
-            
-            // Send message to chat backend
-            await chatClientService.sendMessage(messageData.sessionId, messageData, 'agent');
-            
-            logger.info('Message sent from agent', {
-                agentId,
-                sessionId: messageData.sessionId,
-                messageId: messageData.messageId
-            });
-        } catch (error) {
-            logger.error('Failed to send message', {
-                error: error.message,
-                agentId,
-                sessionId: messageData.sessionId
-            });
-        }
+        await ensureChatBackend(agentId);
+        agentService.updateAgentActivity(agentId, 'message');
+        return chatClientService.sendMessage(messageData.sessionId, {
+            ...messageData,
+            agentId
+        }, 'agent');
     });
 
-    // Connect ChatClientService to SocketManager
+    socketManager.on('transferChat', async ({ agentId, transferData }) => {
+        if (!transferData.toAgentId) throw new Error('A destination agent is required');
+        await ensureChatBackend(agentId);
+        await chatClientService.requestSessionTransfer(
+            transferData.sessionId,
+            agentId,
+            transferData.toAgentId,
+            transferData.reason
+        );
+        await agentService.removeChatFromAgent(agentId, transferData.sessionId, 'transferred');
+        await agentService.assignChatToAgent(transferData.toAgentId, transferData);
+        return true;
+    });
+
+    socketManager.on('escalateChat', async ({ agentId, chatData }) => {
+        await agentService.removeChatFromAgent(agentId, chatData.sessionId, 'escalated');
+        await queueService.addToQueue({
+            ...chatData,
+            escalationReason: chatData.reason || 'agent_request',
+            previousAgent: agentId
+        }, 'high', {
+            ...(chatData.requirements || {}),
+            excludeAgentIds: [agentId]
+        });
+        return true;
+    });
+
+    socketManager.on('getQueueStatus', () => queueService.getQueueStatus());
+    socketManager.on('getAgentList', () => agentService.getAllAgents().map(agent => ({
+        agentId: agent.agentId,
+        name: agent.name,
+        department: agent.department,
+        status: agent.status,
+        currentChats: agent.currentChats.size,
+        maxChats: agent.preferences.maxConcurrentChats
+    })));
+    socketManager.on('getChatHistory', async ({ agentId, historyRequest }) => {
+        if (historyRequest?.sessionId) {
+            await ensureChatBackend(agentId);
+            return chatClientService.getSessionHistory(historyRequest.sessionId, historyRequest);
+        }
+        return {
+            messages: [],
+            chats: agentService.getAgent(agentId)?.chatHistory || []
+        };
+    });
+    socketManager.on('getCustomerInfo', ({ customerId }) => {
+        const queueEntry = Array.from(queueService.chatQueue.values())
+            .find(entry => entry.customerId === customerId);
+        const recentChat = agentService.getAllAgents()
+            .flatMap(agent => agent.chatHistory)
+            .find(chat => chat.customerId === customerId);
+        return {
+            customerId,
+            name: queueEntry?.customerName || recentChat?.customerName || 'Customer',
+            accountType: queueEntry?.customerData?.accountType || 'standard'
+        };
+    });
+    socketManager.on('updatePreferences', ({ agentId, preferences }) => (
+        agentService.updateAgentPreferences(agentId, preferences)
+    ));
+
     chatClientService.on('messageReceived', (message) => {
         socketManager.sendMessageToChatRoom(message.sessionId, message);
     });
@@ -300,8 +308,33 @@ async function setupServiceIntegrations() {
         socketManager.broadcastToAgents('sessionEnded', data);
     });
 
+    chatClientService.on('escalationRequest', async data => {
+        const priority = data.priority || 'high';
+        await queueService.addToQueue({
+            ...data,
+            customerId: data.customerId || data.userId,
+            customerName: data.customerName || 'Customer',
+            escalationReason: data.reason || 'agent_request',
+            source: 'chat-backend'
+        }, priority, data.requirements || {});
+    });
+
+    chatClientService.on('systemNotification', data => {
+        socketManager.broadcastToAgents('systemNotification', data);
+    });
+    chatClientService.on('error', ({ error }) => {
+        logger.error('Chat backend socket error', { error: error?.message || String(error) });
+    });
+
+    const broadcastQueue = () => {
+        socketManager.broadcastToAgents('queueStatus', queueService.getQueueStatus());
+    };
+    queueService.on('chatQueued', broadcastQueue);
+    queueService.on('chatDequeued', broadcastQueue);
+
     // Error handling
     agentService.on('chatNeedsReassignment', async ({ sessionId, reason, previousAgentId }) => {
+        if (isShuttingDown) return;
         try {
             // Add back to queue for reassignment
             await queueService.addToQueue({
@@ -351,8 +384,8 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/agents', agentsRoutes);
-app.use('/api/queue', queueRoutes);
+app.use('/api/agents', requireAgentAuth, agentsRoutes);
+app.use('/api/queue', requireAgentAuth, queueRoutes);
 
 // API status endpoint
 app.get('/api/status', (req, res) => {
@@ -370,7 +403,7 @@ app.get('/api/status', (req, res) => {
 });
 
 // Error handling
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
     logger.error('Unhandled error', {
         error: err.message,
         stack: err.stack,
@@ -400,30 +433,36 @@ app.use((req, res) => {
 });
 
 // Graceful shutdown
+let isShuttingDown = false;
 async function shutdown() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
     logger.info('Starting graceful shutdown...');
-    
-    server.close(() => {
-        logger.info('HTTP server closed');
-        
-        // Cleanup services
-        Promise.all([
-            agentService?.cleanup(),
-            queueService?.cleanup(),
-            chatClientService?.cleanup(),
-            socketManager?.cleanup()
-        ]).then(async () => {
-            redisClient.quit();
-            await closeRedisClient(); // close the shared agent/queue state client
-            logger.info('Graceful shutdown completed');
-            process.exit(0);
-        }).catch(async (error) => {
-            logger.error('Error during shutdown', { error: error.message });
-            redisClient.quit();
-            await closeRedisClient();
-            process.exit(1);
+
+    try {
+        // Close Socket.IO clients before waiting for the HTTP server. Otherwise
+        // open WebSocket connections prevent server.close() from completing.
+        await socketManager?.cleanup();
+        await agentService?.cleanup();
+        await queueService?.cleanup();
+        await chatClientService?.cleanup();
+        await closeRedisClient();
+
+        await new Promise(resolve => {
+            if (!server.listening) return resolve();
+            server.close(resolve);
         });
-    });
+        logger.info('HTTP server closed');
+        logger.info('Graceful shutdown completed');
+        process.exit(0);
+    } catch (error) {
+        logger.error('Error during shutdown', { error: error.message });
+        try {
+            await closeRedisClient();
+        } finally {
+            process.exit(1);
+        }
+    }
 }
 
 process.on('SIGTERM', shutdown);
@@ -453,4 +492,14 @@ async function startServer() {
     }
 }
 
-startServer();
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = {
+    app,
+    server,
+    startServer,
+    initializeServices,
+    connectChatBackendAtStartup
+};

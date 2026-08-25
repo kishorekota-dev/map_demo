@@ -1,6 +1,36 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
+const { verifyToken } = require('./auth');
+
+async function requireSessionOwnership(req, res, next) {
+    try {
+        const sessionId = req.params.sessionId || req.query.sessionId ||
+            req.headers['x-session-id'] || req.body?.sessionId;
+        if (!sessionId) {
+            return res.status(400).json({ error: 'Session ID required', timestamp: new Date().toISOString() });
+        }
+
+        const sessionManager = req.app.locals.services?.sessionManager;
+        if (!sessionManager) {
+            return res.status(503).json({ error: 'Session service not available', timestamp: new Date().toISOString() });
+        }
+
+        const session = await sessionManager.getSession(sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found', sessionId, timestamp: new Date().toISOString() });
+        }
+
+        if (String(session.userId) !== String(req.user.userId)) {
+            return res.status(403).json({ error: 'Access denied', timestamp: new Date().toISOString() });
+        }
+
+        req.ownedSession = session;
+        return next();
+    } catch (error) {
+        return next(error);
+    }
+}
 
 // Reusable handler: process a session message (used by both /sessions/:sessionId/messages and /chat/message compatibility)
 async function processSessionMessageHandler(req, res, next) {
@@ -54,26 +84,82 @@ async function processSessionMessageHandler(req, res, next) {
             metadata || {}
         );
 
+        // Carry the authenticated identity through to the orchestrator. Banking
+        // tools require the bearer token and pending workflows use the user id
+        // when they resume on a later REST request.
+        const authToken = req.headers.authorization?.startsWith('Bearer ')
+            ? req.headers.authorization.substring(7)
+            : null;
+        const userId = req.user?.userId || session.userId;
+        const conversationContext = {
+            ...(session.state || {}),
+            userId,
+            authToken
+        };
+        const enrichedMessage = {
+            ...message,
+            sessionId,
+            userId,
+            authToken
+        };
+
         // Process through orchestrator
-        const agentResult = await agentOrchestrator.processMessage(sessionId, message, session.state || {});
+        const agentResult = await agentOrchestrator.processMessage(
+            sessionId,
+            enrichedMessage,
+            conversationContext
+        );
+
+        const finalResponse = agentResult.finalResponse || {};
+        const responseIntent = finalResponse.metadata?.intent
+            || conversationContext.lockedIntent
+            || (typeof finalResponse.source === 'string'
+                ? finalResponse.source.replace(/-/g, '_')
+                : null);
+        const responseMetadata = {
+            ...(finalResponse.metadata || {}),
+            ...(responseIntent ? { intent: responseIntent } : {})
+        };
+        const responsePayload = {
+            ...finalResponse,
+            metadata: responseMetadata
+        };
 
         // Send response
         const response = await chatService.sendResponse(
             sessionId,
-            agentResult.finalResponse,
+            responsePayload,
             {
-                agentId: 'orchestrator',
-                agentType: 'ai',
+                agentId: finalResponse.source || 'orchestrator',
+                agentType: finalResponse.source || 'ai',
+                confidence: finalResponse.confidence,
                 processingTime: agentResult.processingTime
             }
         );
+
+        // Persist state returned by the workflow so follow-up REST requests can
+        // resume pending confirmation/clarification flows.
+        if (agentResult.conversationContextUpdates) {
+            await sessionManager.updateSessionState(
+                sessionId,
+                agentResult.conversationContextUpdates
+            );
+        }
 
         logger.info('Message processed via REST API', { sessionId, messageId: message.id, responseId: response.id });
 
         return res.status(200).json({
             message,
             response,
-            agentResult: { processingTime: agentResult.processingTime, agentsInvolved: agentResult.agentsInvolved },
+            agentResult: {
+                processingTime: agentResult.processingTime,
+                agentsInvolved: agentResult.agentsInvolved,
+                intent: responseIntent,
+                confidence: finalResponse.confidence ?? null,
+                source: finalResponse.source || null,
+                metadata: responseMetadata,
+                finalResponse: responsePayload
+            },
             timestamp: new Date().toISOString()
         });
 
@@ -99,7 +185,7 @@ async function getSessionHistoryHandler(req, res, next) {
             return res.status(503).json({ error: 'Chat service not available', timestamp: new Date().toISOString() });
         }
 
-        const history = chatService.getConversationHistory(sessionId, limit);
+        const history = await chatService.getConversationHistory(sessionId, limit);
 
         return res.status(200).json({ sessionId, history, count: history.length, timestamp: new Date().toISOString() });
 
@@ -116,7 +202,7 @@ async function getSessionHistoryHandler(req, res, next) {
  */
 
 // Convenience POST /api/chat/message
-router.post('/chat/message', async (req, res, next) => {
+router.post('/chat/message', verifyToken, requireSessionOwnership, async (req, res, next) => {
     try {
         // frontend sends { message, context } with X-Session-ID header
         const sessionId = req.headers['x-session-id'] || req.body?.sessionId;
@@ -136,7 +222,7 @@ router.post('/chat/message', async (req, res, next) => {
 });
 
 // Convenience GET /api/chat/history
-router.get('/chat/history', async (req, res, next) => {
+router.get('/chat/history', verifyToken, requireSessionOwnership, async (req, res, next) => {
     try {
         // frontend may provide sessionId as query param
         const sessionId = req.query.sessionId;
@@ -159,7 +245,7 @@ router.get('/chat/history', async (req, res, next) => {
  */
 router.post('/process', async (req, res) => {
     try {
-        const { message, conversationContext, previousResults, sessionInfo } = req.body;
+        const { message, conversationContext, sessionInfo } = req.body;
 
         if (!message || !sessionInfo) {
             return res.status(400).json({
@@ -218,7 +304,7 @@ router.post('/process', async (req, res) => {
  * @desc Get conversation history for a session
  * @access Private
  */
-router.get('/sessions/:sessionId/history', async (req, res) => {
+router.get('/sessions/:sessionId/history', verifyToken, requireSessionOwnership, async (req, res) => {
     return getSessionHistoryHandler(req, res);
 });
 
@@ -227,7 +313,7 @@ router.get('/sessions/:sessionId/history', async (req, res) => {
  * @desc Get session information
  * @access Private
  */
-router.get('/sessions/:sessionId', async (req, res) => {
+router.get('/sessions/:sessionId', verifyToken, requireSessionOwnership, async (req, res) => {
     try {
         const { sessionId } = req.params;
 
@@ -274,13 +360,14 @@ router.get('/sessions/:sessionId', async (req, res) => {
  * @desc Create a new session (REST API alternative to WebSocket)
  * @access Private
  */
-router.post('/sessions', async (req, res) => {
+router.post('/sessions', verifyToken, async (req, res) => {
     try {
-        const { userId, userData, metadata } = req.body;
+        const { userData, metadata } = req.body;
+        const userId = req.user.userId;
 
-        if (!userId) {
-            return res.status(400).json({
-                error: 'User ID required',
+        if (req.body.userId && String(req.body.userId) !== String(userId)) {
+            return res.status(403).json({
+                error: 'Cannot create a session for another user',
                 timestamp: new Date().toISOString()
             });
         }
@@ -331,7 +418,7 @@ router.post('/sessions', async (req, res) => {
  * @desc Send a message to a session (REST API alternative to WebSocket)
  * @access Private
  */
-router.post('/sessions/:sessionId/messages', async (req, res) => {
+router.post('/sessions/:sessionId/messages', verifyToken, requireSessionOwnership, async (req, res) => {
     return processSessionMessageHandler(req, res);
 });
 
@@ -340,7 +427,7 @@ router.post('/sessions/:sessionId/messages', async (req, res) => {
  * @desc End a session
  * @access Private
  */
-router.delete('/sessions/:sessionId', async (req, res) => {
+router.delete('/sessions/:sessionId', verifyToken, requireSessionOwnership, async (req, res) => {
     try {
         const { sessionId } = req.params;
         const { reason } = req.body;

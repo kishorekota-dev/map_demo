@@ -1,4 +1,4 @@
-const { Session, WorkflowExecution, HumanFeedback } = require('../models');
+const { Session, WorkflowExecution } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../utils/logger');
 const config = require('../../config');
@@ -278,7 +278,7 @@ class SessionManager {
 
       // Filter out already collected fields
       const requiredData = fields.filter(
-        field => !session.collectedData.hasOwnProperty(field)
+        field => !Object.prototype.hasOwnProperty.call(session.collectedData, field)
       );
 
       await session.update({

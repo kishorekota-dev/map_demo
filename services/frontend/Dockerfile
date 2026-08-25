@@ -1,4 +1,4 @@
-FROM node:18-alpine AS base
+FROM node:22-alpine AS base
 
 WORKDIR /app
 
@@ -41,11 +41,11 @@ COPY . .
 
 RUN npm run build
 
-FROM node:18-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
-RUN npm install -g serve
+RUN npm install -g serve@14.2.6
 
 COPY --from=build /app/dist ./dist
 

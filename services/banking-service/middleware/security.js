@@ -1,5 +1,4 @@
 const rateLimit = require('express-rate-limit');
-const helmet = require('helmet');
 const config = require('../config');
 const logger = require('../utils/logger');
 

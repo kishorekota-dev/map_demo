@@ -9,11 +9,11 @@ const intentConfig = require('../../config/intentConfig');
 const logger = require('../utils/logger');
 
 // Import prompt templates by category
-const ACCOUNT_PROMPTS = require('./templates/account');
-const TRANSACTION_PROMPTS = require('./templates/transaction');
-const CARD_PROMPTS = require('./templates/card');
-const SECURITY_PROMPTS = require('./templates/security');
-const SUPPORT_PROMPTS = require('./templates/support');
+const ACCOUNT_PROMPTS = require('../prompts/templates/account');
+const TRANSACTION_PROMPTS = require('../prompts/templates/transaction');
+const CARD_PROMPTS = require('../prompts/templates/card');
+const SECURITY_PROMPTS = require('../prompts/templates/security');
+const SUPPORT_PROMPTS = require('../prompts/templates/support');
 
 // Combine all prompt templates
 const ALL_PROMPTS = {
@@ -384,7 +384,6 @@ Provide accurate, helpful information about banking services.`,
   validateData(intent, collectedData) {
     const required = this.getRequiredData(intent);
     const rules = this.getValidationRules(intent);
-    const behavior = this.getIntentBehavior(intent);
 
     const result = {
       valid: true,
@@ -393,13 +392,14 @@ Provide accurate, helpful information about banking services.`,
       warnings: []
     };
 
-    // Check required fields
-    if (behavior.requiresAllFields !== false) {
-      for (const field of required) {
-        if (!collectedData[field] && collectedData[field] !== 0) {
-          result.missing.push(field);
-          result.valid = false;
-        }
+    // Required fields are always required before an intent can execute. The
+    // collection behavior flags control UX; they must not allow MCP calls with
+    // required arguments omitted.
+    for (const field of required) {
+      const value = collectedData[field];
+      if (value === undefined || value === null || value === '') {
+        result.missing.push(field);
+        result.valid = false;
       }
     }
 
@@ -517,9 +517,12 @@ module.exports.IntentMapper = IntentMapper;
 
 // Export convenience functions (backward compatibility)
 module.exports.getPromptForIntent = (intent) => intentMapper.getIntentConfig(intent);
-module.exports.buildSystemMessage = (intent) => intentMapper.buildSystemMessage(intent);
-module.exports.buildUserMessage = (intent, context) => intentMapper.buildUserMessage(intent, context);
-module.exports.getRequiredDataForIntent = (intent) => intentMapper.getRequiredData(intent);
-module.exports.getOptionalDataForIntent = (intent) => intentMapper.getOptionalData(intent);
-module.exports.needsConfirmation = (intent) => intentMapper.needsConfirmation(intent);
-module.exports.getToolsForIntent = (intent) => intentMapper.getToolsForIntent(intent);
+// Bind the prototype implementations directly. Assigning wrappers that call
+// `intentMapper.<sameMethod>()` would replace that method on the singleton and
+// recurse forever.
+module.exports.buildSystemMessage = IntentMapper.prototype.buildSystemMessage.bind(intentMapper);
+module.exports.buildUserMessage = IntentMapper.prototype.buildUserMessage.bind(intentMapper);
+module.exports.getRequiredDataForIntent = IntentMapper.prototype.getRequiredData.bind(intentMapper);
+module.exports.getOptionalDataForIntent = IntentMapper.prototype.getOptionalData.bind(intentMapper);
+module.exports.needsConfirmation = IntentMapper.prototype.needsConfirmation.bind(intentMapper);
+module.exports.getToolsForIntent = IntentMapper.prototype.getToolsForIntent.bind(intentMapper);

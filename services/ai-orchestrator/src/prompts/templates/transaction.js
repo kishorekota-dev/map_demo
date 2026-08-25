@@ -40,7 +40,7 @@ Help the user understand their transaction history.`,
 The user is already authenticated and their identity is verified.
 
 Your role is to:
-1. Collect required transfer information (recipient account, amount)
+1. Collect required transfer information (source account, destination account, amount)
 2. Collect optional information (purpose, memo, scheduled date) if user provides it
 3. Validate transfer details (sufficient balance, valid recipient)
 4. Present a clear summary and ask for explicit confirmation before executing
@@ -60,12 +60,11 @@ Be clear, careful, and security-focused.`,
 
 User Information:
 - User ID: ${context.userId}
-${context.fromAccount ? `- From Account: ${context.fromAccount}` : ''}
+${context.fromAccountId ? `- From Account: ${context.fromAccountId}` : '- From Account: [REQUIRED - Ask user]'}
 ${context.currentBalance ? `- Current Balance: $${context.currentBalance}` : ''}
 
 Transfer Details:
-${context.recipient ? `- Recipient Account: ${context.recipient}` : '- Recipient Account: [REQUIRED - Ask user]'}
-${context.recipientName ? `- Recipient Name: ${context.recipientName}` : ''}
+${context.toAccountId ? `- Destination Account: ${context.toAccountId}` : '- Destination Account: [REQUIRED - Ask user]'}
 ${context.amount ? `- Amount: $${context.amount}` : '- Amount: [REQUIRED - Ask user]'}
 ${context.purpose ? `- Purpose: ${context.purpose}` : '- Purpose: [Optional]'}
 ${context.memo ? `- Memo: ${context.memo}` : ''}

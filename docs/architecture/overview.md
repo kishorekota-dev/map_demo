@@ -78,7 +78,7 @@ The POC Banking Chat is a microservices-based application for conversational ban
 | Service | Port | Technology | Purpose |
 |---------|------|------------|---------|
 | Banking Service | 3005 | Express + PostgreSQL | Banking operations, accounts, transactions |
-| AI Orchestrator | 3007 | Express + LangGraph | AI workflow orchestration, OpenAI-backed response generation |
+| AI Orchestrator | 3007 | Express + LangGraph | Banking workflow orchestration and deterministic tool-backed responses; optional remote generation for no-tool intents |
 
 ## Data Flow
 

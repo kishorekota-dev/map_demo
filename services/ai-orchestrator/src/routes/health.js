@@ -6,7 +6,7 @@ const router = express.Router();
  * Health check endpoint
  */
 router.get('/', async (req, res) => {
-  const { mcpClient, sessionManager } = req.app.locals;
+  const { mcpClient } = req.app.locals;
   
   try {
     // Check database connection
@@ -16,9 +16,10 @@ router.get('/', async (req, res) => {
     
     // Check MCP service
     const mcpHealth = await mcpClient.healthCheck();
+    const mcpHealthy = mcpHealth?.overall === 'healthy' || mcpHealth?.healthy === true;
     
     const health = {
-      status: dbHealthy && mcpHealth.healthy ? 'healthy' : 'unhealthy',
+      status: dbHealthy && mcpHealthy ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
       service: 'poc-ai-orchestrator',
       version: '1.0.0',
@@ -28,7 +29,7 @@ router.get('/', async (req, res) => {
           status: dbHealthy ? 'up' : 'down'
         },
         mcpService: {
-          status: mcpHealth.healthy ? 'up' : 'down',
+          status: mcpHealthy ? 'up' : 'down',
           url: mcpClient.baseUrl
         },
         memory: {

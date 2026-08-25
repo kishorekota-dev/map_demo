@@ -1,10 +1,17 @@
 require('dotenv').config();
 
+const sslOptions = process.env.DB_SSL === 'true' ? {
+  ssl: {
+    require: true,
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
+  }
+} : {};
+
 module.exports = {
   development: {
     username: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
-    database: process.env.DB_NAME || 'poc_banking',
+    database: process.env.DB_NAME || 'poc_chat',
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT) || 5432,
     dialect: 'postgres',
@@ -15,12 +22,23 @@ module.exports = {
       acquire: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 10000,
       idle: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000
     },
-    dialectOptions: process.env.DB_SSL === 'true' ? {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false
-      }
-    } : {}
+    dialectOptions: sslOptions
+  },
+  test: {
+    username: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    database: process.env.DB_NAME || 'poc_chat_test',
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT) || 5432,
+    dialect: 'postgres',
+    logging: false,
+    pool: {
+      max: 2,
+      min: 0,
+      acquire: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 10000,
+      idle: 1000
+    },
+    dialectOptions: sslOptions
   },
   production: {
     username: process.env.DB_USER,
@@ -36,11 +54,6 @@ module.exports = {
       acquire: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 10000,
       idle: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000
     },
-    dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false
-      }
-    }
+    dialectOptions: sslOptions
   }
 };

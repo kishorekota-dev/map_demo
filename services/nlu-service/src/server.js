@@ -82,8 +82,7 @@ class NLUService {
           intents: '/api/nlu/intents',
           entities: '/api/nlu/entities',
           dialogflow: '/api/nlu/dialogflow',
-          banking: '/api/nlu/banking',
-          train: '/api/nlu/train'
+          banking: '/api/nlu/banking'
         },
         capabilities: [
           'Intent Detection',
@@ -93,8 +92,7 @@ class NLUService {
           'DialogFlow Integration',
           'Banking Domain Understanding',
           'Multi-language Support',
-          'Confidence Scoring',
-          'Training Data Management'
+          'Confidence Scoring'
         ]
       });
     });
@@ -116,6 +114,8 @@ class NLUService {
 
 // Start the service
 const nluService = new NLUService();
-nluService.start();
+if (require.main === module) {
+  nluService.start();
+}
 
 module.exports = nluService;

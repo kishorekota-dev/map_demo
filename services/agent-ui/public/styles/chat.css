@@ -255,6 +255,7 @@
     line-height: 1.4;
     word-wrap: break-word;
     position: relative;
+    white-space: pre-wrap;
 }
 
 .message.agent .message-bubble {

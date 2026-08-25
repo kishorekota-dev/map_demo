@@ -85,10 +85,17 @@ JWT_SECRET=$(openssl rand -hex 64)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key | For AI features |
+| `OPENAI_ENABLED` | Enable remote generation for no-tool intents | No; default `false` |
+| `OPENAI_API_KEY` | OpenAI API key | Only when `OPENAI_ENABLED=true` |
 | `OPENAI_MODEL` | Model to use | `gpt-4` |
+| `SLM_ENABLED` | Enable remote structured extraction | No; default `false` |
+| `SLM_BASE_URL` | Local OpenAI-compatible extractor URL; setting it enables local extraction without a key | No |
+| `SLM_API_KEY` | Separate key for remote extraction | Only for opted-in remote extraction if no OpenAI key is used |
 
 Get your API key at: https://platform.openai.com/api-keys
+
+Tool-backed banking responses never use the response model; they are formatted
+from authoritative tool data. A key by itself does not enable any remote call.
 
 #### DialogFlow (NLU Service)
 
@@ -152,7 +159,10 @@ FRAUD_THRESHOLD_AMOUNT=5000
 
 ```env
 PORT=3007
+OPENAI_ENABLED=false
 OPENAI_API_KEY=sk-...
+SLM_ENABLED=false
+SLM_BASE_URL=
 DATABASE_URL=postgresql://postgres:password@localhost:5432/poc_ai_orchestrator
 MCP_SERVICE_URL=http://localhost:3004
 ```

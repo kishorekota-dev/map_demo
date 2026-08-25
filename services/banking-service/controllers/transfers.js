@@ -1,4 +1,4 @@
-const { TransferRepository } = require('../database/repositories');
+const { TransferRepository, AccountRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
 
 class TransferController {
@@ -36,13 +36,31 @@ class TransferController {
   async createTransfer(req, res, next) {
     try {
       const fromUserId = req.user.userId;
-      const transferData = { ...req.body, fromUserId };
+      const destinationAccount = await AccountRepository.findById(req.body.toAccountId);
+      if (!destinationAccount) {
+        return res.status(404).json({ success: false, error: 'Destination account not found' });
+      }
 
-      const transfer = await TransferRepository.create(transferData);
+      const transferData = {
+        ...req.body,
+        fromUserId,
+        toUserId: destinationAccount.user_id
+      };
+
+      const createdTransfer = await TransferRepository.create(transferData);
+      const scheduledForFuture = transferData.scheduledDate &&
+        new Date(transferData.scheduledDate).getTime() > Date.now();
+      const transfer = scheduledForFuture
+        ? createdTransfer
+        : await TransferRepository.process(createdTransfer.transfer_id);
 
       logger.info(`Transfer created: ${transfer.transfer_id}`);
 
-      res.status(201).json({ success: true, message: 'Transfer initiated', data: transfer });
+      res.status(201).json({
+        success: true,
+        message: scheduledForFuture ? 'Transfer scheduled' : 'Transfer completed',
+        data: transfer
+      });
     } catch (error) {
       logger.error('Error creating transfer:', error);
       next(error);

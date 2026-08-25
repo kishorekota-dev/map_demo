@@ -2,7 +2,10 @@ const express = require('express');
 const router = express.Router();
 const transactionController = require('../controllers/transactions');
 const { validators, businessValidators } = require('../middleware/validation');
-const { authorize, verifyAccountOwnership } = require('../middleware/auth');
+const {
+  verifyAccountOwnership,
+  verifyTransactionOwnership
+} = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply banking rate limiting to all transaction routes
@@ -19,6 +22,29 @@ router.get('/',
   transactionController.getAllTransactions
 );
 
+// Static routes must be declared before /:transactionId or Express will treat
+// names such as "pending" and "summary" as transaction IDs.
+router.get('/pending',
+  validators.validatePagination,
+  transactionController.getPendingTransactions
+);
+
+router.get('/search',
+  validators.validatePagination,
+  validators.validateDateRange,
+  transactionController.searchTransactions
+);
+
+router.get('/summary',
+  validators.validateDateRange,
+  verifyAccountOwnership,
+  transactionController.getTransactionSummary
+);
+
+router.get('/categories',
+  transactionController.getCategories
+);
+
 /**
  * @route   GET /api/transactions/:transactionId
  * @desc    Get specific transaction details
@@ -26,6 +52,7 @@ router.get('/',
  */
 router.get('/:transactionId',
   validators.validateTransactionId,
+  verifyTransactionOwnership,
   transactionController.getTransactionById
 );
 
@@ -36,19 +63,11 @@ router.get('/:transactionId',
  */
 router.post('/',
   validators.validateCreateTransaction,
+  verifyAccountOwnership,
+  businessValidators.validateTransactionPermission,
   businessValidators.validateSufficientFunds,
   businessValidators.validateDailyLimits,
   transactionController.createTransaction
-);
-
-/**
- * @route   GET /api/transactions/pending
- * @desc    Get pending transactions
- * @access  Private
- */
-router.get('/pending',
-  validators.validatePagination,
-  transactionController.getPendingTransactions
 );
 
 /**
@@ -58,28 +77,8 @@ router.get('/pending',
  */
 router.post('/:transactionId/cancel',
   validators.validateTransactionId,
+  verifyTransactionOwnership,
   transactionController.cancelTransaction
-);
-
-/**
- * @route   GET /api/transactions/search
- * @desc    Search transactions by criteria
- * @access  Private
- */
-router.get('/search',
-  validators.validatePagination,
-  validators.validateDateRange,
-  transactionController.searchTransactions
-);
-
-/**
- * @route   GET /api/transactions/summary
- * @desc    Get transaction summary/analytics
- * @access  Private
- */
-router.get('/summary',
-  validators.validateDateRange,
-  transactionController.getTransactionSummary
 );
 
 /**
@@ -89,16 +88,8 @@ router.get('/summary',
  */
 router.post('/:transactionId/receipt',
   validators.validateTransactionId,
+  verifyTransactionOwnership,
   transactionController.generateReceipt
-);
-
-/**
- * @route   GET /api/transactions/categories
- * @desc    Get available transaction categories
- * @access  Private
- */
-router.get('/categories',
-  transactionController.getCategories
 );
 
 /**

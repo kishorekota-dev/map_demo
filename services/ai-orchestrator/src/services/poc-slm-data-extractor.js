@@ -26,12 +26,14 @@ class PocSlmDataExtractor {
     const maxTokens = Math.min(slmConfig.maxTokens || openaiConfig.maxTokens || 2000, 4000);
 
     this.responseFormat = slmConfig.jsonMode !== false ? { type: 'json_object' } : null;
-    this.enabled = slmConfig.enabled !== false && (!!baseUrl || !!apiKey);
+    // Trust the explicit enablement decision made by config. Re-deriving this
+    // from the presence of an inherited API key would bypass the opt-in gate.
+    this.enabled = slmConfig.enabled === true;
 
     if (this.enabled) {
       const clientOptions = {
-        openAIApiKey: apiKey || 'not-required',
-        modelName,
+        apiKey: apiKey || 'not-required',
+        model: modelName,
         temperature,
         topP,
         maxTokens,
@@ -40,6 +42,7 @@ class PocSlmDataExtractor {
 
       if (baseUrl) {
         clientOptions.configuration = { baseURL: baseUrl };
+        clientOptions.useResponsesApi = false;
       }
 
       this.llm = new ChatOpenAI(clientOptions);
@@ -50,7 +53,7 @@ class PocSlmDataExtractor {
       });
     } else {
       this.llm = null;
-      logger.warn('poc-slm-data-extractor disabled (missing SLM/OpenAI config)');
+      logger.warn('poc-slm-data-extractor disabled (not explicitly enabled or missing endpoint/key)');
     }
   }
 

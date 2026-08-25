@@ -4,8 +4,7 @@ const logger = require('./logger');
 /**
  * Shared Redis client helper for agent + queue state persistence.
  *
- * The service already depends on Redis for express-session. This module
- * provides a single redis@4 client (using the existing REDIS_* env vars)
+ * This module provides a single redis@4 client (using the existing REDIS_* env vars)
  * that AgentService and QueueService use to persist their state so it
  * survives restarts and is consistent across instances.
  *
@@ -22,7 +21,13 @@ let unavailable = false;
  */
 function buildClient() {
     if (process.env.REDIS_URL) {
-        return redis.createClient({ url: process.env.REDIS_URL });
+        return redis.createClient({
+            url: process.env.REDIS_URL,
+            socket: {
+                connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 1500,
+                reconnectStrategy: false
+            }
+        });
     }
 
     const host = process.env.REDIS_HOST || 'localhost';
@@ -30,7 +35,12 @@ function buildClient() {
     const password = process.env.REDIS_PASSWORD || undefined;
 
     return redis.createClient({
-        socket: { host, port },
+        socket: {
+            host,
+            port,
+            connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 1500,
+            reconnectStrategy: false
+        },
         password
     });
 }

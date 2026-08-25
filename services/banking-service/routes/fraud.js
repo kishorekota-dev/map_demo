@@ -2,7 +2,13 @@ const express = require('express');
 const router = express.Router();
 const fraudController = require('../controllers/fraud');
 const { validators } = require('../middleware/validation');
-const { authorize } = require('../middleware/auth');
+const {
+  authorize,
+  verifyOptionalAccountOwnership,
+  verifyOptionalTransactionOwnership,
+  verifyOptionalCardOwnership,
+  verifyFraudAlertOwnership
+} = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply rate limiting to fraud routes
@@ -25,6 +31,7 @@ router.get('/alerts',
  */
 router.get('/alerts/:alertId',
   validators.validateId,
+  verifyFraudAlertOwnership,
   fraudController.getAlertById
 );
 
@@ -34,6 +41,10 @@ router.get('/alerts/:alertId',
  * @access  Private
  */
 router.post('/alerts',
+  validators.validateCreateFraudAlert,
+  verifyOptionalAccountOwnership,
+  verifyOptionalTransactionOwnership,
+  verifyOptionalCardOwnership,
   fraudController.createAlert
 );
 
@@ -79,6 +90,7 @@ router.post('/alerts/:alertId/false-positive',
  */
 router.post('/alerts/:alertId/verify',
   validators.validateId,
+  verifyFraudAlertOwnership,
   fraudController.verifyTransaction
 );
 

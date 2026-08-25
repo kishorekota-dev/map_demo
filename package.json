@@ -8,28 +8,28 @@
   ],
   "scripts": {
     "//-- DEVELOPMENT --//": "",
-    "dev": "concurrently -n 'gateway,chat,banking,nlu,mcp,ai' -c 'blue,green,yellow,magenta,cyan,red' 'npm run dev:gateway' 'npm run dev:chat' 'npm run dev:banking' 'npm run dev:nlu' 'npm run dev:mcp' 'npm run dev:ai'",
-    "dev:frontend": "npm run dev -w services/frontend",
-    "dev:gateway": "npm run dev -w services/api-gateway",
-    "dev:chat": "npm run dev -w services/chat-backend",
-    "dev:banking": "npm run dev -w services/banking-service",
-    "dev:nlu": "npm run dev -w services/nlu-service",
-    "dev:mcp": "npm run dev -w services/mcp-service",
-    "dev:ai": "npm run dev -w services/ai-orchestrator",
-    "dev:agent": "npm run dev -w services/agent-ui",
+    "dev": "concurrently -n 'frontend,gateway,chat,banking,nlu,mcp,ai,agent' -c 'cyan,blue,green,yellow,magenta,cyan,red,white' 'npm run dev:frontend' 'npm run dev:gateway' 'npm run dev:chat' 'npm run dev:banking' 'npm run dev:nlu' 'npm run dev:mcp' 'npm run dev:ai' 'npm run dev:agent'",
+    "dev:frontend": "./scripts/run-with-env.sh npm run dev -w services/frontend",
+    "dev:gateway": "./scripts/run-with-env.sh npm run dev -w services/api-gateway",
+    "dev:chat": "./scripts/run-with-env.sh npm run dev -w services/chat-backend",
+    "dev:banking": "./scripts/run-with-env.sh npm run dev -w services/banking-service",
+    "dev:nlu": "./scripts/run-with-env.sh npm run dev -w services/nlu-service",
+    "dev:mcp": "./scripts/run-with-env.sh npm run dev -w services/mcp-service",
+    "dev:ai": "./scripts/run-with-env.sh npm run dev -w services/ai-orchestrator",
+    "dev:agent": "./scripts/run-with-env.sh npm run dev -w services/agent-ui",
 
     "//-- PRODUCTION --//": "",
-    "start": "./scripts/start-all.sh",
+    "start": "./scripts/run-with-env.sh ./scripts/start-all.sh",
     "stop": "./scripts/stop-all.sh",
-    "restart": "./scripts/stop-all.sh && ./scripts/start-all.sh",
-    "start:frontend": "npm run start -w services/frontend",
-    "start:gateway": "npm run start -w services/api-gateway",
-    "start:chat": "npm run start -w services/chat-backend",
-    "start:banking": "npm run start -w services/banking-service",
-    "start:nlu": "npm run start -w services/nlu-service",
-    "start:mcp": "npm run start -w services/mcp-service",
-    "start:ai": "npm run start -w services/ai-orchestrator",
-    "start:agent": "npm run start -w services/agent-ui",
+    "restart": "npm run stop && npm run start",
+    "start:frontend": "./scripts/run-with-env.sh npm run start -w services/frontend",
+    "start:gateway": "./scripts/run-with-env.sh npm run start -w services/api-gateway",
+    "start:chat": "./scripts/run-with-env.sh npm run start -w services/chat-backend",
+    "start:banking": "./scripts/run-with-env.sh npm run start -w services/banking-service",
+    "start:nlu": "./scripts/run-with-env.sh npm run start -w services/nlu-service",
+    "start:mcp": "./scripts/run-with-env.sh npm run start -w services/mcp-service",
+    "start:ai": "./scripts/run-with-env.sh npm run start -w services/ai-orchestrator",
+    "start:agent": "./scripts/run-with-env.sh npm run start -w services/agent-ui",
 
     "//-- BUILD --//": "",
     "build": "npm run build --workspaces --if-present",
@@ -39,7 +39,7 @@
     "//-- TESTING --//": "",
     "test": "npm run test --workspaces --if-present",
     "test:integration": "./scripts/test-integration.sh",
-    "test:e2e": "./scripts/test-e2e.sh",
+    "test:e2e": "./scripts/test-integration.sh",
     "health": "./scripts/health-check.sh",
 
     "//-- DATABASE --//": "",
@@ -49,34 +49,41 @@
     "db:reset": "npm run db:reset -w services/banking-service",
 
     "//-- DOCKER --//": "",
-    "docker:up": "docker compose -f docker/docker-compose.local.yml up -d",
-    "docker:down": "docker compose -f docker/docker-compose.local.yml down",
-    "docker:logs": "docker compose -f docker/docker-compose.local.yml logs -f",
-    "docker:build": "docker compose -f docker/docker-compose.local.yml build",
-    "docker:full": "docker compose -f docker/docker-compose-full-stack.yml up -d --build",
+    "docker:up": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml up -d",
+    "docker:down": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml down",
+    "docker:logs": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml logs -f",
+    "docker:build": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml build",
+    "docker:full": "./scripts/run-with-env.sh docker compose -f docker/docker-compose-full-stack.yml up -d --build",
 
     "//-- PRODUCTIZATION --//": "",
     "product:generate": "node deployment-scripts/generate-enterprise-assets.mjs",
     "product:validate": "node deployment-scripts/generate-enterprise-assets.mjs --validate-only",
 
     "//-- UTILITIES --//": "",
-    "lint": "eslint . --ext .js,.ts,.tsx",
+    "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "validate": "bash ./scripts/validate-env.sh",
-    "postinstall": "npm run validate || true"
+    "postinstall": "npm run validate"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
     "concurrently": "^8.2.0",
     "eslint": "^8.45.0",
     "husky": "^8.0.3",
-    "lint-staged": "^13.2.3",
+    "lint-staged": "^15.5.2",
     "prettier": "^3.0.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "overrides": {
+    "sequelize": {
+      "uuid": "11.1.1"
+    }
   },
   "repository": {
     "type": "git",

@@ -1,5 +1,5 @@
 # Banking Service Dockerfile
-FROM node:18-alpine
+FROM node:22-alpine
 
 # Install netcat for database wait script
 RUN apk add --no-cache netcat-openbsd
@@ -12,8 +12,8 @@ COPY package*.json ./
 COPY database/package*.json ./database/
 
 # Install dependencies
-RUN npm install --production && \
-    cd database && npm install --production && cd ..
+RUN npm ci --omit=dev && \
+    cd database && npm ci --omit=dev && cd ..
 
 # Copy application files
 COPY . .

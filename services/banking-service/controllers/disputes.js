@@ -1,4 +1,4 @@
-const { DisputeRepository } = require('../database/repositories');
+const { DisputeRepository, TransactionRepository, AccountRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
 
 class DisputeController {
@@ -36,7 +36,24 @@ class DisputeController {
   async createDispute(req, res, next) {
     try {
       const userId = req.user.userId;
-      const disputeData = { ...req.body, userId };
+      const transaction = req.ownedTransaction ||
+        await TransactionRepository.findById(req.body.transactionId);
+      const account = transaction && (req.ownedAccount ||
+        await AccountRepository.findById(transaction.account_id));
+
+      if (!transaction || !account) {
+        return res.status(404).json({ success: false, error: 'Transaction account not found' });
+      }
+
+      const disputeData = {
+        ...req.body,
+        userId,
+        accountId: account.account_id,
+        transactionId: transaction.transaction_id,
+        description: req.body.description || req.body.reason,
+        customerNotes: req.body.reason,
+        evidenceProvided: req.body.evidence
+      };
 
       const dispute = await DisputeRepository.create(disputeData);
 
@@ -115,9 +132,13 @@ class DisputeController {
   async addEvidence(req, res, next) {
     try {
       const { disputeId } = req.params;
-      const { evidenceType, evidenceData } = req.body;
+      const { evidenceType, evidenceData, description, fileUrl } = req.body;
 
-      const dispute = await DisputeRepository.addEvidence(disputeId, evidenceType, evidenceData);
+      const dispute = await DisputeRepository.addEvidence(
+        disputeId,
+        evidenceType,
+        evidenceData || { description, fileUrl }
+      );
 
       logger.info(`Evidence added to dispute: ${disputeId}`);
 

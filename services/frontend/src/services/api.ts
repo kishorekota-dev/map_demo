@@ -1,50 +1,57 @@
-import axios, { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosResponse,
+  InternalAxiosRequestConfig,
+} from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { getRuntimeConfig } from '@/config/runtimeConfig';
 import authService from '@/services/authService';
-import { 
-  ChatResponse, 
-  AvailableIntent, 
-  SystemStatus, 
-  ChatHistory, 
+import type {
+  ApiError,
+  AvailableIntent,
+  ChatHistory,
+  ChatResponse,
   IntentAnalysis,
-  ApiError 
+  SystemStatus,
 } from '@/types';
 
-// Extend the axios request config so we can flag a request that has already
-// been retried after a 401, preventing infinite refresh/retry loops.
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retried?: boolean;
 }
 
+const unwrapPayload = (value: any): any => value?.data?.data ?? value?.data ?? value;
+
+const readApiErrorMessage = (error: AxiosError): string => {
+  const data = error.response?.data as any;
+  const nestedError = data?.error;
+
+  if (typeof nestedError === 'string') return nestedError;
+  if (typeof nestedError?.message === 'string') return nestedError.message;
+  return data?.message || error.message || 'The request could not be completed.';
+};
+
 class ApiService {
   private client: AxiosInstance;
-  private sessionId: string;
+  private sessionId = uuidv4();
+  private sessionOwnerId: string | null = null;
+  private sessionInitialized = false;
+  private sessionPromise: Promise<string> | null = null;
   private baseURL: string;
-  // Holds the in-flight refresh request so that multiple concurrent 401s share
-  // a single token refresh instead of each firing their own.
   private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.baseURL = getRuntimeConfig().apiBaseUrl.replace(/\/$/, '');
-    this.sessionId = this.generateSessionId(); // temporary until we create a real session
-    
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
 
     this.setupInterceptors();
-    
-    // Initialize a real session with the backend
-    this.initializeSession();
   }
 
-  private setupInterceptors() {
-    // Request interceptor
+  private setupInterceptors(): void {
     this.client.interceptors.request.use(
       (config) => {
         config.headers['X-Session-ID'] = this.sessionId;
@@ -52,81 +59,53 @@ class ApiService {
 
         const accessToken = authService.getAccessToken();
         if (accessToken) {
-          config.headers['Authorization'] = `Bearer ${accessToken}`;
+          config.headers.Authorization = `Bearer ${accessToken}`;
         }
-        
+
         if (import.meta.env.DEV) {
           console.debug(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
         }
         return config;
       },
-      (error) => {
-        console.error('API Request Error:', error);
-        return Promise.reject(error);
-      }
+      (error) => Promise.reject(error)
     );
 
-    // Response interceptor
     this.client.interceptors.response.use(
-      (response: AxiosResponse) => {
-        if (import.meta.env.DEV) {
-          console.debug(`API Response: ${response.status} ${response.config.url}`);
-        }
-        return response;
-      },
+      (response: AxiosResponse) => response,
       async (error: AxiosError) => {
         const originalRequest = error.config as RetryableRequestConfig | undefined;
         const status = error.response?.status;
 
-        // Automatic 401 handling: attempt a single token refresh and retry the
-        // original request. If refresh succeeds, the request is replayed with a
-        // fresh Authorization header (added by the request interceptor). If it
-        // fails (or there is no refresh token), the user is logged out.
         if (status === 401 && originalRequest && !originalRequest._retried) {
           originalRequest._retried = true;
-
           const refreshed = await this.refreshAccessToken();
 
           if (refreshed) {
-            // Drop any stale Authorization header so the request interceptor
-            // re-attaches the newly minted access token on the replay.
             if (originalRequest.headers) {
-              delete originalRequest.headers['Authorization'];
+              delete originalRequest.headers.Authorization;
             }
             return this.client(originalRequest);
           }
 
-          // Refresh failed -> force a clean logout so route guards redirect.
           this.handleAuthFailure();
         }
 
         const apiError: ApiError = {
-          message:
-            (error.response?.data as any)?.message || error.message || 'Unknown error',
+          message: readApiErrorMessage(error),
           status: status || 0,
           endpoint: originalRequest?.url,
           timestamp: new Date(),
         };
 
-        console.error('API Response Error:', apiError);
-
-        // Dispatch custom event for global error handling
-        window.dispatchEvent(new CustomEvent('api:error', { detail: apiError }));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('api:error', { detail: apiError }));
+        }
 
         return Promise.reject(apiError);
       }
     );
   }
 
-  /**
-   * Refresh the access token, coalescing concurrent callers onto a single
-   * refresh request. Returns true when a new access token is available.
-   *
-   * NOTE: This relies on authService.refreshToken(), which calls the auth
-   * service's POST /auth/refresh endpoint using the stored refresh token. If no
-   * refresh token is present (e.g. manual-token auth), refreshToken() returns
-   * null and this resolves to false, triggering a logout-on-401 flow.
-   */
   private async refreshAccessToken(): Promise<boolean> {
     if (!this.refreshPromise) {
       this.refreshPromise = authService
@@ -141,14 +120,27 @@ class ApiService {
     return this.refreshPromise;
   }
 
-  /**
-   * Clear stored credentials and notify the app so the Zustand auth store can
-   * react (redirecting to /auth). Decoupled from the router via a window event
-   * to keep this service free of React/router dependencies.
-   */
   private handleAuthFailure(): void {
     authService.logout();
-    window.dispatchEvent(new CustomEvent('auth:logout'));
+    this.clearSession();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:logout'));
+    }
+  }
+
+  private getUserProfile() {
+    return authService.getUserProfile();
+  }
+
+  private getUserId(): string {
+    return this.getUserProfile()?.userId || 'manual-user';
+  }
+
+  private clearSession(): void {
+    this.sessionId = uuidv4();
+    this.sessionOwnerId = null;
+    this.sessionInitialized = false;
+    this.sessionPromise = null;
   }
 
   public generateSessionId(): string {
@@ -161,95 +153,163 @@ class ApiService {
 
   public setSessionId(sessionId: string): void {
     this.sessionId = sessionId;
+    this.sessionOwnerId = this.getUserId();
+    this.sessionInitialized = true;
+    this.sessionPromise = null;
   }
 
-  private getUserProfile() {
-    return authService.getUserProfile();
-  }
+  /** Create one canonical backend session and share the in-flight request. */
+  public async ensureSession(): Promise<string> {
+    const ownerId = this.getUserId();
 
-  private getUserId(): string {
-    return this.getUserProfile()?.userId || 'manual-user';
-  }
-
-  // Initialize a session with the backend
-  private async initializeSession(): Promise<void> {
-    try {
-      const userProfile = this.getUserProfile();
-
-      const response = await this.client.post('/sessions', {
-        userId: this.getUserId(),
-        userData: userProfile || {},
-        metadata: {
-          userAgent: navigator.userAgent,
-          timestamp: new Date().toISOString()
-        }
-      });
-
-      if (response.data.sessionId) {
-        this.sessionId = response.data.sessionId;
-        if (import.meta.env.DEV) {
-          console.debug('Session initialized:', this.sessionId);
-        }
-      }
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn('Failed to initialize session, using temporary ID:', error);
-      }
-      // Keep the temporary session ID if backend is unavailable
+    if (this.sessionInitialized && this.sessionOwnerId === ownerId) {
+      return this.sessionId;
     }
+
+    if (this.sessionOwnerId && this.sessionOwnerId !== ownerId) {
+      this.clearSession();
+    }
+
+    if (!this.sessionPromise) {
+      this.sessionPromise = this.client
+        .post('/sessions', {
+          userId: ownerId,
+          userData: this.getUserProfile() || {},
+          metadata: {
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString(),
+          },
+        })
+        .then((response) => {
+          const payload = unwrapPayload(response.data);
+          const sessionId = payload?.sessionId || payload?.session?.sessionId;
+
+          if (!sessionId) {
+            throw new Error('The chat service did not return a session ID.');
+          }
+
+          this.sessionId = sessionId;
+          this.sessionOwnerId = ownerId;
+          this.sessionInitialized = true;
+          return sessionId;
+        })
+        .finally(() => {
+          this.sessionPromise = null;
+        });
+    }
+
+    return this.sessionPromise;
   }
 
-  // Chat endpoints
-  public async sendMessage(message: string, context?: Record<string, any>): Promise<ChatResponse> {
+  public async startNewSession(): Promise<string> {
+    const previousSessionId = this.sessionInitialized ? this.sessionId : null;
+
+    if (previousSessionId) {
+      try {
+        await this.client.delete(`/sessions/${encodeURIComponent(previousSessionId)}`, {
+          data: { reason: 'new_conversation' },
+        });
+      } catch {
+        // Expired sessions should not prevent a customer from starting over.
+      }
+    }
+
+    this.clearSession();
+    return this.ensureSession();
+  }
+
+  public async sendMessage(
+    message: string,
+    context?: Record<string, unknown>
+  ): Promise<ChatResponse> {
+    const sessionId = await this.ensureSession();
     const response = await this.client.post('/chat/message', {
       message,
       context: context || {},
+      sessionId,
     });
+    const payload = unwrapPayload(response.data);
 
-    return response.data.data;
-  }
+    if (typeof payload?.message === 'string' && payload?.conversation) {
+      return payload as ChatResponse;
+    }
 
-  public async analyzeMessage(message: string): Promise<IntentAnalysis> {
-    const response = await this.client.post('/chat/analyze', {
-      message,
-    });
+    const outgoing = payload?.response || {};
+    const intentName =
+      outgoing?.metadata?.intent ||
+      payload?.agentResult?.intent ||
+      payload?.intent?.detected ||
+      'general_inquiry';
 
-    return response.data.data;
+    return {
+      message: outgoing.content || outgoing.message || 'No response was returned.',
+      intent: {
+        detected: intentName,
+        confidence: outgoing?.agentInfo?.confidence ?? payload?.intent?.confidence ?? 0.9,
+        entities: payload?.intent?.entities || [],
+      },
+      response: {
+        type: outgoing.type || outgoing?.metadata?.responseType || 'text',
+        timestamp: outgoing.timestamp || new Date().toISOString(),
+      },
+      conversation: {
+        sessionId: outgoing.sessionId || sessionId,
+        messageId: outgoing.id || outgoing.messageId || uuidv4(),
+      },
+      metadata: {
+        processingTime:
+          outgoing?.agentInfo?.processingTime || payload?.agentResult?.processingTime,
+      },
+    };
   }
 
   public async getChatHistory(
     sessionId?: string,
-    offset: number = 0,
-    limit: number = 10
+    offset = 0,
+    limit = 50
   ): Promise<ChatHistory> {
+    const activeSessionId = sessionId || (await this.ensureSession());
     const params = new URLSearchParams({
+      sessionId: activeSessionId,
       offset: offset.toString(),
       limit: limit.toString(),
     });
-
-    if (sessionId) {
-      params.append('sessionId', sessionId);
-    }
-
     const response = await this.client.get(`/chat/history?${params}`);
-    return response.data.data;
+    const payload = unwrapPayload(response.data);
+    const messages = payload?.messages || payload?.history || [];
+
+    return {
+      messages,
+      session: payload?.session || {
+        sessionId: payload?.sessionId || activeSessionId,
+        messageCount: payload?.count ?? messages.length,
+      },
+    };
   }
 
-  public async resetConversation(sessionId?: string): Promise<void> {
-    const params = sessionId ? { sessionId } : {};
-    await this.client.delete('/chat/reset', { data: params });
+  public async resetConversation(): Promise<void> {
+    await this.startNewSession();
   }
 
-  // Intent endpoints
+  public async analyzeMessage(message: string): Promise<IntentAnalysis> {
+    const response = await this.client.post('/nlu/analyze', { user_input: message });
+    const payload = unwrapPayload(response.data);
+    return {
+      detected: payload?.intent || payload?.detected || 'general_inquiry',
+      confidence: payload?.confidence ?? 0,
+      entities: payload?.entities || [],
+    };
+  }
+
   public async getAvailableIntents(): Promise<AvailableIntent[]> {
-    const response = await this.client.get('/chat/intents');
-    return response.data.data.intents;
+    const response = await this.client.get('/nlu/intents/available');
+    const payload = unwrapPayload(response.data);
+    return payload?.intents || payload?.banking || [];
   }
 
-  // System endpoints
   public async getSystemStatus(): Promise<SystemStatus> {
-    const response = await this.client.get('/chat/status');
-    return response.data.data;
+    const response = await this.client.get('/health');
+    return unwrapPayload(response.data) as SystemStatus;
   }
 
   public async checkHealth(): Promise<boolean> {
@@ -261,17 +321,10 @@ class ApiService {
     }
   }
 
-  // Utility methods
   public async testConnection(): Promise<{ success: boolean; latency?: number }> {
-    const startTime = Date.now();
-    
-    try {
-      await this.checkHealth();
-      const latency = Date.now() - startTime;
-      return { success: true, latency };
-    } catch {
-      return { success: false };
-    }
+    const startedAt = Date.now();
+    const success = await this.checkHealth();
+    return success ? { success: true, latency: Date.now() - startedAt } : { success: false };
   }
 
   public getBaseURL(): string {
@@ -279,12 +332,12 @@ class ApiService {
   }
 
   public updateBaseURL(newBaseURL: string): void {
-    this.baseURL = newBaseURL;
-    this.client.defaults.baseURL = newBaseURL;
+    this.baseURL = newBaseURL.replace(/\/$/, '');
+    this.client.defaults.baseURL = this.baseURL;
+    this.clearSession();
   }
 }
 
-// Create singleton instance
 const apiService = new ApiService();
 
 export default apiService;

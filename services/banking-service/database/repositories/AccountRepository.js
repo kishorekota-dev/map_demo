@@ -98,9 +98,16 @@ class AccountRepository {
         throw new Error('Account not found');
       }
 
-      // Calculate new balances
-      const newBalance = parseFloat(account.balance) + amount;
-      const newAvailableBalance = parseFloat(account.available_balance) + amount;
+      // Calculate new balances using the same sign convention as ledger rows.
+      const debitTypes = new Set(['withdrawal', 'payment', 'fee', 'purchase', 'atm_withdrawal']);
+      const numericAmount = Math.abs(Number(amount));
+      const signedAmount = debitTypes.has(transactionType) ? -numericAmount : numericAmount;
+      const newBalance = parseFloat(account.balance) + signedAmount;
+      const newAvailableBalance = parseFloat(account.available_balance) + signedAmount;
+
+      if (newAvailableBalance < 0) {
+        throw new Error('Insufficient funds');
+      }
 
       // Update balance
       const updateQuery = `

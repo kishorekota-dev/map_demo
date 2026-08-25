@@ -27,7 +27,7 @@ poc-mcp-service/
 Run directly on your machine without Docker.
 
 **Requirements:**
-- Node.js 18+
+- Node.js 22+
 - Banking Service running on port 3005
 
 **Steps:**

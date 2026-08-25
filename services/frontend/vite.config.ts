@@ -39,10 +39,21 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'router': ['react-router-dom'],
-          'utils': ['axios', 'date-fns', 'uuid']
+        manualChunks(id) {
+          if (id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/scheduler/')) {
+            return 'react-vendor'
+          }
+          if (id.includes('/node_modules/react-router') ||
+              id.includes('/node_modules/@remix-run/router/')) {
+            return 'router'
+          }
+          if (id.includes('/node_modules/axios/') ||
+              id.includes('/node_modules/date-fns/') ||
+              id.includes('/node_modules/uuid/')) {
+            return 'utils'
+          }
         }
       }
     }

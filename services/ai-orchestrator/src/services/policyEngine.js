@@ -262,7 +262,7 @@ class PolicyEngine {
 
   buildFallbackConfirmationQuestion(intent, collectedData) {
     if (intent === 'transfer_funds') {
-      return `Please confirm you want to transfer $${collectedData.amount} to ${collectedData.recipient}`;
+      return `Please confirm you want to transfer $${collectedData.amount} from ${collectedData.fromAccountId} to ${collectedData.toAccountId}`;
     }
 
     if (intent === 'card_management') {
@@ -270,7 +270,7 @@ class PolicyEngine {
     }
 
     if (intent === 'verify_transaction') {
-      return `Please confirm your decision for transaction ${collectedData.transactionId || 'under review'}`;
+      return `Please confirm your decision for fraud alert ${collectedData.alertId || 'under review'}`;
     }
 
     return 'Please confirm that you want to continue with this action';
@@ -278,7 +278,7 @@ class PolicyEngine {
 
   hasSensitiveTool(tools) {
     const sensitiveTools = new Set([
-      'banking_transfer',
+      'banking_create_transfer',
       'banking_block_card',
       'banking_unblock_card',
       'banking_replace_card',

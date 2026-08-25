@@ -81,6 +81,80 @@ class TransactionRepository {
     return result.rows[0];
   }
 
+  // Create the ledger row and apply its balance impact in one database
+  // transaction. Debit types are stored as negative amounts, matching the
+  // summary/reporting queries and preventing a committed ledger entry without
+  // its corresponding balance update.
+  async createAndApplyBalance(transactionData) {
+    const creditTypes = new Set(['deposit', 'interest', 'refund', 'adjustment']);
+    const debitTypes = new Set(['withdrawal', 'payment', 'fee', 'purchase', 'atm_withdrawal']);
+
+    return db.transaction(async (client) => {
+      const {
+        accountId, transactionType, amount, currency = 'USD', description,
+        category, merchantName, merchantCategory, relatedAccountId, location,
+        deviceId, ipAddress, metadata
+      } = transactionData;
+
+      if (!creditTypes.has(transactionType) && !debitTypes.has(transactionType)) {
+        throw new Error(`Unsupported transaction type: ${transactionType}`);
+      }
+
+      const numericAmount = Math.abs(Number(amount));
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        throw new Error('Transaction amount must be a positive number');
+      }
+
+      const accountResult = await client.query(
+        'SELECT * FROM accounts WHERE account_id = $1 FOR UPDATE',
+        [accountId]
+      );
+      const account = accountResult.rows[0];
+      if (!account) {
+        throw new Error('Account not found');
+      }
+
+      const signedAmount = creditTypes.has(transactionType) ? numericAmount : -numericAmount;
+      const newBalance = Number(account.balance) + signedAmount;
+      const newAvailableBalance = Number(account.available_balance) + signedAmount;
+      if (newAvailableBalance < 0) {
+        const error = new Error('Insufficient funds');
+        error.code = 'INSUFFICIENT_FUNDS';
+        throw error;
+      }
+
+      const referenceResult = await client.query(
+        'SELECT generate_reference_number() as reference_number'
+      );
+      const referenceNumber = referenceResult.rows[0].reference_number;
+
+      await client.query(
+        `UPDATE accounts
+         SET balance = $2, available_balance = $3, updated_at = CURRENT_TIMESTAMP
+         WHERE account_id = $1`,
+        [accountId, newBalance, newAvailableBalance]
+      );
+
+      const insertResult = await client.query(
+        `INSERT INTO transactions (
+          account_id, transaction_type, amount, currency, balance_after,
+          description, category, merchant_name, merchant_category,
+          reference_number, related_account_id, location, device_id,
+          ip_address, metadata
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING *`,
+        [
+          accountId, transactionType, signedAmount, currency, newBalance,
+          description, category, merchantName, merchantCategory, referenceNumber,
+          relatedAccountId, location, deviceId, ipAddress,
+          metadata ? JSON.stringify(metadata) : null
+        ]
+      );
+
+      return insertResult.rows[0];
+    });
+  }
+
   // Update transaction status
   async updateStatus(transactionId, status, completedAt = null) {
     const query = `

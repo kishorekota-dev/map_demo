@@ -1,19 +1,17 @@
 const EventEmitter = require('events');
+const { randomUUID } = require('crypto');
 const logger = require('./logger');
 
 class ChatService extends EventEmitter {
-    constructor() {
+    constructor(databaseService = null) {
         super();
+        this.databaseService = databaseService;
         this.activeChats = new Map();
         this.messageHistory = new Map();
         this.userSessions = new Map();
         this.maxHistorySize = parseInt(process.env.MAX_CONVERSATION_HISTORY) || 100;
         this.messageRateLimit = parseInt(process.env.MESSAGE_RATE_LIMIT) || 60;
         this.conversationTimeout = parseInt(process.env.CONVERSATION_TIMEOUT) || 1800000; // 30 minutes
-        this.autoSaveInterval = parseInt(process.env.AUTO_SAVE_INTERVAL) || 30000; // 30 seconds
-        
-        // Set up auto-save for conversation history
-        this.setupAutoSave();
         
         logger.info('ChatService initialized', {
             maxHistorySize: this.maxHistorySize,
@@ -52,6 +50,14 @@ class ChatService extends EventEmitter {
                 queuePosition: null
             });
 
+            if (this.databaseService && Object.keys(userData).length > 0) {
+                const persistedSession = await this.databaseService.getSession(sessionId);
+                const persistedMetadata = persistedSession?.metadata || {};
+                await this.databaseService.updateSession(sessionId, {
+                    metadata: { ...persistedMetadata, userData }
+                });
+            }
+
             logger.info('Chat session created', { 
                 sessionId, 
                 userId,
@@ -71,7 +77,7 @@ class ChatService extends EventEmitter {
      */
     async processMessage(sessionId, message, metadata = {}) {
         try {
-            const session = this.userSessions.get(sessionId);
+            const session = await this.ensureSessionLoaded(sessionId);
             if (!session) {
                 throw new Error('Session not found');
             }
@@ -107,7 +113,11 @@ class ChatService extends EventEmitter {
                 }
             };
 
-            // Add to history
+            if (this.databaseService) {
+                await this.databaseService.saveMessage(messageObj);
+            }
+
+            // Add to the hot in-memory history after the durable write succeeds.
             this.addToHistory(sessionId, messageObj);
 
             logger.info('Message received for processing', { 
@@ -136,7 +146,7 @@ class ChatService extends EventEmitter {
      */
     async sendResponse(sessionId, response, agentInfo = {}) {
         try {
-            const session = this.userSessions.get(sessionId);
+            const session = await this.ensureSessionLoaded(sessionId);
             if (!session) {
                 throw new Error('Session not found');
             }
@@ -152,8 +162,8 @@ class ChatService extends EventEmitter {
                 agentInfo: {
                     agentId: agentInfo.agentId || 'system',
                     agentType: agentInfo.agentType || 'ai',
-                    confidence: agentInfo.confidence || null,
-                    processingTime: agentInfo.processingTime || null
+                    confidence: agentInfo.confidence ?? null,
+                    processingTime: agentInfo.processingTime ?? null
                 },
                 metadata: {
                     ...response.metadata,
@@ -162,7 +172,11 @@ class ChatService extends EventEmitter {
                 }
             };
 
-            // Add to history
+            if (this.databaseService) {
+                await this.databaseService.saveMessage(responseObj);
+            }
+
+            // Add to the hot in-memory history after the durable write succeeds.
             this.addToHistory(sessionId, responseObj);
 
             // Update session activity
@@ -225,8 +239,9 @@ class ChatService extends EventEmitter {
     /**
      * Get conversation history
      */
-    getConversationHistory(sessionId, limit = 50) {
+    async getConversationHistory(sessionId, limit = 50) {
         try {
+            await this.ensureSessionLoaded(sessionId);
             const history = this.messageHistory.get(sessionId) || [];
             return history.slice(-limit);
         } catch (error) {
@@ -244,6 +259,48 @@ class ChatService extends EventEmitter {
      */
     getSession(sessionId) {
         return this.userSessions.get(sessionId) || null;
+    }
+
+    async getMessageHistory(sessionId, limit = 50) {
+        return this.getConversationHistory(sessionId, limit);
+    }
+
+    async ensureSessionLoaded(sessionId) {
+        const cachedSession = this.userSessions.get(sessionId);
+        if (cachedSession || !this.databaseService) {
+            return cachedSession || null;
+        }
+
+        const persistedSession = await this.databaseService.getSession(sessionId);
+        if (!persistedSession?.is_active) {
+            return null;
+        }
+
+        const metadata = persistedSession.metadata || {};
+        const session = {
+            sessionId: persistedSession.session_id,
+            userId: persistedSession.user_id,
+            createdAt: new Date(persistedSession.created_at),
+            lastActivity: new Date(persistedSession.last_activity),
+            isActive: persistedSession.is_active,
+            userData: metadata.userData || {},
+            messageCount: persistedSession.message_count || 0,
+            conversationContext: persistedSession.conversation_context || {}
+        };
+        const persistedHistory = await this.databaseService.getConversationHistory(
+            sessionId,
+            this.maxHistorySize
+        );
+
+        this.userSessions.set(sessionId, session);
+        this.messageHistory.set(sessionId, persistedHistory);
+        this.activeChats.set(sessionId, {
+            status: persistedSession.status || 'active',
+            agentAssigned: Boolean(persistedSession.state?.assignedAgentId),
+            queuePosition: null
+        });
+
+        return session;
     }
 
     /**
@@ -330,24 +387,7 @@ class ChatService extends EventEmitter {
      * Generate unique message ID
      */
     generateMessageId() {
-        return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
-
-    /**
-     * Setup auto-save for conversation history
-     */
-    setupAutoSave() {
-        setInterval(() => {
-            try {
-                // In production, save to database or persistent storage
-                logger.debug('Auto-save conversation data', {
-                    activeSessions: this.userSessions.size,
-                    totalMessages: Array.from(this.messageHistory.values()).reduce((total, history) => total + history.length, 0)
-                });
-            } catch (error) {
-                logger.error('Error during auto-save', { error: error.message });
-            }
-        }, this.autoSaveInterval);
+        return randomUUID();
     }
 
     /**

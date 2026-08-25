@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-green.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 **Enterprise conversational platform with a banking accelerator, built on microservices architecture**
@@ -22,7 +22,7 @@
 
 ### 🤖 AI-Powered Banking
 - **LangGraph Workflows** - State machine-based conversation orchestration
-- **Deterministic by design** - Same input + state → same routing, tool calls, policy decisions, and a stable response. LLM sampling is pinned (temperature/top_p `0`, fixed seed). See [Deterministic Behavior](docs/architecture/determinism.md).
+- **Deterministic by design** - Same input + state → same routing, tool calls, policy decisions, and a stable response. Tool-backed replies are formatted directly from authoritative banking results; optional remote generation for no-tool intents is explicitly enabled and uses pinned sampling. See [Deterministic Behavior](docs/architecture/determinism.md).
 - **Intent Detection** - Deterministic pattern matching with DialogFlow as an advisory tie-breaker; one canonical intent vocabulary across services
 - **Policy Engine** - Confirmation gates, transfer limits, prompt-injection blocking, and PII redaction
 - **MCP Tools** - Model Context Protocol for tool execution, with a startup tool contract
@@ -122,11 +122,12 @@ Every customer message follows one fixed, reproducible pipeline:
 See [Deterministic Behavior](docs/architecture/determinism.md) for the guarantees
 enforced at each layer.
 
-> **Session state** is currently in-memory in `chat-backend` (and DB-backed in
-> `ai-orchestrator`). Per-session updates are serialized with a mutex to prevent
-> lost updates, but `chat-backend` session/message state does not survive a
-> restart. Durable persistence is a known follow-up (see the in-code notes in
-> `chat-backend/services/databaseService.js`).
+> **Session state** is persisted by `chat-backend` to its dedicated `poc_chat`
+> PostgreSQL database. Active sessions and full message metadata are restored
+> lazily after a restart, while per-session updates remain serialized to prevent
+> lost updates. The default development setup enables this persistence and fails
+> fast when PostgreSQL is unavailable rather than silently falling back to
+> process memory.
 
 ---
 
@@ -134,9 +135,9 @@ enforced at each layer.
 
 ### Prerequisites
 
-- Node.js v18.0.0+
-- npm v9.0.0+
-- PostgreSQL v15+ (optional)
+- Node.js v22.0.0+
+- npm v10.0.0+
+- PostgreSQL v15+
 - Docker (optional)
 
 ### Installation
@@ -152,11 +153,15 @@ npm install
 # Configure environment
 cp .env.example .env.development
 
-# Start core backend services
-npm run dev
+# Start PostgreSQL (skip this if PostgreSQL is already running locally)
+docker compose -f docker/docker-compose.local.yml up -d postgres
 
-# Start the customer UI in a second terminal
-npm run dev:frontend
+# Create the databases, run migrations, and load the demo data
+npm run db:setup
+npm run db:seed
+
+# Start all eight services, including both UIs
+npm run dev
 ```
 
 ### Verify Installation
@@ -221,10 +226,10 @@ poc-banking-chat/
 ### Commands
 
 ```bash
-# Development (core backend services)
+# Development (all eight services)
 npm run dev
 
-# Development (UI and specific services)
+# Individual services (optional)
 npm run dev:frontend
 npm run dev:agent
 npm run dev:banking
@@ -297,8 +302,11 @@ JWT_SECRET=your-secret-key
 API_GATEWAY_URL=http://localhost:3001
 BANKING_SERVICE_URL=http://localhost:3005
 
-# AI (optional)
+# AI (optional and disabled by default)
+OPENAI_ENABLED=false
 OPENAI_API_KEY=your-openai-key
+SLM_ENABLED=false
+SLM_BASE_URL=
 DIALOGFLOW_PROJECT_ID=your-project-id
 ```
 
@@ -381,7 +389,7 @@ docker compose -f docker/docker-compose.local.yml logs -f banking-service
 
 ## 📄 License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
+This project is licensed under the MIT License.
 
 ---
 

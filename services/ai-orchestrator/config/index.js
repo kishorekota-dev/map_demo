@@ -16,10 +16,39 @@ function parseIntSafe(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function hasUsableApiKey(value) {
+  if (typeof value !== 'string' || value.trim().length < 12) return false;
+  const normalized = value.trim().toLowerCase();
+  return ![
+    'placeholder',
+    'your-openai',
+    'your_openai',
+    'change-me',
+    'changeme',
+    'example-key',
+    'test-key'
+  ].some(marker => normalized.includes(marker));
+}
+
+function isExplicitlyEnabled(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'true';
+}
+
+const openaiApiKey = process.env.OPENAI_API_KEY;
+const slmBaseUrl = typeof process.env.SLM_BASE_URL === 'string'
+  && process.env.SLM_BASE_URL.trim()
+  ? process.env.SLM_BASE_URL.trim()
+  : null;
+// Never forward an ambient OpenAI credential to an explicitly configured local
+// endpoint. Custom endpoints can receive a deliberately supplied SLM_API_KEY.
+const slmApiKey = process.env.SLM_API_KEY || (slmBaseUrl ? null : openaiApiKey);
+
 module.exports = {
   // Expose helpers for reuse by service modules that need the same semantics
   parseFloatSafe,
   parseIntSafe,
+  hasUsableApiKey,
+  isExplicitlyEnabled,
   // Server Configuration
   server: {
     port: parseInt(process.env.PORT) || 3007,
@@ -53,11 +82,13 @@ module.exports = {
   },
 
   // OpenAI Configuration
-  // Determinism: temperature/top_p default to 0 and seed is pinned so the same
-  // input + state yields the same response. Use NaN-safe parsing so an explicit
-  // 0 is honoured (plain `|| 0.7` would silently override a configured 0).
+  // Remote response generation is an explicit opt-in: an inherited host key
+  // alone must never switch banking responses from tool-grounded formatting to
+  // a remote model. Sampling remains pinned for opted-in no-tool responses.
   openai: {
-    apiKey: process.env.OPENAI_API_KEY,
+    enabled: isExplicitlyEnabled(process.env.OPENAI_ENABLED)
+      && hasUsableApiKey(openaiApiKey),
+    apiKey: openaiApiKey,
     model: process.env.OPENAI_MODEL || 'gpt-4',
     temperature: parseFloatSafe(process.env.OPENAI_TEMPERATURE, 0),
     topP: parseFloatSafe(process.env.OPENAI_TOP_P, 0),
@@ -66,12 +97,14 @@ module.exports = {
   },
 
   // Local/Custom SLM Configuration (OpenAI-compatible endpoint)
-  // The structured extractor MUST be deterministic: temperature is forced to 0
-  // unless explicitly overridden, and JSON mode is on by default.
+  // Remote extraction requires SLM_ENABLED=true plus a usable key. Supplying a
+  // local SLM_BASE_URL is itself an explicit opt-in and needs no remote key.
   slm: {
-    enabled: process.env.SLM_ENABLED !== 'false',
-    baseUrl: process.env.SLM_BASE_URL || null,
-    apiKey: process.env.SLM_API_KEY || process.env.OPENAI_API_KEY || 'not-required',
+    enabled: !!slmBaseUrl || (
+      isExplicitlyEnabled(process.env.SLM_ENABLED) && hasUsableApiKey(slmApiKey)
+    ),
+    baseUrl: slmBaseUrl,
+    apiKey: slmApiKey || 'not-required',
     model: process.env.SLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4',
     temperature: process.env.SLM_TEMPERATURE !== undefined
       ? parseFloatSafe(process.env.SLM_TEMPERATURE, 0)
@@ -94,14 +127,21 @@ module.exports = {
     
     // Transport selection. For deterministic environments pin a single
     // transport so identical input always uses the same path and result shape.
-    //   'http'     -> always HTTP MCP (default; the protocol/SSE path is not
-    //                 yet operational, so this matches reality)
+    //   'http'     -> always HTTP MCP (default)
     //   'protocol' -> always True MCP Protocol (no implicit HTTP fallback)
     //   'auto'     -> try protocol, fall back to HTTP on error (non-deterministic)
     transport: (process.env.MCP_TRANSPORT || 'http').toLowerCase(),
 
-    // True MCP Protocol (SSE-based)
-    sseUrl: process.env.MCP_SSE_URL || 'http://localhost:3004/mcp/sse',
+    // True MCP Protocol (WebSocket-based). MCP_PROTOCOL_URL is explicit; the
+    // default is derived from the same service host used by the HTTP client.
+    protocolUrl: process.env.MCP_PROTOCOL_URL || (() => {
+      const url = new URL(process.env.MCP_SERVICE_URL || 'http://localhost:3004');
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      url.pathname = '/mcp';
+      url.search = '';
+      url.hash = '';
+      return url.toString();
+    })(),
     preferProtocol: process.env.MCP_PREFER_PROTOCOL !== 'false', // Default true
     enableFallback: process.env.MCP_ENABLE_FALLBACK !== 'false', // Default true
     

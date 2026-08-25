@@ -313,6 +313,14 @@ router.post('/validate', (req, res) => {
       });
     }
 
+    if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: 'Parameters must be an object'
+      });
+    }
+
     const tools = bankingTools.getToolDefinitions();
     const toolDef = tools.find(t => t.name === tool);
 

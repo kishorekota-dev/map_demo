@@ -129,7 +129,7 @@ CREATE INDEX idx_chat_message_user ON chat_messages(user_id, created_at);
 
 ### Prerequisites
 
-- Node.js >= 18.0.0
+- Node.js >= 22.0.0
 - PostgreSQL >= 12
 - npm or yarn
 
@@ -154,7 +154,7 @@ Ensure PostgreSQL is running and create the database:
 psql -U postgres
 
 # Create database
-CREATE DATABASE poc_banking;
+CREATE DATABASE poc_chat;
 
 # Exit
 \q
@@ -168,9 +168,10 @@ Update `.env` with database credentials:
 # Database Configuration
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=poc_banking
+DB_NAME=poc_chat
 DB_USER=postgres
 DB_PASSWORD=postgres
+CHAT_PERSISTENCE_ENABLED=true
 DB_POOL_MAX=10
 DB_POOL_MIN=2
 DB_IDLE_TIMEOUT=30000
@@ -585,7 +586,7 @@ JWT_SECRET=<secure-secret-key>
 ### Docker Support
 
 ```dockerfile
-FROM node:18-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production

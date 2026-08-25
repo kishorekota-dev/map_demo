@@ -74,14 +74,15 @@ const WorkflowExecution = sequelize.define('WorkflowExecution', {
     allowNull: true
   }
 }, {
-  tableName: 'workflow_executions',
+  tableName: 'ai_workflow_executions',
+  underscored: true,
   timestamps: true,
   indexes: [
-    { fields: ['sessionId'] },
-    { fields: ['executionId'] },
+    { fields: ['session_id'] },
+    { fields: ['execution_id'] },
     { fields: ['status'] },
     { fields: ['intent'] },
-    { fields: ['startedAt'] }
+    { fields: ['started_at'] }
   ]
 });
 

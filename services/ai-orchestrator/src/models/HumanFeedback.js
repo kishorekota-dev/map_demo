@@ -59,13 +59,14 @@ const HumanFeedback = sequelize.define('HumanFeedback', {
     allowNull: true
   }
 }, {
-  tableName: 'human_feedback',
+  tableName: 'ai_human_feedback',
+  underscored: true,
   timestamps: true,
   indexes: [
-    { fields: ['sessionId'] },
-    { fields: ['executionId'] },
+    { fields: ['session_id'] },
+    { fields: ['execution_id'] },
     { fields: ['status'] },
-    { fields: ['expiresAt'] }
+    { fields: ['expires_at'] }
   ]
 });
 

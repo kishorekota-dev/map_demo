@@ -13,7 +13,7 @@ This guide covers Docker deployment for the POC Chat Backend service with Postgr
 │                                         │
 │  ┌─────────────────────────────────┐  │
 │  │   Chat Backend Service          │  │
-│  │   - Node.js 18                  │  │
+│  │   - Node.js 22                  │  │
 │  │   - Express + Socket.IO         │  │
 │  │   - Port: 3006                  │  │
 │  └─────────────────────────────────┘  │

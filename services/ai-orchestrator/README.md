@@ -132,10 +132,13 @@ PostgreSQL-based persistent session storage:
 
 ## 📋 Prerequisites
 
-- Node.js v18.0.0 or higher
+- Node.js v22.0.0 or higher
 - PostgreSQL v15 or higher
-- OpenAI API key
 - MCP Service running on port 3004
+
+An OpenAI API key is optional. Tool-backed banking replies always use the
+deterministic formatter; remote generation is available only for no-tool
+intents when explicitly enabled.
 
 ## 🔧 Installation
 
@@ -171,9 +174,14 @@ DB_NAME=ai_orchestrator_dev
 DB_USER=postgres
 DB_PASSWORD=postgres
 
-# OpenAI
+# Optional remote generation for no-tool intents
+OPENAI_ENABLED=false
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4
+
+# Optional structured extraction (remote flag or explicit local endpoint)
+SLM_ENABLED=false
+SLM_BASE_URL=
 
 # MCP Service
 MCP_SERVICE_URL=http://localhost:3004/api/tools
@@ -417,9 +425,13 @@ docker run -d \
   -p 3007:3007 \
   -e NODE_ENV=production \
   -e DB_HOST=postgres \
+  -e OPENAI_ENABLED=true \
   -e OPENAI_API_KEY=your_key \
   poc-ai-orchestrator
 ```
+
+Omit the last two options to keep remote response generation disabled. For a
+local extractor, pass `SLM_BASE_URL`; no remote API key is required.
 
 ### Docker Compose
 

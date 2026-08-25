@@ -5,6 +5,9 @@
  */
 const path = require('path');
 const intentConfig = require('../intentConfig');
+const CompleteBankingTools = require(path.join(
+  __dirname, '..', '..', '..', 'mcp-service', 'src', 'tools', 'completeBankingTools'
+));
 
 // Recreate the flat ALL_PROMPTS map exactly as intentMapper does, without
 // pulling in the winston logger.
@@ -57,5 +60,40 @@ describe('intentConfig consistency', () => {
     for (const intent of intents) {
       expect(intentConfig.isValidIntent(intent)).toBe(true);
     }
+  });
+
+  test('required fields and enums match the executable MCP schemas', () => {
+    const bankingTools = new CompleteBankingTools('http://banking.local/api/v1');
+    const schemas = Object.fromEntries(
+      bankingTools.getToolDefinitions().map(tool => [tool.name, tool.inputSchema])
+    );
+    const withoutAuth = fields => fields.filter(field => field !== 'authToken');
+
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.transfer_funds.required)
+      .toEqual(withoutAuth(schemas.banking_create_transfer.required));
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.account_statement.required)
+      .toEqual(withoutAuth(schemas.banking_get_account_statement.required));
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.dispute_transaction.required)
+      .toEqual(withoutAuth(schemas.banking_create_dispute.required));
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.report_fraud.validation.fraudType.values)
+      .toEqual(schemas.banking_create_fraud_alert.properties.alertType.enum);
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.card_replacement.validation.reason.values)
+      .toEqual(schemas.banking_replace_card.properties.reason.enum);
+    expect([...intentConfig.INTENT_DATA_REQUIREMENTS.card_management.validation.reason.values].sort())
+      .toEqual([...new Set([
+        ...schemas.banking_block_card.properties.reason.enum,
+        ...schemas.banking_replace_card.properties.reason.enum
+      ])].sort());
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.check_fraud_alerts.validation.status.values)
+      .toEqual(schemas.banking_get_fraud_alerts.properties.status.enum);
+    expect(intentConfig.INTENT_DATA_REQUIREMENTS.check_fraud_alerts.validation.severity.values)
+      .toEqual(schemas.banking_get_fraud_alerts.properties.severity.enum);
+
+    expect(bankingTools.validateParameters({
+      inputSchema: schemas.banking_get_fraud_alerts
+    }, {
+      authToken: 'token',
+      ...intentConfig.INTENT_DATA_REQUIREMENTS.check_fraud_alerts.defaults
+    })).toEqual({ valid: true, errors: [] });
   });
 });

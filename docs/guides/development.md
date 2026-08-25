@@ -28,10 +28,13 @@ poc-banking-chat/
 
 ```bash
 # Verify Node.js version
-node -v  # Should be >= 18.0.0
+node -v  # Should be >= 22.0.0
 
 # Verify npm version
-npm -v   # Should be >= 9.0.0
+npm -v   # Should be >= 10.0.0
+
+# Verify PostgreSQL version
+psql --version  # Should be >= 15.0
 ```
 
 ### Initial Setup
@@ -61,12 +64,28 @@ cp services/banking-service/.env.example services/banking-service/.env
 # ... repeat for other services
 ```
 
+### Database Setup
+
+The default development configuration persists banking data, AI workflow state,
+and chat sessions and messages in PostgreSQL. Start PostgreSQL before launching
+the services; the chat backend fails fast instead of silently using process
+memory when persistence is enabled and the database is unavailable.
+
+```bash
+# Skip this command if PostgreSQL 15+ is already running locally
+docker compose -f docker/docker-compose.local.yml up -d postgres
+
+# Create databases, run migrations, and load the documented demo customer
+npm run db:setup
+npm run db:seed
+```
+
 ## Running Services
 
 ### Development Mode (Hot Reload)
 
 ```bash
-# Start all services with live reload
+# Start all eight services with live reload
 npm run dev
 
 # Start specific service

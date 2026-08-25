@@ -1,7 +1,14 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const logger = require('../utils/logger');
-const { AccountRepository } = require('../database/repositories');
+const {
+  AccountRepository,
+  TransactionRepository,
+  CardRepository,
+  TransferRepository,
+  FraudRepository,
+  DisputeRepository
+} = require('../database/repositories');
 
 /**
  * JWT Authentication Middleware
@@ -160,7 +167,8 @@ const requirePermissions = (permissions) => {
  * Ensures users can only access their own accounts
  */
 const verifyAccountOwnership = async (req, res, next) => {
-  const accountId = req.params.accountId || req.body.accountId;
+  const accountId = req.params?.accountId || req.body?.accountId ||
+    req.body?.fromAccountId || req.query?.accountId;
   const userId = req.user.userId || req.user.id;
 
   // Admin users can access any account
@@ -207,6 +215,7 @@ const verifyAccountOwnership = async (req, res, next) => {
       });
     }
 
+    req.ownedAccount = account;
     next();
   } catch (error) {
     logger.error('Account ownership verification error', {
@@ -224,9 +233,139 @@ const verifyAccountOwnership = async (req, res, next) => {
   }
 };
 
+const verifyOptionalAccountOwnership = (req, res, next) => {
+  const accountId = req.params?.accountId || req.body?.accountId ||
+    req.body?.fromAccountId || req.query?.accountId;
+  return accountId ? verifyAccountOwnership(req, res, next) : next();
+};
+
+const createResourceOwnershipVerifier = ({ resourceName, getId, resolve, attachAs }) => {
+  return async (req, res, next) => {
+    const resourceId = getId(req);
+    const userId = req.user?.userId || req.user?.id;
+
+    if (!resourceId) {
+      return res.status(400).json({
+        error: `${resourceName} ID required`,
+        code: 'RESOURCE_ID_REQUIRED'
+      });
+    }
+
+    try {
+      const resolved = await resolve(resourceId);
+      if (!resolved?.resource) {
+        return res.status(404).json({
+          error: `${resourceName} not found`,
+          code: 'RESOURCE_NOT_FOUND'
+        });
+      }
+
+      const ownerIds = (resolved.ownerIds || [resolved.ownerId])
+        .filter(Boolean)
+        .map(String);
+      const isAdmin = req.user?.role === 'admin';
+      if (!isAdmin && !ownerIds.includes(String(userId))) {
+        logger.warn(`${resourceName} ownership verification failed`, {
+          resourceId,
+          userId,
+          path: req.path
+        });
+        return res.status(403).json({
+          error: 'Access forbidden',
+          message: `You can only access your own ${resourceName.toLowerCase()} resources`,
+          code: 'RESOURCE_ACCESS_DENIED'
+        });
+      }
+
+      req[attachAs] = resolved.resource;
+      next();
+    } catch (error) {
+      logger.error(`${resourceName} ownership verification error`, {
+        error: error.message,
+        resourceId,
+        userId
+      });
+      res.status(500).json({
+        error: 'Ownership verification error',
+        code: 'RESOURCE_OWNERSHIP_ERROR'
+      });
+    }
+  };
+};
+
+const verifyTransactionOwnership = createResourceOwnershipVerifier({
+  resourceName: 'Transaction',
+  getId: (req) => req.params?.transactionId || req.body?.transactionId,
+  resolve: async (transactionId) => {
+    const transaction = await TransactionRepository.findById(transactionId);
+    if (!transaction) return null;
+    const account = await AccountRepository.findById(transaction.account_id);
+    return { resource: transaction, ownerId: account?.user_id };
+  },
+  attachAs: 'ownedTransaction'
+});
+
+const verifyOptionalTransactionOwnership = (req, res, next) => {
+  return req.body?.transactionId ? verifyTransactionOwnership(req, res, next) : next();
+};
+
+const verifyCardOwnership = createResourceOwnershipVerifier({
+  resourceName: 'Card',
+  getId: (req) => req.params?.cardId || req.body?.cardId,
+  resolve: async (cardId) => {
+    const card = await CardRepository.findById(cardId);
+    return card ? { resource: card, ownerId: card.user_id } : null;
+  },
+  attachAs: 'ownedCard'
+});
+
+const verifyOptionalCardOwnership = (req, res, next) => {
+  return req.body?.cardId ? verifyCardOwnership(req, res, next) : next();
+};
+
+const verifyTransferOwnership = createResourceOwnershipVerifier({
+  resourceName: 'Transfer',
+  getId: (req) => req.params?.transferId,
+  resolve: async (transferId) => {
+    const transfer = await TransferRepository.findById(transferId);
+    return transfer
+      ? { resource: transfer, ownerIds: [transfer.from_user_id, transfer.to_user_id] }
+      : null;
+  },
+  attachAs: 'ownedTransfer'
+});
+
+const verifyFraudAlertOwnership = createResourceOwnershipVerifier({
+  resourceName: 'Fraud alert',
+  getId: (req) => req.params?.alertId,
+  resolve: async (alertId) => {
+    const alert = await FraudRepository.findById(alertId);
+    return alert ? { resource: alert, ownerId: alert.user_id } : null;
+  },
+  attachAs: 'ownedFraudAlert'
+});
+
+const verifyDisputeOwnership = createResourceOwnershipVerifier({
+  resourceName: 'Dispute',
+  getId: (req) => req.params?.disputeId,
+  resolve: async (disputeId) => {
+    const dispute = await DisputeRepository.findById(disputeId);
+    return dispute ? { resource: dispute, ownerId: dispute.user_id } : null;
+  },
+  attachAs: 'ownedDispute'
+});
+
 module.exports = {
   authenticateToken,
   authorize,
   requirePermissions,
-  verifyAccountOwnership
+  verifyAccountOwnership,
+  verifyOptionalAccountOwnership,
+  verifyTransactionOwnership,
+  verifyOptionalTransactionOwnership,
+  verifyCardOwnership,
+  verifyOptionalCardOwnership,
+  verifyTransferOwnership,
+  verifyFraudAlertOwnership,
+  verifyDisputeOwnership
 };

@@ -15,6 +15,20 @@ const buildAuthUrl = (path: string): string => {
 };
 
 class AuthService {
+  private getErrorMessage(error: any, fallback: string): string {
+    const responseError = error?.response?.data?.error;
+
+    if (typeof responseError === 'string') {
+      return responseError;
+    }
+
+    if (responseError && typeof responseError.message === 'string') {
+      return responseError.message;
+    }
+
+    return error?.response?.data?.message || error?.message || fallback;
+  }
+
   /**
    * Login via the configured authentication API directly (unauthenticated)
    */
@@ -32,26 +46,40 @@ class AuthService {
       );
 
       const { data } = response;
+      const payload = data.data || (data.user && data.tokens
+        ? {
+            user: data.user,
+            tokens: data.tokens,
+            roles: data.user.roles || [],
+          }
+        : null);
 
-      // Store tokens and user profile
-      if (data.data?.tokens) {
-        this.setTokens(data.data.tokens);
-        
-        // Ensure user profile has all required fields
-        const userProfile: UserProfile = {
-          userId: data.data.user.userId || (data.data.user as any).id,
-          username: data.data.user.username,
-          email: data.data.user.email,
-          firstName: data.data.user.firstName,
-          lastName: data.data.user.lastName,
-          roles: data.data.roles || [],
-          customerId: data.data.user.customerId,
-        };
-        
-        if (import.meta.env.DEV) {
-          console.debug('Login successful, storing user profile:', userProfile);
-        }
-        this.setUserProfile(userProfile);
+      if (!payload?.user || !payload.tokens?.accessToken) {
+        throw new Error('Authentication service returned an incomplete login response');
+      }
+
+      const userId = payload.user.userId || (payload.user as any).id;
+      if (!userId) {
+        throw new Error('Authentication service did not return a user ID');
+      }
+
+      // Normalize both the banking service's nested response and the supported
+      // top-level LoginResponse shape before persisting any authentication data.
+      const userProfile: UserProfile = {
+        userId,
+        username: payload.user.username,
+        email: payload.user.email,
+        firstName: payload.user.firstName,
+        lastName: payload.user.lastName,
+        roles: payload.roles || payload.user.roles || [],
+        customerId: payload.user.customerId,
+      };
+
+      this.setTokens(payload.tokens);
+      this.setUserProfile(userProfile);
+
+      if (import.meta.env.DEV) {
+        console.debug('Login successful, storing user profile:', userProfile);
       }
 
       return data;
@@ -60,7 +88,10 @@ class AuthService {
         console.error('Login error:', error);
       }
       throw {
-        message: error.response?.data?.error || 'Login failed. Please check your credentials.',
+        message: this.getErrorMessage(
+          error,
+          'Login failed. Please check your credentials.'
+        ),
         status: error.response?.status || 500,
       };
     }
@@ -156,7 +187,9 @@ class AuthService {
     if (!refreshToken) return null;
 
     try {
-      const response = await axios.post<{ data: { tokens: TokenPair } }>(
+      const response = await axios.post<{
+        data: { tokens?: TokenPair; accessToken?: string; expiresIn?: number | string }
+      }>(
         buildAuthUrl('/auth/refresh'),
         { refreshToken },
         {
@@ -167,7 +200,17 @@ class AuthService {
         }
       );
 
-      const { tokens } = response.data.data;
+      const payload = response.data.data;
+      const tokens: TokenPair = payload.tokens || {
+        accessToken: payload.accessToken || '',
+        refreshToken,
+        expiresIn: typeof payload.expiresIn === 'number' ? payload.expiresIn : undefined,
+      };
+
+      if (!tokens.accessToken) {
+        throw new Error('Authentication service did not return an access token');
+      }
+
       this.setTokens(tokens);
       return tokens;
     } catch (error) {
@@ -180,15 +223,21 @@ class AuthService {
   /**
    * Validate token by checking if it's expired (basic JWT decode)
    */
-  isTokenValid(): boolean {
-    const token = this.getAccessToken();
+  isTokenValid(candidateToken?: string | null): boolean {
+    const token = candidateToken ?? this.getAccessToken();
     if (!token) return false;
 
     try {
       // Decode JWT (basic check without verification)
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const expiry = payload.exp * 1000; // Convert to milliseconds
-      return Date.now() < expiry;
+      const segment = token.split('.')[1];
+      if (!segment) return false;
+
+      const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      const payload = JSON.parse(atob(padded));
+
+      // Tokens without an expiry are not accepted by the protected UI.
+      return typeof payload.exp === 'number' && Date.now() < payload.exp * 1000;
     } catch {
       return false;
     }

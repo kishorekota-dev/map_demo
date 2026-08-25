@@ -9,9 +9,10 @@ npm install
 
 # 2. Configure database (in .env)
 DB_HOST=localhost
-DB_NAME=poc_banking
+DB_NAME=poc_chat
 DB_USER=postgres
 DB_PASSWORD=postgres
+CHAT_PERSISTENCE_ENABLED=true
 
 # 3. Start service
 npm start
@@ -63,9 +64,10 @@ Body: { "notes": "..." }
 ```env
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=poc_banking
+DB_NAME=poc_chat
 DB_USER=postgres
 DB_PASSWORD=postgres
+CHAT_PERSISTENCE_ENABLED=true
 ```
 
 ### Optional Settings

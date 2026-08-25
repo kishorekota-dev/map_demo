@@ -69,7 +69,7 @@ docker-compose -f docker/docker-compose.yml up -d
 ## Environment Configuration
 - Root `.env.example` contains all service URLs and shared config
 - Each service has `.env.development` for local overrides
-- Required: `OPENAI_API_KEY` for ai-orchestrator, `DIALOGFLOW_PROJECT_ID` for nlu-service (optional, falls back to mock)
+- Optional AI calls: `OPENAI_ENABLED=true` plus `OPENAI_API_KEY` enables remote generation for no-tool intents; `SLM_ENABLED=true` plus a usable key enables remote extraction, while `SLM_BASE_URL` opts into a local extractor without a key
 
 ## Where to Look First
 - Service ports and quick start: [README.md](README.md)

@@ -4,9 +4,9 @@ Get the POC Banking Chat application running in under 5 minutes.
 
 ## Prerequisites
 
-- **Node.js** v18.0.0 or higher
-- **npm** v9.0.0 or higher
-- **PostgreSQL** v15+ (optional, for full functionality)
+- **Node.js** v22.0.0 or higher
+- **npm** v10.0.0 or higher
+- **PostgreSQL** v15+ (required by the default persistence-enabled setup)
 - **Docker** (optional, for containerized deployment)
 
 ## Installation
@@ -36,16 +36,30 @@ cp .env.example .env.development
 
 Edit `.env.development` with your settings (see [Configuration](configuration.md)).
 
-### 4. Start Services
+### 4. Prepare PostgreSQL
+
+Start the repository's PostgreSQL service, or use an existing local PostgreSQL
+15+ instance configured in `.env.development`:
+
+```bash
+docker compose -f docker/docker-compose.local.yml up -d postgres
+npm run db:setup
+npm run db:seed
+```
+
+PostgreSQL stores the banking data, AI workflow state, and durable chat sessions
+and messages used by the default development setup.
+
+### 5. Start Services
 
 **Option A: All services at once**
 ```bash
-# Start the backend and service mesh
+# Start all eight services, including the customer and agent UIs
 npm run dev
-
-# Start the customer UI in a second terminal
-npm run dev:frontend
 ```
+
+This starts the frontend, API gateway, chat backend, banking service, NLU
+service, MCP service, AI orchestrator, and agent UI.
 
 **Option B: Individual services**
 ```bash
@@ -56,7 +70,7 @@ npm run dev:banking     # Banking Service (port 3005)
 npm run dev:chat        # Chat Backend (port 3006)
 ```
 
-### 5. Verify Installation
+### 6. Verify Installation
 
 ```bash
 npm run health
@@ -71,13 +85,13 @@ npm run health
 | Agent Dashboard | http://localhost:8081 | Support agent interface |
 | API Docs | http://localhost:3005/api/docs | Banking API documentation |
 
-## Test Credentials
+## Demo Customer Credential
 
-| Role | Email | Password |
-|------|-------|----------|
-| Customer | customer1@example.com | Password123! |
-| Agent | agent@example.com | Password123! |
-| Admin | admin@example.com | Password123! |
+`npm run db:seed` creates this verified customer login:
+
+| Role | Username | Password |
+|------|----------|----------|
+| Customer (James Patterson) | `james.patterson` | `Password123!` |
 
 ## Next Steps
 

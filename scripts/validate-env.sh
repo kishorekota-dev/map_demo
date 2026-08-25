@@ -76,8 +76,8 @@ validate_dependencies() {
     print_status "Node.js version: $node_version"
     print_status "npm version: $(npm --version)"
 
-    if [ "$major_version" -lt 18 ]; then
-        print_error "Node.js version must be >= 18.0.0"
+    if [ "$major_version" -lt 22 ]; then
+        print_error "Node.js version must be >= 22.0.0"
         return 1
     fi
 
@@ -150,32 +150,24 @@ validate_service_structure() {
 check_service_urls() {
     print_status "Validating service URL configurations..."
 
-    declare -A services=(
-        ["FRONTEND_URL"]="${FRONTEND_URL:-http://localhost:3000}"
-        ["API_GATEWAY_URL"]="${API_GATEWAY_URL:-http://localhost:3001}"
-        ["CHAT_BACKEND_URL"]="${CHAT_BACKEND_URL:-http://localhost:3006}"
-        ["BANKING_SERVICE_URL"]="${BANKING_SERVICE_URL:-http://localhost:3005}"
-        ["NLP_SERVICE_URL"]="${NLP_SERVICE_URL:-http://localhost:3003}"
-        ["NLU_SERVICE_URL"]="${NLU_SERVICE_URL:-http://localhost:3003}"
-        ["MCP_SERVICE_URL"]="${MCP_SERVICE_URL:-http://localhost:3004}"
-        ["AI_ORCHESTRATOR_URL"]="${AI_ORCHESTRATOR_URL:-http://localhost:3007}"
-        ["AGENT_UI_URL"]="${AGENT_UI_URL:-http://localhost:8081}"
+    # Keep this compatible with the Bash 3.2 shipped by macOS; associative
+    # arrays (`declare -A`) are only available in newer Bash versions.
+    local service_entries=(
+        "FRONTEND_URL|${FRONTEND_URL:-http://localhost:3000}|3000"
+        "API_GATEWAY_URL|${API_GATEWAY_URL:-http://localhost:3001}|3001"
+        "CHAT_BACKEND_URL|${CHAT_BACKEND_URL:-http://localhost:3006}|3006"
+        "BANKING_SERVICE_URL|${BANKING_SERVICE_URL:-http://localhost:3005}|3005"
+        "NLP_SERVICE_URL|${NLP_SERVICE_URL:-http://localhost:3003}|3003"
+        "NLU_SERVICE_URL|${NLU_SERVICE_URL:-http://localhost:3003}|3003"
+        "MCP_SERVICE_URL|${MCP_SERVICE_URL:-http://localhost:3004}|3004"
+        "AI_ORCHESTRATOR_URL|${AI_ORCHESTRATOR_URL:-http://localhost:3007}|3007"
+        "AGENT_UI_URL|${AGENT_UI_URL:-http://localhost:8081}|8081"
     )
 
-    declare -A expected_ports=(
-        ["FRONTEND_URL"]=3000
-        ["API_GATEWAY_URL"]=3001
-        ["CHAT_BACKEND_URL"]=3006
-        ["BANKING_SERVICE_URL"]=3005
-        ["NLP_SERVICE_URL"]=3003
-        ["NLU_SERVICE_URL"]=3003
-        ["MCP_SERVICE_URL"]=3004
-        ["AI_ORCHESTRATOR_URL"]=3007
-        ["AGENT_UI_URL"]=8081
-    )
-
-    for service_name in "${!services[@]}"; do
-        local url="${services[$service_name]}"
+    local entry
+    for entry in "${service_entries[@]}"; do
+        local service_name url expected_port
+        IFS='|' read -r service_name url expected_port <<< "$entry"
         local port
         port=$(echo "$url" | sed -n 's/.*:\([0-9]*\).*/\1/p')
 
@@ -186,10 +178,10 @@ check_service_urls() {
             continue
         fi
 
-        if [ "$port" = "${expected_ports[$service_name]}" ]; then
+        if [ "$port" = "$expected_port" ]; then
             print_success "$service_name uses expected port $port"
         else
-            print_warning "$service_name uses port $port; expected ${expected_ports[$service_name]}"
+            print_warning "$service_name uses port $port; expected $expected_port"
         fi
     done
 }

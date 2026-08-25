@@ -37,9 +37,7 @@ check_service() {
     local health_path=$3
     
     # Check if container is running
-    RUNNING=$(docker compose -f "$COMPOSE_FILE" ps $service_name 2>/dev/null | grep -c "Up" || echo "0")
-    
-    if [ "$RUNNING" = "0" ]; then
+    if ! docker compose -f "$COMPOSE_FILE" ps --status running --services 2>/dev/null | grep -Fxq "$service_name"; then
         echo -e "${RED}✗ ${service_name} - Not Running${NC}"
         return 1
     fi
@@ -52,7 +50,7 @@ check_service() {
     # Check health endpoint
     if command -v curl &> /dev/null; then
         local url="http://localhost:${port}${health_path}"
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $url 2>/dev/null || echo "000")
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
         if [ "$HTTP_CODE" = "200" ]; then
             echo -e "${GREEN}✓ ${service_name} - Healthy (Port ${port})${NC}"
             return 0
@@ -84,16 +82,22 @@ check_service "redis" "6379" ""
 check_service "banking-service" "3005" "/health"
 check_service "nlu-service" "3003" "/health"
 check_service "mcp-service" "3004" "/health"
+check_service "ai-orchestrator" "3007" "/health"
 check_service "chat-backend" "3006" "/health"
+check_service "api-gateway" "3001" "/health"
+check_service "agent-ui" "8081" "/health"
 check_service "frontend" "3000" "/"
 
 echo ""
 echo -e "${BLUE}Quick Access URLs:${NC}"
 echo "  • Frontend:        http://localhost:3000"
+echo "  • Agent UI:        http://localhost:8081"
+echo "  • API Gateway:     http://localhost:3001/health"
 echo "  • Chat Backend:    http://localhost:3006/health"
 echo "  • Banking Service: http://localhost:3005/health"
 echo "  • NLU Service:     http://localhost:3003/health"
 echo "  • MCP Service:     http://localhost:3004/health"
+echo "  • AI Orchestrator: http://localhost:3007/health"
 echo ""
 echo -e "${BLUE}View Logs:${NC}"
 echo "  docker compose -f docker/docker-compose.local.yml logs -f [service-name]"

@@ -441,34 +441,18 @@ class NLUController {
   }
 
   /**
-   * Train NLU model
+   * Reject runtime model training until a durable training provider exists.
    */
-  async trainModel(req, res) {
-    try {
-      const { trainingData } = req.body;
-      
-      logger.info('Training model', { samples: trainingData.length });
+  trainModel(req, res) {
+    logger.warn('Runtime NLU model training requested but unsupported', {
+      samples: req.body.trainingData.length
+    });
 
-      const result = await nluService.trainModel(trainingData);
-      
-      if (result.success) {
-        res.json({
-          success: true,
-          data: result
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: result.error
-        });
-      }
-    } catch (error) {
-      logger.error('Error in trainModel', { error: error.message });
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
+    return res.status(501).json({
+      success: false,
+      code: 'NLU_TRAINING_UNSUPPORTED',
+      error: 'Runtime NLU model training is not supported by this service.'
+    });
   }
 
   /**
@@ -517,7 +501,6 @@ class NLUController {
             extractEntities: '/api/nlu/entities',
             dialogflow: '/api/nlu/dialogflow',
             context: '/api/nlu/context/:sessionId',
-            train: '/api/nlu/train',
             health: '/api/nlu/health'
           },
           examples: {

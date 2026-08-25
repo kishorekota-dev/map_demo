@@ -35,7 +35,7 @@ class FraudController {
 
   async createAlert(req, res, next) {
     try {
-      const alertData = req.body;
+      const alertData = { ...req.body, userId: req.user.userId };
 
       const alert = await FraudRepository.create(alertData);
 

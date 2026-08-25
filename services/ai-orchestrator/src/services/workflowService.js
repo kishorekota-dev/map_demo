@@ -257,7 +257,10 @@ class WorkflowService {
       const latestUserMessage = this.getLatestUserMessage(session);
       const tools = feedback.context.tools?.length
         ? feedback.context.tools
-        : intentMapper.getToolsForIntent(session.intent);
+        : this.workflow.getToolsForState({
+          intent: session.intent,
+          collectedData: session.collectedData
+        });
 
       // Determinism: re-run the same validation the StateGraph applies before
       // executing tools, so the confirm-then-execute path produces identical

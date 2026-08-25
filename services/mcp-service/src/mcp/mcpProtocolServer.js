@@ -64,31 +64,6 @@ class MCPProtocolServer extends EventEmitter {
       logger.error('MCP WebSocket error', { connectionId, error: error.message });
     });
 
-    // Send initialization message
-    this.sendMessage(connection, {
-      jsonrpc: '2.0',
-      method: 'notifications/initialized',
-      params: {
-        protocolVersion: this.protocolVersion,
-        serverInfo: {
-          name: 'POC Banking MCP Server',
-          version: '1.0.0'
-        },
-        capabilities: {
-          tools: {
-            listChanged: false
-          },
-          resources: {
-            subscribe: false,
-            listChanged: false
-          },
-          prompts: {
-            listChanged: false
-          },
-          logging: {}
-        }
-      }
-    });
   }
 
   /**
@@ -105,6 +80,11 @@ class MCPProtocolServer extends EventEmitter {
 
     try {
       switch (method) {
+        case 'notifications/initialized':
+          connection.initialized = true;
+          logger.debug('MCP client initialization completed', { connectionId: connection.id });
+          break;
+
         case 'initialize':
           await this.handleInitialize(connection, id, params);
           break;

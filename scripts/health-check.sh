@@ -16,15 +16,16 @@ echo -e "${BLUE}  POC Banking Chat - Health Check       ${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# Service definitions: name:port
+# Service definitions: name:port:health-path
 SERVICES=(
-  "API Gateway:3001"
-  "NLU Service:3003"
-  "MCP Service:3004"
-  "Banking Service:3005"
-  "Chat Backend:3006"
-  "AI Orchestrator:3007"
-  "Agent UI:8081"
+  "API Gateway:3001:/health"
+  "NLU Service:3003:/health"
+  "MCP Service:3004:/health"
+  "Banking Service:3005:/health"
+  "Chat Backend:3006:/health"
+  "AI Orchestrator:3007:/health"
+  "Agent UI:8081:/health"
+  "Frontend:3000:/"
 )
 
 HEALTHY=0
@@ -33,23 +34,24 @@ UNHEALTHY=0
 check_service() {
   local name=$1
   local port=$2
+  local health_path=$3
   
   printf "%-20s " "$name"
   
-  response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null || echo "000")
+  response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port$health_path" 2>/dev/null || echo "000")
   
   if [[ "$response" == "200" ]]; then
     echo -e "${GREEN}✓ Healthy (port $port)${NC}"
-    ((HEALTHY++))
+    HEALTHY=$((HEALTHY + 1))
   else
     echo -e "${RED}✗ Unhealthy (port $port, status: $response)${NC}"
-    ((UNHEALTHY++))
+    UNHEALTHY=$((UNHEALTHY + 1))
   fi
 }
 
 for service in "${SERVICES[@]}"; do
-  IFS=':' read -r name port <<< "$service"
-  check_service "$name" "$port"
+  IFS=':' read -r name port health_path <<< "$service"
+  check_service "$name" "$port" "$health_path"
 done
 
 echo ""

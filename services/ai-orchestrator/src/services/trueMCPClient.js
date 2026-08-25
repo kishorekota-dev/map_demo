@@ -1,18 +1,29 @@
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
+const { Client } = require('@modelcontextprotocol/sdk/client');
+const NodeWebSocket = require('ws');
+
+// The SDK's WebSocket transport targets browser-style runtimes and expects a
+// global implementation. Node 18/20 do not provide one consistently.
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = NodeWebSocket;
+}
+
+const { WebSocketClientTransport } = require('@modelcontextprotocol/sdk/client/websocket.js');
 const config = require('../../config');
 const logger = require('../utils/logger');
 
 /**
  * True MCP Client using official Model Context Protocol SDK
- * Implements the official MCP protocol with SSE transport
+ * Implements the official MCP protocol over the WebSocket transport exposed
+ * by the MCP service.
  */
 class TrueMCPClient {
   constructor() {
-    this.serverUrl = config.mcp.serviceUrl.replace('/api/tools', '/mcp/sse');
+    this.serverUrl = config.mcp.protocolUrl;
     this.connected = false;
     this.client = null;
     this.transport = null;
+    this.shouldReconnect = true;
+    this.reconnectTimer = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
     this.reconnectDelay = 2000;
@@ -32,6 +43,7 @@ class TrueMCPClient {
     }
 
     try {
+      this.shouldReconnect = true;
       logger.info('Connecting to MCP server', { url: this.serverUrl });
 
       // Initialize MCP client
@@ -49,8 +61,8 @@ class TrueMCPClient {
         }
       );
 
-      // Create SSE transport
-      this.transport = new SSEClientTransport(
+      // Create the transport used by the MCP service's /mcp endpoint.
+      this.transport = new WebSocketClientTransport(
         new URL(this.serverUrl)
       );
 
@@ -64,9 +76,11 @@ class TrueMCPClient {
 
       // Setup reconnection on disconnect
       this.transport.onclose = () => {
-        logger.warn('MCP connection closed, attempting reconnect');
         this.connected = false;
-        this.scheduleReconnect();
+        if (this.shouldReconnect) {
+          logger.warn('MCP connection closed, attempting reconnect');
+          this.scheduleReconnect();
+        }
       };
 
       this.transport.onerror = (error) => {
@@ -89,6 +103,10 @@ class TrueMCPClient {
    * Schedule reconnection attempt
    */
   async scheduleReconnect() {
+    if (!this.shouldReconnect) {
+      return;
+    }
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       logger.error('Max reconnection attempts reached, giving up');
       return;
@@ -99,7 +117,10 @@ class TrueMCPClient {
     
     logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
     
-    setTimeout(async () => {
+    this.reconnectTimer = setTimeout(async () => {
+      if (!this.shouldReconnect) {
+        return;
+      }
       try {
         await this.connect();
       } catch (error) {
@@ -333,6 +354,12 @@ class TrueMCPClient {
 
     try {
       logger.info('Disconnecting from MCP server');
+
+      this.shouldReconnect = false;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       
       if (this.client) {
         await this.client.close();

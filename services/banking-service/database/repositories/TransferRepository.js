@@ -7,7 +7,7 @@ class TransferRepository {
     
     let query = `
       SELECT * FROM transfers 
-      WHERE from_user_id = $1 OR to_user_id = $1
+      WHERE (from_user_id = $1 OR to_user_id = $1)
     `;
     const params = [userId];
     let paramIndex = 2;
@@ -115,7 +115,8 @@ class TransferRepository {
 
   // Process transfer (atomic operation)
   async process(transferId) {
-    return await db.transaction(async (client) => {
+    try {
+      return await db.transaction(async (client) => {
       // Get transfer details
       const getTransferQuery = 'SELECT * FROM transfers WHERE transfer_id = $1 FOR UPDATE';
       const transferResult = await client.query(getTransferQuery, [transferId]);
@@ -140,11 +141,9 @@ class TransferRepository {
 
       // Check sufficient funds
       if (parseFloat(fromAccount.available_balance) < parseFloat(transfer.total_amount)) {
-        await client.query(
-          'UPDATE transfers SET status = $2, failure_reason = $3 WHERE transfer_id = $1',
-          [transferId, 'failed', 'Insufficient funds']
-        );
-        throw new Error('Insufficient funds');
+        const error = new Error('Insufficient funds');
+        error.code = 'INSUFFICIENT_FUNDS';
+        throw error;
       }
 
       // Deduct from source account
@@ -160,13 +159,17 @@ class TransferRepository {
         const toAccountResult = await client.query(getToAccountQuery, [transfer.to_account_id]);
         const toAccount = toAccountResult.rows[0];
 
-        if (toAccount) {
-          const newToBalance = parseFloat(toAccount.balance) + parseFloat(transfer.amount);
-          await client.query(
-            'UPDATE accounts SET balance = $2, available_balance = $2 WHERE account_id = $1',
-            [transfer.to_account_id, newToBalance]
-          );
+        if (!toAccount) {
+          const error = new Error('Destination account not found');
+          error.code = 'DESTINATION_ACCOUNT_NOT_FOUND';
+          throw error;
         }
+
+        const newToBalance = parseFloat(toAccount.balance) + parseFloat(transfer.amount);
+        await client.query(
+          'UPDATE accounts SET balance = $2, available_balance = $2 WHERE account_id = $1',
+          [transfer.to_account_id, newToBalance]
+        );
       }
 
       // Update transfer status
@@ -180,7 +183,16 @@ class TransferRepository {
       `;
       const result = await client.query(updateQuery, [transferId]);
       return result.rows[0];
-    });
+      });
+    } catch (error) {
+      // Persist deterministic business failures after the failed transaction
+      // has rolled back. Updating inside the transaction and then throwing
+      // would roll the failure status back as well.
+      if (['INSUFFICIENT_FUNDS', 'DESTINATION_ACCOUNT_NOT_FOUND'].includes(error.code)) {
+        await this.updateStatus(transferId, 'failed', error.message);
+      }
+      throw error;
+    }
   }
 
   // Cancel transfer

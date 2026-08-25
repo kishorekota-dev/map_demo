@@ -1,4 +1,4 @@
-const { TransactionRepository, AccountRepository } = require('../database/repositories');
+const { AccountRepository, TransactionRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
 
 class TransactionController {
@@ -47,7 +47,7 @@ class TransactionController {
     try {
       const { accountId, transactionType, amount, description, category, merchantName } = req.body;
 
-      const transaction = await TransactionRepository.create({
+      const transaction = await TransactionRepository.createAndApplyBalance({
         accountId,
         transactionType,
         amount,
@@ -55,9 +55,6 @@ class TransactionController {
         category,
         merchantName
       });
-
-      // Update account balance
-      await AccountRepository.updateBalance(accountId, amount, transactionType);
 
       logger.info(`Transaction created: ${transaction.transaction_id}`);
 
@@ -87,7 +84,13 @@ class TransactionController {
   async getPendingTransactions(req, res, next) {
     try {
       const userId = req.user.userId;
-      const transactions = await TransactionRepository.findPending();
+      const { page = 1, limit = 50 } = req.query;
+      const transactions = await TransactionRepository.search({
+        userId,
+        status: 'pending',
+        limit,
+        offset: (page - 1) * limit
+      });
 
       res.json({ success: true, data: transactions });
     } catch (error) {

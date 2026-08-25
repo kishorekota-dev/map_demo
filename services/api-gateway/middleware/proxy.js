@@ -1,4 +1,4 @@
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const serviceRegistryModule = require('../services/serviceRegistry');
 const loadBalancerModule = require('../services/loadBalancer');
 const circuitBreakerModule = require('../services/circuitBreaker');
@@ -82,8 +82,10 @@ const createServiceProxy = (options) => {
       
       // Forward user context
       if (req.user) {
-        proxyReq.setHeader('X-User-ID', req.user.id);
-        proxyReq.setHeader('X-User-Role', req.user.role);
+        const userId = req.userId || req.user.userId || req.user.id || req.user.sub;
+        const userRole = req.userRole || req.user.role || req.user.roles?.[0];
+        if (userId) proxyReq.setHeader('X-User-ID', String(userId));
+        if (userRole) proxyReq.setHeader('X-User-Role', String(userRole));
       }
       
       logger.info(`Proxying request to ${serviceName}`, {
@@ -93,6 +95,11 @@ const createServiceProxy = (options) => {
         target: proxyReq.getHeader('host'),
         userId: req.user?.id
       });
+
+      // express.json() has already consumed the stream. Re-serialize parsed
+      // bodies after all proxy headers are set; writing the body can flush the
+      // outgoing headers on newer Node releases.
+      fixRequestBody(proxyReq, req, res);
     },
 
     // Response logging and modification

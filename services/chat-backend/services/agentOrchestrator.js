@@ -196,7 +196,7 @@ class AgentOrchestrator extends EventEmitter {
         try {
             const response = await this.httpPost(
                 `${this.nluServiceUrl}/api/nlu/intents`,
-                { text: question, sessionId },
+                { message: question, sessionId },
                 { 'X-Session-ID': sessionId }
             );
 
