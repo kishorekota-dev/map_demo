@@ -26,6 +26,8 @@
  *   no assistant clarification turn (a turn whose content asks a
  *   clarifying question).
  *
+ * Input annotations are authored, never authoritative execution evidence.
+ * Empty/malformed input returns an invalid verdict and null score.
  * This is a deterministic lint for transcripts, not a quality judgment:
  * a high score does not prove a good conversation, and a warning does not
  * prove a bad one. Scores are for pilot triage, not for ranking customers.
@@ -40,7 +42,20 @@ function isClarification(turn) {
 }
 
 function evaluateConversation(turns) {
-  const list = Array.isArray(turns) ? turns : [];
+  const limitations = ['Authored mutation, confirmation, intent and citation annotations are not verified against workflow or provider evidence.',
+    'This is a bounded lexical transcript lint, not semantic evaluation, a release gate or proof of servicing completion.'];
+  const validTurn = turn => turn && typeof turn === 'object' && !Array.isArray(turn)
+    && ['customer', 'assistant', 'agent'].includes(turn.role) && typeof turn.content === 'string' && turn.content.trim().length > 0 && turn.content.length <= 5000
+    && (turn.intent === undefined || (typeof turn.intent === 'string' && turn.intent.trim().length > 0 && turn.intent.length <= 128))
+    && ['mutation', 'confirmed', 'transfer'].every(key => turn[key] === undefined || typeof turn[key] === 'boolean')
+    && (turn.citations === undefined || (Array.isArray(turn.citations) && turn.citations.length <= 20 && turn.citations.every(id => typeof id === 'string' && id.trim().length > 0 && id.length <= 200)));
+  if (!Array.isArray(turns) || turns.length === 0 || turns.length > 200 || !turns.every(validTurn)
+    || !turns.some(turn => turn.role === 'customer') || !turns.some(turn => turn.role !== 'customer')) {
+    return { score: null, verdict: 'invalid', turnCount: Array.isArray(turns) ? turns.length : 0,
+      scope: 'annotated_transcript_lint', limitations,
+      checks: [{ id: 'valid_transcript', severity: 'fail', passed: false, detail: 'Provide 1–200 bounded valid turns including a customer and an assistant or agent response.' }] };
+  }
+  const list = turns;
   const checks = [];
   const fail = (id, detail) => checks.push({ id, severity: 'fail', passed: false, detail });
   const warn = (id, detail) => checks.push({ id, severity: 'warning', passed: false, detail });
@@ -52,31 +67,27 @@ function evaluateConversation(turns) {
   else pass('mutation_without_confirmation');
 
   // Transfer without intent.
-  const transferIndex = list.findIndex((t) => t.transfer === true || t.role === 'agent');
-  if (transferIndex !== -1) {
-    const hasIntent = list.slice(0, transferIndex + 1).some((t) => Boolean(t.intent));
-    if (!hasIntent) fail('transfer_without_intent', 'A transfer to a human happened with no intent recorded — the agent starts blind.');
-    else pass('transfer_without_intent');
-  } else {
-    pass('transfer_without_intent');
-  }
+  const blindTransfer = list.some((turn, index) => (turn.transfer === true || turn.role === 'agent')
+    && !list.slice(0, index + 1).some(previous => Boolean(previous.intent)));
+  if (blindTransfer) fail('transfer_without_intent', 'A transfer to a human happened with no prior intent annotation.');
+  else pass('transfer_without_intent');
 
   // Uncited amounts.
-  const uncited = list.find((t) => t.role === 'assistant' && /[$]\s?\d|%\s/.test(t.content || '') && !(Array.isArray(t.citations) && t.citations.length));
+  const uncited = list.find((t) => t.role === 'assistant' && /\$\s*-?\d|\b\d+(?:\.\d+)?\s*%/.test(t.content || '') && !(Array.isArray(t.citations) && t.citations.length));
   if (uncited) warn('uncited_amount', 'An assistant turn mentions a $ amount or percentage with no citations.');
   else pass('uncited_amount');
 
   // Repeated question.
-  const seenCustomerQuestions = new Set();
+  const seenCustomerQuestions = new Map();
   let repeated = false;
-  let answered = false;
-  for (const turn of list) {
-    if (turn.role === 'assistant') answered = true;
-    if (turn.role === 'customer' && answered) {
+  let lastAnswer = -1;
+  for (const [index, turn] of list.entries()) {
+    if (turn.role === 'assistant') lastAnswer = index;
+    if (turn.role === 'customer') {
       const normalized = normalizeText(turn.content);
-      if (normalized && seenCustomerQuestions.has(normalized)) { repeated = true; break; }
+      if (normalized && seenCustomerQuestions.has(normalized) && lastAnswer > seenCustomerQuestions.get(normalized)) { repeated = true; break; }
+      seenCustomerQuestions.set(normalized, index);
     }
-    if (turn.role === 'customer') seenCustomerQuestions.add(normalizeText(turn.content));
   }
   if (repeated) warn('repeated_question', 'The customer repeated a question after an assistant answer.');
   else pass('repeated_question');
@@ -91,7 +102,7 @@ function evaluateConversation(turns) {
 
   const score = Math.max(0, 100 - checks.filter((c) => c.severity === 'fail').length * 25 - checks.filter((c) => c.severity === 'warning').length * 10);
   const verdict = checks.some((c) => c.severity === 'fail') ? 'fail' : checks.some((c) => c.severity === 'warning') ? 'warn' : 'pass';
-  return { score, verdict, turnCount: list.length, checks };
+  return { score, verdict, turnCount: list.length, checks, scope: 'annotated_transcript_lint', limitations };
 }
 
 module.exports = { evaluateConversation };

@@ -53,16 +53,57 @@ Retain `X-Interaction-ID` when retrying the same new request. Do not reuse it fo
 
 ## Live human agent chat
 
-When a session is in live agent mode, `sendMessage` routes human-to-human
-instead of through the AI orchestrator, using the same transcript
-persistence (customer messages via `processMessage`, agent messages via
-`sendResponse` with agentType `human`). Socket events:
-`requestLiveAgent` (customer, joins the queue), `agentAcceptLiveChat`
-(agent principal, assigns and receives the transfer context),
-`endLiveChat` (either side, returns the session to AI). The agent
-dashboard queue sees session + intent only; the transfer context goes to
-the accepting agent only. See `services/liveAgentChat.js` and
-`docs/guides/digital-assistant-pilot-checklist.md`.
+This is a **Socket.IO client pilot capability**. The React customer's REST chat
+has no live-assistance request/composer UI yet; enabling this backend does not
+silently turn REST conversations into a complete live-chat product.
+
+A customer sends `requestLiveAgent {queue?}` for the current owned session. Queue
+names are bounded identifiers; the in-memory FIFO has at most 1,000 entries and
+requests expire after 15 minutes. A session can wait in only one logical queue.
+The queue is a routing aid, not durable dispatch: restart loses queue visibility,
+and the customer must request again. The current request marker and assignment
+persist with the chat session. Expired requests require explicit renewal or
+`endLiveChat`; they do not silently resume AI processing.
+
+`agentAcceptLiveChat {sessionId,agentId?,reason?}` requires a verified agent, a
+current customer request or server escalation, and the matching deployment tenant.
+Only the trusted agent-ui relay may assert another agent's identity. The existing
+agent dashboard's `request` envelope (`assignAgent`, `sendMessage`,
+`transferSession`, `endSession`) uses the same assignment/live-mode state, rather
+than a separate assignment that leaves customer messages routed to AI. Pending
+confirmation or recovery must finish before a new live takeover.
+
+Assignments and live sends serialize by session. Production requires persistent
+chat storage and a PostgreSQL advisory lock; unavailable durable coordination
+fails closed. Claim checks refresh session state under that lock, so competing
+workers cannot both take the same request. **Realtime delivery is still local to
+one chat worker**: route participating customer/agent sockets to that worker. A
+shared Socket.IO adapter and multi-worker delivery qualification are separate
+work. Durable assignment does not establish cross-worker realtime routing.
+
+Waiting/assigned socket customer messages use `chatService.processMessage`, and
+human replies use `sendResponse` with agentType `human`. Incoming customer text
+uses the existing `newMessage` event consumed by agent-ui. The stored-message
+acknowledgment identifies the actual transcript record; persistence failure
+produces no success acknowledgment. Statistics failure after a stored message is
+reported separately. Customer and agent messages bypass AI while waiting/assigned.
+
+`endLiveChat {reason?}` lets the owner cancel waiting or end a live conversation;
+the current assigned agent can end an active conversation. End/transfer removes
+revoked session rooms, and each delivery checks current ownership/assignment and
+tenant again. JWT expiry revokes rooms and disconnects the socket; credential
+login uses the bank-issued access JWT rather than caller-provided identity.
+
+Agent queue broadcasts contain session/queue/time and bounded intent metadata,
+without transcript or raw escalation errors. Only the accepting authorized agent
+receives the last ten bounded messages as transfer context. Common credential
+patterns and long digit runs are redacted; this is not comprehensive PII/secret
+classification. A customer can still include sensitive text in a conversation,
+so assigned-agent transcript access needs the deployment's privacy controls.
+
+See [live chat implementation](services/liveAgentChat.js),
+[protocol authorization tests](services/__tests__/socketHandler.liveAgent.test.js)
+and the [pilot checklist](../../docs/guides/digital-assistant-pilot-checklist.md).
 
 ## Socket.IO
 

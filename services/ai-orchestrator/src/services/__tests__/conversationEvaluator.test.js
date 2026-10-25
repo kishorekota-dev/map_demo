@@ -41,4 +41,17 @@ describe('conversation evaluation', () => {
     expect(result.verdict).toBe('warn');
     expect(result.checks.find((c) => c.id === 'repeated_question').passed).toBe(false);
   });
+  test.each([null, [], [null], [{ role: 'assistant', content: 'Hello' }], [{ role: 'customer', content: 'Hi' }, { role: 'assistant', content: 'Done', confirmed: 'true' }]])('missing or malformed evidence cannot receive a passing score', turns => {
+    const result = evaluateConversation(turns); expect(result.verdict).toBe('invalid'); expect(result.score).toBeNull();
+  });
+  test('uncited percentages at the end of a sentence warn and annotations are explicitly unverified', () => {
+    const result = evaluateConversation([{ role: 'customer', content: 'What is my rate?' }, { role: 'assistant', content: 'The rate is 3.5%' }]);
+    expect(result.checks.find(check => check.id === 'uncited_amount').passed).toBe(false);
+    expect(result.scope).toBe('annotated_transcript_lint'); expect(result.limitations[0]).toMatch(/not verified/);
+  });
+  test('an opening greeting is not an answer to a later repeated question', () => {
+    const result = evaluateConversation([{ role: 'assistant', content: 'Welcome' }, { role: 'customer', content: 'My balance?' }, { role: 'customer', content: 'My balance?' }]);
+    expect(result.checks.find(check => check.id === 'repeated_question').passed).toBe(true);
+  });
+
 });

@@ -15,21 +15,34 @@ These are current entry points. Files labeled Historical retain earlier design/t
 
 ## IVR and conversation evaluation
 
-- **IVR** (`src/ivr/`, routes under `/api/ivr`): a provider-neutral
-  telephony adapter plus a Twilio-compatible adapter (HMAC-SHA1 webhook
-  signature validation, TwiML, speech/DTMF gather with barge-in) and a
-  state machine that blocks account actions until caller verification
-  succeeds and carries transfer context to a human agent. Webhooks are
-  rejected unless `IVR_ENABLED=true` and the provider secret is set; the
-  simulator is disabled in production. No provider is configured by
-  default — a Twilio number and a pilot call are still required.
-- **Conversation evaluation** (`src/services/conversationEvaluator.js`):
-  a deterministic transcript lint (mutation without confirmation,
-  transfer without intent, uncited amounts, repeated questions, intent
-  drift) for pilot triage, not a quality ranking.
+- **Standalone IVR pilot** (`src/ivr/`, `/api/ivr`): a development-only
+  Twilio signature/TwiML and simulator prototype. Production rejects both
+  routes even when flags are enabled: its sessions, caller verification and
+  retries are not durable. Production voice uses the existing authenticated,
+  signed [operations voice contract](../../docs/guides/servicing-operations.md).
+  These are private orchestrator routes; the gateway does not proxy `/api/ivr`.
+  A local pilot requires `IVR_ENABLED=true`, `TWILIO_AUTH_TOKEN`, an HTTPS
+  `IVR_PUBLIC_URL`, and an E.164 `IVR_TRANSFER_TARGET` for actual human transfer.
+  The injected verifier must return boolean `true`; the default denies all codes.
+  Verification is capped at three attempts. Barge-in never bypasses verification.
+  Calls are bounded to 100 process-local sessions, five minutes, 100 turns and
+  50 transcript entries; terminated calls retain a bounded tombstone until expiry.
+  Events for one call cannot overlap; simulator and Twilio state are separate.
+  A missing session cannot resume midway after restart. No customer JWT, banking
+  tool, published servicing release or authoritative completion record is created.
+  Confirmation connects to a configured agent number or explicitly ends with an
+  unavailable message. The simulator returns bounded transfer context; TwiML Dial
+  alone does not deliver that context to a contact-center case/agent workspace.
+  No provider is configured or called by default. Gather's empty-input callback
+  follows [Twilio's documented behavior](https://www.twilio.com/docs/voice/twiml/gather).
+- **Conversation evaluation** (`src/services/conversationEvaluator.js`): a pure
+  bounded lint for 1–200 annotated transcript turns, not a semantic judge, public
+  API, measured workflow run or release gate. Empty/malformed/no-response input
+  returns `verdict: invalid` and a null score. Authored mutation, confirmation,
+  intent and citation annotations are not checked against execution evidence.
 
-See `docs/guides/digital-assistant-pilot-checklist.md` for the pass
-criteria for each phase.
+The [pilot checklist](../../docs/guides/digital-assistant-pilot-checklist.md)
+requires live-provider acceptance; it does not certify these prototypes.
 
 ## Execution contract
 

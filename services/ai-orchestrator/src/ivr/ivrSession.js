@@ -8,21 +8,20 @@
  *    only allowed paths are: verify (DTMF PIN / account digits, checked by
  *    an injected verifier the operator supplies), transfer to a human, or
  *    hang up. A transcript or caller ID alone never verifies a caller.
- * 2. Interruption is a first-class event, not an error. If the caller
- *    speaks or presses a key while a prompt is playing, the machine moves
- *    to gathering with that input — it does not replay the prompt and
- *    does not discard the input.
- * 3. Transfer carries context, not just a phone call: intent, verification
- *    status, and the call transcript so far, so the agent does not ask
- *    the customer to repeat everything.
- * 4. Uncertain outcomes are explicit. A call that ends mid-flow is
- *    recorded as ended with reason + transcript, not as completed.
+ * 2. Interruption passes input through the current verification or
+ *    confirmation state. It never grants verification or confirmation.
+ * 3. Transfer returns bounded context to its caller. The standalone TwiML
+ *    route only dials a number; delivering context to a real agent remains
+ *    the durable provider adapter's responsibility.
+ * 4. A call ending mid-flow is marked ended in this development process,
+ *    never represented as a completed account action or durable record.
  *
  * The verifier is injected ({ verify(callerId, digits) -> Promise<boolean> })
  * because this repo cannot supply an enterprise's identity check. The
  * default verifier denies everything, which is the safe failure mode.
  */
 
+const TYPES = ['call.started', 'call.ended', 'speech', 'dtmf', 'interrupted', 'transfer.requested'];
 const STATES = ['started', 'verifying', 'gathering', 'confirming', 'transferring', 'ended'];
 
 class IvrSession {
@@ -32,16 +31,19 @@ class IvrSession {
     this.callerId = callerId;
     this.state = 'started';
     this.verified = false;
-    this.transcript = []; // [{ type, text, at }] — caller utterances only, no secrets
+    this.transcript = []; // Bounded post-verification utterances; verification speech/digits omitted.
     this.intent = null;
     this.transferTo = null;
     this.endedReason = null;
     this.verifier = verifier || { verify: async () => false };
+    this.verificationAttempts = 0;
+    this.turns = 0;
   }
 
   _record(event) {
-    if (event.transcript) this.transcript.push({ type: 'speech', text: String(event.transcript).slice(0, 2000), at: new Date().toISOString() });
-    if (event.digits) this.transcript.push({ type: 'dtmf', text: `digits:${String(event.digits).length} digits`, at: new Date().toISOString() });
+    if (event.transcript && this.verified) this.transcript.push({ type: 'speech', text: String(event.transcript).slice(0, 2000), at: new Date().toISOString() });
+    if (event.digits && this.verified) this.transcript.push({ type: 'dtmf', text: `digits:${String(event.digits).length} digits`, at: new Date().toISOString() });
+    this.transcript = this.transcript.slice(-50);
   }
 
   /**
@@ -53,13 +55,18 @@ class IvrSession {
    * { action: 'hangup' }
    */
   async handle(event) {
+    if (!event || !TYPES.includes(event.type) || (event.callId && event.callId !== this.callId)
+      || (event.transcript != null && (typeof event.transcript !== 'string' || event.transcript.length > 2000))
+      || (event.digits != null && (typeof event.digits !== 'string' || !/^[0-9*#]{0,32}$/.test(event.digits)))) throw Object.assign(new Error('Invalid call event'), { status: 400 });
     if (this.state === 'ended') return { response: { action: 'hangup' }, state: this.state };
     if (event.type === 'call.ended') {
       this.state = 'ended';
       this.endedReason = event.status || 'ended';
       return { response: { action: 'hangup' }, state: this.state };
     }
-    if (event.type === 'call.started') {
+    if (++this.turns > 100) return this._end('call_limit', 'This call has reached its limit. Please contact customer service.');
+    if (this.state === 'transferring') return { response: { action: 'hangup' }, state: this.state };
+    if (event.type === 'call.started' && this.state === 'started') {
       this.state = 'verifying';
       return {
         response: {
@@ -71,29 +78,27 @@ class IvrSession {
         state: this.state,
       };
     }
+    if (event.type === 'transfer.requested') return this._transfer('caller requested an agent');
+    if (event.type === 'call.started' && this.state !== 'started') return this._prompt();
     if (event.type === 'interrupted') {
-      // Caller barged in during a prompt: treat the interruption as input.
-      this.state = 'gathering';
-      return {
-        response: {
-          action: 'gather',
-          say: 'Go ahead, I am listening.',
-          timeoutSeconds: 15,
-          maxDigits: 1,
-        },
-        state: this.state,
-      };
+      // Barge-in carries input into the current security/confirmation state.
+      // It must never promote an unverified caller into an account path.
+      if (event.transcript || event.digits) event = { ...event, type: event.digits ? 'dtmf' : 'speech' };
+      else if (this.verified && this.state === 'gathering') return { response: { action: 'gather', say: 'Go ahead, I am listening.', timeoutSeconds: 15, maxDigits: 1 }, state: this.state };
     }
+    if (!this.verified && this.state !== 'verifying') this.state = 'verifying';
     if (this.state === 'verifying') {
       const transcript = (event.transcript || '').toLowerCase();
-      if (transcript.includes('agent') || transcript.includes('human') || event.digits === '0') {
+      if (/\b(agent|human)\b/.test(transcript) || event.digits === '0') {
         return this._transfer('caller requested an agent before verification');
       }
       if (event.digits) {
+        if (this.verificationAttempts >= 3) return this._transfer('verification attempt limit');
         // Digits are passed to the operator verifier, never compared here
         // against a stored value and never logged in full (see _record).
+        this.verificationAttempts++;
         const ok = await this.verifier.verify(this.callerId, event.digits);
-        if (ok) {
+        if (ok === true) {
           this.verified = true;
           this.state = 'gathering';
           return {
@@ -106,6 +111,7 @@ class IvrSession {
             state: this.state,
           };
         }
+        if (this.verificationAttempts >= 3) return this._transfer('verification attempt limit');
         return {
           response: {
             action: 'gather',
@@ -133,7 +139,7 @@ class IvrSession {
     if (this.state === 'gathering') {
       this._record(event);
       const text = (event.transcript || '').toLowerCase();
-      if (text.includes('agent') || text.includes('human') || event.digits === '0') {
+      if (/\b(agent|human)\b/.test(text) || event.digits === '0') {
         return this._transfer('caller requested an agent');
       }
       if (text.includes('balance')) this.intent = 'balance_inquiry';
@@ -166,21 +172,16 @@ class IvrSession {
       };
     }
     if (this.state === 'confirming') {
+      if (!event.transcript && !event.digits) return this._prompt();
       this._record(event);
       const text = (event.transcript || '').toLowerCase();
-      if (text.includes('agent') || text.includes('human') || event.digits === '0') {
+      if (/\b(agent|human)\b/.test(text) || event.digits === '0') {
         return this._transfer('caller requested an agent at confirmation');
       }
-      if (text.includes('yes') || event.digits === '1') {
-        // Confirmed, verified intent: the caller is handed to the
-        // orchestrator path via a transfer record, not executed here.
-        return {
-          response: {
-            action: 'say',
-            say: `Confirmed. Your request for ${this.intent.replace(/_/g, ' ')} is being processed. Please hold while I connect you to complete it.`,
-          },
-          state: this.state,
-        };
+      if (/^(yes|confirm|correct|continue)[.!\s]*$/.test(text.trim()) || event.digits === '1') {
+        // No customer JWT or durable action contract is available here.
+        // An actual configured Dial is a human transfer, never fulfillment.
+        return this._transfer('verified request confirmed; agent fulfillment required');
       }
       this.state = 'gathering';
       this.intent = null;
@@ -197,7 +198,20 @@ class IvrSession {
     return { response: { action: 'hangup' }, state: this.state };
   }
 
+  _prompt() {
+    const verifying = !this.verified;
+    return { response: { action: 'gather', say: verifying ? 'Please enter your verification code, or say agent.'
+      : this.state === 'confirming' ? `You asked about ${this.intent.replace(/_/g, ' ')}. Say yes to connect with an agent, or no to choose another request.`
+        : 'How can I help? You can say balance, recent transactions, or agent.', timeoutSeconds: 15, maxDigits: verifying ? 6 : 1 }, state: this.state };
+  }
+
+  _end(reason, say) {
+    this.state = 'ended'; this.endedReason = reason;
+    return { response: { action: 'hangup', say }, state: this.state };
+  }
+
   _transfer(reason) {
+    if (!this.transferTo) return this._end('transfer_unavailable', 'An agent connection is unavailable. No account action was performed. Please contact customer service.');
     this.state = 'transferring';
     return {
       response: {
@@ -219,6 +233,7 @@ class IvrSession {
 
   /** Operator configuration: where transfers go (a queue/agent number). */
   setTransferTarget(target) {
+    if (target && (typeof target !== 'string' || !/^\+[1-9][0-9]{6,14}$/.test(target))) throw Object.assign(new Error('Transfer target must be an E.164 phone number'), { status: 503 });
     this.transferTo = target || null;
     return this;
   }

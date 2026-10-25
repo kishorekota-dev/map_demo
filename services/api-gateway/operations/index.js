@@ -9,7 +9,8 @@ const { receiveWebhook } = require("./webhooks");
 const { retainOperations } = require("./maintenance");
 const { RolloutMonitor } = require("./rollout-monitor");
 const { mountUsageRoutes } = require("./usage");
-const { computeOutcomeMetrics } = require("./outcomeAnalytics");
+const { computeOutcomeMetrics, OUTCOME_EVENT_LIMIT } = require("./outcomeAnalytics");
+const { validateKnowledgeBatch } = require("./knowledgeValidation");
 const { mountAgentRoutes } = require("./agent-workspace");
 const { identifier, text } = require("../control-plane/config");
 
@@ -222,6 +223,8 @@ function createOperationsRouter(options = {}) {
           502,
           "Provider must return 1–50 documents; synchronize larger collections in batches.",
         );
+      const validation = validateKnowledgeBatch(result.data.documents);
+      if (!validation.valid) throw new OperationsError(422, "Knowledge connector returned invalid or sensitive content. Review source documents before importing.");
       const gateway =
         env.CONTROL_PLANE_INTERNAL_URL ||
         `http://127.0.0.1:${env.PORT || 3001}/api/control-plane`;
@@ -838,15 +841,20 @@ function createOperationsRouter(options = {}) {
     authorize("canView"),
     route(async (req, res) => {
       const days = req.query.days === undefined ? 30 : Number(req.query.days);
-      if (!Number.isInteger(days) || days < 1 || days > 365) {
+      if ((req.query.days !== undefined && typeof req.query.days !== "string") || !Number.isInteger(days) || days < 1 || days > 365) {
         throw new OperationsError(400, "days must be an integer from 1 to 365.");
       }
+      const windowEnd = new Date().toISOString();
+      const windowStart = new Date(Date.parse(windowEnd) - days * 86400000).toISOString();
       const rows = await store.query(
-        "SELECT document->>'sessionId' AS session_id,document->>'actorHash' AS actor_hash,document->>'channel' AS channel,document->>'intent' AS intent,document->>'outcome' AS outcome,document->>'stage' AS stage,document->>'type' AS type,document->>'kind' AS kind,created_at FROM servicing_operations_events WHERE tenant_id=$1 AND document->>'type' IN ('runtime.execution','case.created') AND created_at>=NOW()-($2::int*INTERVAL '1 day')",
-        [store.tenantId, days],
+        "SELECT seq,document->>'sessionId' AS session_id,document->>'interactionId' AS interaction_id,document->>'actorHash' AS actor_hash,document->>'channel' AS channel,document->>'intent' AS intent,document->>'outcome' AS outcome,document->>'stage' AS stage,document->>'type' AS type,document->>'kind' AS kind,created_at FROM servicing_operations_events WHERE tenant_id=$1 AND (document->>'type' IN ('case.created','live.agent.started','live.agent.transferred') OR (document->>'type'='runtime.execution' AND document->>'stage'='conversation')) AND created_at>=$2::timestamptz AND created_at<=$3::timestamptz ORDER BY created_at,seq LIMIT $4",
+        [store.tenantId, windowStart, windowEnd, OUTCOME_EVENT_LIMIT + 1],
       );
+      if (rows.rows.length > OUTCOME_EVENT_LIMIT) throw new OperationsError(422, "Outcome window exceeds 50000 events. Choose fewer days; partial metrics are not reported.");
       const events = rows.rows.map((r) => ({
         sessionId: r.session_id,
+        interactionId: r.interaction_id,
+        sequence: Number(r.seq),
         actorHash: r.actor_hash,
         channel: r.channel,
         intent: r.intent,
@@ -856,7 +864,7 @@ function createOperationsRouter(options = {}) {
         kind: r.kind,
         createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
       }));
-      res.json({ windowDays: days, ...computeOutcomeMetrics(events) });
+      res.json({ windowDays: days, windowStart, eventCount: events.length, ...computeOutcomeMetrics(events, { windowEnd }) });
     }),
   );
   router.use((error, _req, res, _next) => {

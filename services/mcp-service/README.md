@@ -52,22 +52,18 @@ Supply the servicing-service header during the authenticated upgrade; query-stri
 
 ## Generic backend adapters
 
-Beside the banking tools, the service hosts a generic backend integration
-framework for a company's own systems (CRM, ticketing, core, billing).
-Adapters are declared in a server-side config file (`ADAPTERS_CONFIG_PATH`),
-never registered through an API; credentials come only from environment
-variables; mutating tools require an idempotencyKey, forward it as
-`Idempotency-Key`, and return an explicit `uncertain` outcome (with a
-reconcile endpoint) instead of a blind retry when a response is lost. See
-[the backend integration framework guide](../../docs/guides/backend-integration-framework.md)
-and `adapters.example.json` at this service's root.
+The private `/api/adapters` administrative API loads server-owned declarations from
+`ADAPTERS_CONFIG_PATH`. It always requires a strong `X-Servicing-Service-Token`,
+including development, and applies bounded schema validation and pinned HTTPS
+egress. Generic tools are not added to the existing MCP protocol/tool catalog or
+governed customer workflow automatically.
 
-## Run and verify
+Production executes GET tools only. Mutations require an explicit
+`ADAPTER_PILOT_MUTATIONS_ENABLED=true` outside production; production always denies
+them until customer authorization, confirmation and durable effect-ledger contracts
+are integrated. Pilot replay is argument-bound and concurrent-safe within one
+process, with explicit uncertainty; it does not survive restart or span replicas.
 
-```bash
-# Repository root, after environment/dependency configuration
-npm run dev:mcp
-npm test -w services/mcp-service -- --runInBand
-```
-
-Use Node 22 and the supported [root Compose deployment](../../docker/docker-compose-full-stack.yml). Configure `MCP_SERVICE_PORT`, `BANKING_SERVICE_URL`, `API_TIMEOUT`, internal service authentication, and network access. `GET /health` does not verify a real bank integration or financial recovery. Tool-contract tests are evidence of argument/handler compatibility, not production certification; no financial mutation is needed for basic discovery/health verification.
+See [the adapter contract and operating limits](../../docs/guides/backend-integration-framework.md)
+and [fictional example](adapters.example.json). No credential values belong in
+adapter declarations, browser configuration or request bodies.

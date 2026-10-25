@@ -16,35 +16,44 @@
  * path a request handler can write to.
  */
 
-const fs = require('fs');
-const logger = require('../utils/logger');
+const fs = require("fs");
+const logger = require("../utils/logger");
 
 function loadAdaptersFromConfig(registryInstance, configPath) {
   if (!configPath) {
-    logger.info('No ADAPTERS_CONFIG_PATH set; no generic backend adapters registered');
+    logger.info(
+      "No ADAPTERS_CONFIG_PATH set; no generic backend adapters registered",
+    );
     return { registered: [], errors: [] };
   }
   let raw;
   try {
-    raw = fs.readFileSync(configPath, 'utf8');
+    raw = fs.readFileSync(configPath, "utf8");
   } catch (error) {
-    throw new Error(`Failed to read adapters config at ${configPath}: ${error.message}`);
+    throw new Error(
+      `Failed to read adapters config at ${configPath}: ${error.message}`,
+    );
   }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`Adapters config at ${configPath} is not valid JSON: ${error.message}`);
+    throw new Error(`Adapters config at ${configPath} is not valid JSON`);
   }
   if (!parsed || !Array.isArray(parsed.adapters)) {
-    throw new Error(`Adapters config at ${configPath} must be an object with an "adapters" array`);
+    throw new Error(
+      `Adapters config at ${configPath} must be an object with an "adapters" array`,
+    );
   }
   const registered = [];
   for (const definition of parsed.adapters) {
     const sanitized = registryInstance.register(definition);
     registered.push(sanitized.id);
   }
-  logger.info('Generic backend adapters loaded from config', { configPath, registered });
+  logger.info("Generic backend adapters loaded from config", {
+    configPath,
+    registered,
+  });
   return { registered, errors: [] };
 }
 

@@ -57,6 +57,7 @@ class MCPService {
     this.app.use('/api', limiter);
 
     // Request parsing
+    this.app.use('/api/adapters', adapterApiRoutes.adapterServiceAuth(), adapterApiRoutes.requireJsonBody, express.json({ limit: '64kb' }));
     this.app.use(express.json({ limit: '50mb' })); // Larger limit for tool data
     this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

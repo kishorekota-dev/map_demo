@@ -34,6 +34,14 @@ jobs:
       - name: Install dependencies
         working-directory: services/${{ matrix.service }}
         run: npm ci --workspaces=false --no-audit --no-fund
+      - name: Install sibling dependencies used by contract tests
+        if: matrix.service == 'ai-orchestrator' || matrix.service == 'api-gateway'
+        run: |
+          if [ "${{ matrix.service }}" = "ai-orchestrator" ]; then
+            npm ci --prefix services/mcp-service --workspaces=false --no-audit --no-fund
+          else
+            npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
+          fi
       - name: Audit production dependencies
         working-directory: services/${{ matrix.service }}
         run: npm audit --omit=dev --audit-level=high
@@ -86,17 +94,18 @@ jobs:
       - name: Install gateway dependencies
         working-directory: services/api-gateway
         run: npm ci --workspaces=false --no-audit --no-fund
+      - name: Install runtime and cross-service contract dependencies
+        run: |
+          npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
+          npm ci --prefix services/mcp-service --workspaces=false --no-audit --no-fund
+          npm ci --prefix services/chat-backend --workspaces=false --no-audit --no-fund
+          npm ci --prefix services/banking-service --workspaces=false --no-audit --no-fund
       - name: Verify persistent configuration and replica isolation
         working-directory: services/api-gateway
         env:
           TEST_CONTROL_PLANE_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
           TEST_OPERATIONS_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
         run: npx jest --ci --runInBand control-plane/__tests__ operations/__tests__ platform/__tests__ quality/__tests__
-      - name: Install runtime dependencies
-        run: |
-          npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
-          npm ci --prefix services/chat-backend --workspaces=false --no-audit --no-fund
-          npm ci --prefix services/banking-service --workspaces=false --no-audit --no-fund
       - name: Verify distributed runtime and channel recovery
         env:
           RUNTIME_TEST_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test

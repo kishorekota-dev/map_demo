@@ -1,74 +1,91 @@
-# Digital Assistant pilot checklist
+# Digital Assistant pilot qualification checklist
 
-How to prove, phase by phase, that map_demo is actually best-in-class
-for a company — not just that the code exists. Each phase has a pass
-criterion that needs a real backend, a real provider, or real customers.
-Code alone does not pass a phase.
+The recent changes add an internal backend-adapter API, a Socket.IO live-chat
+pilot, a standalone IVR simulator/TwiML pilot, observed outcome metrics and a
+conversation linter. The review fixed defects in those additions. None is a
+certificate of customer readiness or market leadership. This checklist separates
+implemented mechanics from the live acceptance evidence still required.
 
-## Phase 1 — Generic backend integration (done, code only)
+## Backend adapter pilot
 
-- [ ] One real backend (CRM or ticketing) registered via
-      `ADAPTERS_CONFIG_PATH` with env-only credentials.
-- [ ] A mutating tool executed twice with the same `idempotencyKey`
-      produces one backend record (replay, not duplicate).
-- [ ] A forced timeout on a mutating call returns `uncertain`, and
-      `POST /api/adapters/:adapterId/reconcile` resolves it without a
-      blind retry.
-- Pass: all three, against the real backend, with the backend's own
-  record counts as evidence.
+The [adapter guide](backend-integration-framework.md) defines the exact supported
+contract and restrictions. The API is private and service-authenticated; it is
+not registered in the governed customer workflow/MCP tool catalog.
 
-## Phase 2 — Live agent chat (done, code only)
+- [ ] Register one real backend using a protected `ADAPTERS_CONFIG_PATH` file,
+      explicit host policy and server-owned credentials. Verify read authorization
+      for the intended records; a service credential is not customer authorization.
+- [ ] In an isolated development/test pilot, explicitly enable pilot mutations.
+      Repeating the same key/arguments must produce one provider record; changing
+      the arguments must be rejected. Verify provider-side dedupe across restart.
+- [ ] Force an ambiguous timeout, 5xx and asynchronous 202 response. Preserve
+      `uncertain` status and reconcile using authoritative provider evidence.
+- Production standalone mutations remain blocked. Connect mutations to customer
+  authorization, confirmation and the durable effect ledger before changing that
+  restriction. The in-process cache is not shared durable dedupe.
 
-- [ ] A customer requests a live agent from a digital session, an agent
-      accepts, and the two exchange at least 3 messages each in-session
-      (Socket.IO events `requestLiveAgent`, `agentAcceptLiveChat`,
-      `sendMessage` in live mode, `endLiveChat`).
-- [ ] The accepting agent sees intent + recent transcript (transfer
-      context); the agent dashboard queue sees session + intent only.
-- [ ] After `endLiveChat`, the same session continues with the AI
-      orchestrator (no new session, transcript intact).
-- [ ] A non-assigned agent and a non-owner customer are both denied
-      live messages.
-- Pass: all four, with a transcript export as evidence.
+## Live agent chat pilot
 
-## Phase 3 — IVR (done, code only — no live telephony yet)
+- [ ] Use supported Socket.IO customer events and the existing agent dashboard
+      assignment protocol to request, accept and exchange messages in one owned
+      session. The current React customer page does not expose the new live-chat
+      request protocol; this is not a completed end-to-end React feature.
+- [ ] Require durable chat persistence for production assignment. Verify two
+      simultaneous agents have one claim winner; an unrequested session, pending
+      financial workflow, expired token and non-owner/non-assigned actor are denied.
+- [ ] Verify transfer context is bounded/redacted and queued customers do not
+      silently continue into the AI workflow. End live handling explicitly and
+      verify the same transcript/session continues as intended.
+- [ ] Qualify room delivery, reconnect, assignment revocation, supervisor actions
+      and multiple-server routing with the actual contact-center topology.
+- Queue visibility and socket routing still have process-local boundaries. Database
+  assignment coordination does not establish distributed Socket.IO delivery.
 
-- [ ] A Twilio number points at the public `/api/ivr/twilio/voice`
-      webhook, with `IVR_ENABLED=true`, `TWILIO_AUTH_TOKEN` and
-      `IVR_PUBLIC_URL` set. A forged signature is rejected (403).
-- [ ] A complete authenticated voice journey: verification, intent
-      gathering, confirmation, and transfer to a live agent queue,
-      with interruption (barge-in) exercised mid-prompt.
-- [ ] A caller who fails verification cannot reach an account action
-      and can still reach an agent.
-- [ ] Real ASR/TTS quality, DTMF reliability, and call latency are
-      measured (the repo's 120s/400s chat budgets are NOT a voice SLA).
-- Pass: all four, with call recordings / provider logs as evidence.
-  Until then, IVR is "adapter implemented, provider unqualified".
+## IVR pilot
 
-## Phase 4 — Best-in-class proof (done, code only)
+The new standalone `/api/ivr` adapter is development/test-only. Production returns
+unavailable; use the existing durable provider-neutral operations voice contract
+for a production integration. The gateway does not publish this standalone prefix.
 
-- [ ] `GET /analytics/outcomes` (30 days) shows completion, FCR
-      (proxy, 7-day no-return + no case), containment, repeat contact,
-      and channel breakdown — with the limitations in the response
-      read alongside the numbers.
-- [ ] Conversation evaluation (`conversationEvaluator`) is run over a
-      pilot transcript sample: zero `mutation_without_confirmation`
-      failures, zero `transfer_without_intent` failures.
-- [ ] Knowledge imports pass `validateKnowledgeDocument` (no PII, no
-      stubs, no duplicates, source + version present) before they
-      become answer sources.
-- [ ] Cost per completed interaction is priced (cost model configured;
-      otherwise `/costs` correctly reports unpriced, not zero).
-- Pass: all four, with the analytics output and evaluation report as
-  evidence.
+- [ ] Test Twilio signature verification with an exact local/tunnel public URL;
+      forged signatures, malformed callbacks and overlapping turns must fail.
+- [ ] Verify interruption cannot bypass caller verification, bounded attempts/TTL,
+      DTMF input, explicit confirmation, real provider transfer and call cleanup.
+- [ ] Establish actual customer identity independently. Pilot verification is not
+      a banking access token. This adapter does not execute account actions, and
+      generated TwiML does not deliver the collected context to an agent system.
+- [ ] Qualify real ASR/TTS, barge-in, DTMF timing, caller identity, queue mapping,
+      transfer context and voice latency against the production durable adapter.
+- Chat timeout budgets and fixture TwiML tests are not voice SLA evidence.
 
-## Still explicitly not proven by this repo
+## Outcome and conversation evidence
 
-- Live enterprise identity (IdP) and live CRM sandbox qualification.
-- Real model qualification on production hardware (tests use fixtures).
-- Load, backup, and RPO/RTO evidence.
-- Any vendor's production certification.
+- [ ] Read `/api/operations/analytics/outcomes?days=30` with an authorized operator.
+      Check the observation cutoff, event count, distinct interaction/session
+      counts and mature/unknown/recent FCR denominators alongside the rates.
+- FCR is an observed seven-day no-return/no-case proxy. Recent and anonymous
+  completions are excluded. A recorded successful runtime outcome is not independent
+  customer or provider proof. Windows above 50,000 relevant events return 422 rather
+  than a misleading partial aggregate; choose fewer days.
+- Live agent events are not comprehensively forwarded into operations. Consequently
+  `containmentRate` is null. `observedAutomatedCompletionRate` is a separately
+  labeled proxy that may miss unrecorded human handling.
+- [ ] Use `conversationEvaluator` only to lint reviewed, annotated transcripts.
+      It validates input and applies deterministic rules; mutation/confirmation
+      annotations are supplied by the caller and do not prove actual authorization.
+      Correlate financial action evidence and confirmations independently.
+- [ ] Verify connector knowledge sync rejects a whole invalid/sensitive batch
+      before importing drafts. Internal versions are assigned by the control plane;
+      supplied versions are optional labels. Pattern checks are incomplete and can
+      flag legitimate public contact details, which need explicit human review.
+      Manual knowledge authoring retains its existing publication/ACL controls.
+- [ ] Configure actual prices for `/api/operations/costs`; unpriced usage must
+      remain unknown. Measure business completion and cost in the same pilot.
 
-These were already listed in `docs/guides/platform-gap-assessment.md`
-and remain open. Do not mark them complete on the basis of this work.
+## Still required in the target deployment
+
+Live enterprise identity, CRM/provider sandbox and remote Qwen qualification;
+representative load, realtime routing, backup/restore and RPO/RTO; authoritative
+customer outcome evidence. See the [platform assessment](platform-gap-assessment.md)
+and [recent-change review](recent-changes-review.md). No checklist item becomes
+complete solely because a unit or integration fixture passes.

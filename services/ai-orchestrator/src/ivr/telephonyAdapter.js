@@ -16,6 +16,7 @@
  * - a simulator adapter (JSON in / JSON out, no telephony provider) so
  *   the IVR state machine can be exercised locally without a phone number.
  *
+ * Development-only prototype, rejected in production.
  * What this is NOT: a live telephony qualification. No provider is
  * configured by default, no call is placed, and no account action is
  * allowed until caller verification succeeds (see ivrSession.js). A
@@ -49,7 +50,8 @@ function escapeXml(value) {
  * string, as configured by the operator — not the internal host.
  */
 function twilioSignatureValid({ url, params, signature, authToken }) {
-  if (!url || !signature || !authToken) return false;
+  if (typeof url !== 'string' || typeof signature !== 'string' || typeof authToken !== 'string' || !url || !signature || !authToken
+    || !params || typeof params !== 'object' || Array.isArray(params) || Object.values(params).some(value => typeof value !== 'string')) return false;
   const data = url + Object.keys(params || {}).sort().map((key) => key + params[key]).join('');
   const expected = createHmac('sha1', authToken).update(data).digest('base64');
   const actual = Buffer.from(signature);
@@ -61,7 +63,7 @@ function twilioSignatureValid({ url, params, signature, authToken }) {
 function parseTwilioEvent(body) {
   const callSid = body.CallSid || body.CallSID || null;
   const from = body.From || null;
-  if (body.CallStatus === 'completed' || body.CallStatus === 'failed' || body.CallStatus === 'busy' || body.CallStatus === 'no-answer') {
+  if (body.CallStatus === 'completed' || body.CallStatus === 'failed' || body.CallStatus === 'busy' || body.CallStatus === 'no-answer' || body.CallStatus === 'canceled') {
     return { type: 'call.ended', callId: callSid, callerId: from, status: body.CallStatus, raw: body };
   }
   // Gather results arrive as SpeechResult and/or Digits on the same webhook.
@@ -86,7 +88,8 @@ function parseTwilioEvent(body) {
  */
 function renderTwiml(response) {
   if (!response || response.action === 'hangup') {
-    return `<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`;
+    const say = response?.say ? `<Say>${escapeXml(response.say)}</Say>` : '';
+    return `<?xml version="1.0" encoding="UTF-8"?><Response>${say}<Hangup/></Response>`;
   }
   if (response.action === 'transfer') {
     const target = escapeXml(response.transferTo || '');
@@ -97,9 +100,10 @@ function renderTwiml(response) {
   }
   if (response.action === 'gather') {
     const say = response.say ? `<Say>${escapeXml(response.say)}</Say>` : '';
-    const timeout = Number.isInteger(response.timeoutSeconds) ? response.timeoutSeconds : 10;
+    const timeout = Number.isInteger(response.timeoutSeconds) && response.timeoutSeconds >= 1 && response.timeoutSeconds <= 60 ? response.timeoutSeconds : 10;
+    const digits = Number.isInteger(response.maxDigits) && response.maxDigits >= 1 && response.maxDigits <= 32 ? response.maxDigits : 1;
     const action = response.actionUrl ? ` action="${escapeXml(response.actionUrl)}"` : '';
-    return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" timeout="${timeout}" speechTimeout="auto" numDigits="${response.maxDigits || 1}"${action}>${say}</Gather><Say>${escapeXml(response.fallbackSay || 'I did not catch that. Please try again.')}</Say></Response>`;
+    return `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech dtmf" actionOnEmptyResult="true" method="POST" timeout="${timeout}" speechTimeout="auto" numDigits="${digits}"${action}>${say}</Gather><Say>${escapeXml(response.fallbackSay || 'I did not catch that. Please try again.')}</Say></Response>`;
   }
   // say only
   return `<?xml version="1.0" encoding="UTF-8"?><Response><Say>${escapeXml(response.say || '')}</Say></Response>`;

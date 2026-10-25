@@ -330,3 +330,30 @@ fresh access token and never authorizes an operator to impersonate the customer.
 See [checkpoint/recovery contract](../../services/ai-orchestrator/WHY-CHECKPOINTER-IS-REQUIRED.md).
 Database restore, realtime socket failover and retention remain separate operating
 procedures to qualify in the target deployment.
+
+## Observed outcome reporting
+
+`GET /api/operations/analytics/outcomes?days=30` requires the existing operator
+viewing permission and restricts rows to the deployment tenant. It counts distinct
+session/interaction pairs, using the latest recorded conversation outcome; legacy
+rows without an interaction ID are explicitly counted as session buckets.
+
+First-contact resolution is a seven-day no-return/no-case proxy, with recent
+completions and unknown customer identity excluded from its denominator. Inspect
+`firstContactEligibleCompleted`, `firstContactPendingObservation` and
+`firstContactUnknownCustomer`. The observation cutoff and event count are returned.
+A successful runtime outcome alone does not establish provider completion.
+
+Human-transfer telemetry is incomplete, so containment is unknown (`null`). The
+separate observed automated-completion proxy counts recorded completions with no
+recorded case/handoff and carries explicit limits. Requests exceeding 50,000
+relevant events return 422; reduce the window instead of treating a partial sample
+as an aggregate. See [pilot acceptance](digital-assistant-pilot-checklist.md).
+
+Connector knowledge sync now validates the entire batch before control-plane draft
+import: required fields, bounded content, safe provenance, duplicate identifiers
+and obvious sensitive-text patterns. Rejection imports nothing. Internal revision
+numbers remain control-plane-owned; caller-supplied versions are optional. Pattern
+matching needs human review and is not a comprehensive privacy classifier. Manual
+authoring and all publication/retrieval ACL/version controls retain their existing
+contracts.

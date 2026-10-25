@@ -30,6 +30,9 @@ frontend runtime JSON or a query string.
 
 ## Current references
 
+- [Observed outcome analytics and pilot limits](../guides/digital-assistant-pilot-checklist.md).
+  The standalone MCP adapter API and development-only `/api/ivr` prefix are private
+  service surfaces; they are not additional public gateway route families.
 - [Measured model evaluation](../guides/model-evaluation.md) and
   [agent workspace](../../services/api-gateway/operations/AGENT-WORKSPACE.md).
 - [Control-plane API](../../services/api-gateway/control-plane/README.md):

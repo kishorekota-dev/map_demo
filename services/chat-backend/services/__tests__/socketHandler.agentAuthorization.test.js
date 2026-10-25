@@ -428,8 +428,9 @@ describe('SocketHandler agent relay requests', () => {
         expect(socket.join).not.toHaveBeenCalledWith('session:session-1');
     });
 
-    test('persists a service assignment for a subsequent session-room join', async () => {
+    test('persists a service assignment for a requested live conversation and subsequent room join', async () => {
         const session = assignedSession(null, null);
+        session.state.liveAgentRequestedAt = new Date().toISOString();
         const { handler, socket, sessionManager } = createHarness(session);
         const client = setClient(handler, socket, {
             userId: 'agent-ui-service',

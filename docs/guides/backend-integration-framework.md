@@ -1,123 +1,153 @@
-# Generic backend integration framework
+# Generic backend adapter transport
 
-How a company plugs its own backend into the Digital Assistant without a
-new hard-coded tool class per company. Implemented in the MCP service
-(port 3004), beside the existing banking tools, which are unchanged.
+Reviewed October 24, 2026 against the canonical MCP service. This is a server-owned,
+private administrative HTTP adapter interface beside the existing banking tools.
+It supplies declarations, bounded transport, discovery metadata and pilot replay
+handling. It is not an automatic connection to a company's system.
 
-## What it is
+## Supported execution boundary
 
-A **backend adapter** is a server-side declaration of one company's backend
-system: its base URL, how the platform authenticates to it, and the tools
-it exposes (method, path template, input schema, read-only vs mutating).
-Adapters are discovered as namespaced tools — `<adapterId>_<toolName>` —
-so tools from different companies can never collide with each other or
-with the existing banking tools.
+The interface lives at the MCP service's `/api/adapters` paths. It is **not** wired
+into the existing MCP protocol/tool catalog, the control plane's registered action
+contracts, customer ownership checks, confirmation policy or durable financial
+effect ledger. Configuring an adapter therefore does not create a customer-facing
+intent or authorize an assistant to call it. An inbound customer bearer token is
+not adapter authorization and is never forwarded as the backend credential.
 
-Example: a CRM adapter `example-crm` exposing `example_crm_get_customer`
-and `example_crm_create_case`.
+Production executes **GET tools only**. Every generic mutation returns 403 in
+production, even if the pilot flag is set. Non-production mutations require
+`ADAPTER_PILOT_MUTATIONS_ENABLED=true`, trusted service identity and an idempotency
+key. They are intended for synthetic fixtures or a separately qualified sandbox.
+Keep this API private. The backend must authorize the service account's access;
+there is no customer-specific authorization policy in this administrative API.
 
-## What it is not
+Before exposing generic mutations in a product workflow, implement registered
+action contracts, customer/session ownership and confirmation, durable operation
+identity, authoritative outcomes and reconciliation in the established orchestrator
+architecture. A server-registered URL or in-memory cache cannot provide these
+controls by itself. Existing banking tools retain their current authorization and
+ledger path.
 
-- Not a plugin marketplace and not a claim that any CRM, ticketing, or core
-  system is integrated. An adapter is only as real as the backend it points
-  to and the pilot that exercises it.
-- Not a way for a caller to register an endpoint at runtime. There is
-  deliberately **no API route that registers an adapter**. A caller who
-  could declare a baseUrl could redirect service credentials and customer
-  data to any host.
-- Not the customer-ownership check. The backend still enforces which
-  customer records the service credential may touch, and the orchestrator's
-  confirmation and effect-ledger controls still gate mutations. The
-  adapter is the transport and dedupe layer, not the authorization layer.
+## Operator configuration
 
-## Plugging in a backend (operator steps)
+1. Copy [the fictional example](../../services/mcp-service/adapters.example.json)
+   to a protected server-side JSON file. Replace its endpoints and declarations
+   after reviewing the backend contract. A missing/invalid config fails startup.
+2. Put credentials in the environment variables named by `auth`, never in the
+   JSON declaration, request body, frontend or public runtime configuration.
+3. Supply a strong `SERVICING_SERVICE_TOKEN` of at least 32 bytes. Adapter routes
+   require it in `X-Servicing-Service-Token` in **every environment**, even when
+   ordinary development internal-service authentication is disabled. A missing
+   server identity returns 503; missing/incorrect caller credentials return 401.
+4. Set `ADAPTERS_CONFIG_PATH` for the MCP process. Container deployments must mount
+   the private config and explicitly pass its path/credential variables through
+   a reviewed Compose override; setting host variables alone does not do that.
+5. Discover declarations and explicitly request a read/health check. No inference,
+   provider discovery or tool execution runs automatically at startup.
 
-1. Copy `services/mcp-service/adapters.example.json` to a server-side file
-   (never a path a request handler can write to) and replace it with the
-   company's adapter definition.
-2. Set the credential environment variables named in the definition
-   (`apiKey` / `bearer` / `basic` / `oauth2-client-credentials`). Values
-   are never written in the config file and never accepted in a request.
-3. Set `ADAPTERS_CONFIG_PATH` to that file and start the MCP service.
-   A missing file or an invalid definition fails startup loudly instead
-   of running without the backends an operator expected.
-4. Verify discovery: `GET /api/adapters` (lists adapters, no secrets) and
-   `GET /api/adapters/:adapterId/tools`.
+Adapter IDs are lowercase letters/digits/hyphens; tool names use lowercase
+letters/digits/underscores. `banking` is a reserved adapter namespace. Discovery
+names use `<adapter-id-with-underscores>_<tool-name>`; collisions across declared
+adapters are rejected. Definitions are copied and frozen when registered.
 
-## API (all under the service's internal-service authentication)
+## Contract and validation
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/adapters` | List registered adapters (sanitized) |
-| GET | `/api/adapters/:adapterId/tools` | List that adapter's namespaced tools |
-| GET | `/api/adapters/:adapterId/tools/:toolName` | One tool definition |
-| POST | `/api/adapters/:adapterId/tools/:toolName/execute` | Execute `{ parameters, idempotencyKey?, sessionId? }` |
-| POST | `/api/adapters/:adapterId/reconcile` | Reconcile `{ tool, idempotencyKey }` |
-| GET | `/api/adapters/:adapterId/health` | Backend health (if `healthPath` is declared) |
+Definitions accept `id`, `name`, `version`, `baseUrl`, `auth`, optional static
+`headers`/`healthPath`, and 1–100 tools. Unknown fields are rejected. Supported
+authentication is `none`, `apiKey`, `bearer`, `basic`, and OAuth2 client credentials.
+Credential fields reference environment variable names. OAuth accepts a server-owned
+`tokenUrl` and optional `scope`. Embedded URL credentials and literal auth secrets
+are rejected. Static headers cannot override credential, routing, hop-by-hop,
+content-length or idempotency headers; names/values cannot contain header injection.
 
-## Idempotency and reconciliation (the part that matters)
+Tools accept `name`, `description`, `method`, `path`, `inputSchema`, optional
+`readOnly`, `idempotency`, `timeoutMs`, `retry` and `statusPath`. Only GET is read-only;
+other supported methods require idempotency and cannot declare automatic retries.
+Timeouts are 1,000–120,000 ms. Read retries are bounded to 1–3 attempts; mutations
+always dispatch at most once per pilot execution.
 
-Mutating tools **require** a caller-supplied `idempotencyKey`:
+The supported schema subset is explicit, not a full JSON Schema implementation:
 
-- The adapter forwards it as an `Idempotency-Key` header, so a backend
-  that honours that header dedupes even if this process restarts.
-- The adapter also caches completed results in-process (see limit below)
-  and replays them verbatim with `replayed: true` instead of calling the
-  backend again.
-- A definitive backend failure (4xx/5xx, or a request that never reached
-  the backend) is **not** cached, so the same key can be retried.
+- Root and nested `object`: declared `properties`, optional `required` and
+  `additionalProperties: false` (also the default). Unknown arguments are rejected.
+- `string`, `number`, `integer`, `boolean`, `null`: type checks; primitive `enum`;
+  finite numeric `minimum`/`maximum`; string `minLength`/`maxLength` up to 4,000.
+- `array`: recursively validated `items`, `minItems`/`maxItems` up to 100.
+- Optional bounded `description` metadata. Nesting is limited to five levels,
+  with at most 64 properties per object. Unsupported schema keywords fail validation.
 
-Execution outcomes are explicit:
+HTTP request bodies and validated parameters are limited to 64 KiB. POST requires
+`application/json`. Tool path placeholders must reference declared scalar fields;
+values cannot contain traversal segments, slashes, percent encodings or controls.
+`healthPath` is literal; `statusPath` must bind `{idempotencyKey}` and no other field. URL query,
+fragment and encoded traversal/route escapes are rejected in declarations.
 
-- `completed` (HTTP 200) — backend responded 2xx.
-- `failed` (backend status, else 502) — definitive error, safe to retry
-  with the same key.
-- `uncertain` (HTTP 202, with `reconciliationReference`) — the request
-  may have reached the backend but no response arrived (timeout, reset
-  after send). **Never retry an uncertain call with a new key.** Call
-  `POST /api/adapters/:adapterId/reconcile` instead: if the tool declares
-  a `statusPath`, the backend's own status is authoritative; if it does
-  not, reconciliation returns manual lookup steps. An uncertain result is
-  replayed as uncertain on a repeat with the same key.
+## Egress and credentials
 
-Automatic retries happen only for read-only tools, on network errors or
-5xx, up to `retry.maxAttempts` (max 3). Mutating tools are never
-auto-retried.
+HTTPS is required by default for both backend and OAuth URLs. Production cannot
+enable plain HTTP. Non-production `ADAPTER_ALLOW_LOCAL=true` explicitly enables
+local/private fixture HTTP; do not use it to represent a production deployment.
 
-## Limits, stated plainly
+The native HTTP client resolves once and pins that result to the socket, rejects
+restricted addresses, follows no redirects, ignores proxy environment variables,
+verifies TLS certificates, caps responses at 1 MiB and enforces a total per-request
+DNS/connect/response deadline. Enterprise RFC1918/ULA backends require their exact
+hostname in `ADAPTER_PRIVATE_HOSTS`; this does not permit loopback, link-local or
+metadata addresses in production. OAuth token requests use the same transport.
 
-- The idempotency cache is **per-process and in-memory**. It protects
-  against duplicates within one running instance; it does not survive a
-  restart or span instances. For financial mutations, the durable dedupe
-  is the backend's `Idempotency-Key` support plus the orchestrator's
-  effect ledger — a shared store is future work, not a v1 claim.
-- No inbound webhook handling in v1. A backend that needs to push events
-  back needs a signed-webhook receiver, which is a separate, separately
-  reviewed piece of work.
-- OAuth2 support is client-credentials only, with in-memory token caching.
-  User-delegated OAuth (authorization code, refresh tokens) is not in v1.
-- Production adapters must use `https` base URLs (enforced by validation
-  when `NODE_ENV=production`).
-- Adapters do not validate customer ownership by themselves; that stays
-  with the backend and the orchestrator.
+OAuth token cache identity includes the actual client ID/secret, endpoint, scope
+and deployment tenant. Secret removal/rotation and scope changes do not reuse an
+older token. Tokens are not cached beyond their reported validity; an absent
+`expires_in` does not invent a cache lifetime. Configured credential values and
+raw provider error bodies are not copied into API errors or logs. Successful read
+payloads intentionally contain backend data and must be handled as restricted
+administrative responses; this is not automatic data classification/redaction.
 
-## Files
+## API
 
-- `services/mcp-service/src/adapters/adapterContract.js` — definition
-  validation, parameter validation, sanitized views.
-- `services/mcp-service/src/adapters/credentialResolver.js` — env-only
-  credential resolution (apiKey, bearer, basic, OAuth2 client-credentials).
-- `services/mcp-service/src/adapters/genericHttpAdapter.js` — HTTP
-  execution, idempotent replay, uncertain outcomes, reconciliation, health.
-- `services/mcp-service/src/adapters/idempotencyStore.js` — in-memory
-  idempotency cache (see limits above).
-- `services/mcp-service/src/adapters/adapterRegistry.js` — registry
-  (singleton shared by routes and the startup loader).
-- `services/mcp-service/src/adapters/adapterLoader.js` — startup config
-  loading from `ADAPTERS_CONFIG_PATH`.
-- `services/mcp-service/src/routes/adapterApi.routes.js` — HTTP API.
-- `services/mcp-service/src/adapters/__tests__/adapterFramework.test.js` —
-  14 tests: validation, credentials, replay, uncertain, failure,
-  reconciliation, registry.
-- `services/mcp-service/adapters.example.json` — commented example
-  (fictional `crm.example.invalid` host; not loaded by default).
+All paths are private service APIs, with `Cache-Control: no-store` after identity
+validation. None accepts caller-supplied URL, credential, adapter definition or
+arbitrary executable code.
+
+| Method/path | Purpose |
+| --- | --- |
+| `GET /api/adapters` | Sanitized declarations, without configured credential values |
+| `GET /api/adapters/:adapterId/tools` | Namespaced tool metadata |
+| `GET /api/adapters/:adapterId/tools/:toolName` | One raw-name tool declaration |
+| `POST /api/adapters/:adapterId/tools/:toolName/execute` | `{parameters, idempotencyKey?, sessionId?}`; sessionId is only a caller trace reference, not verified ownership |
+| `POST /api/adapters/:adapterId/reconcile` | `{tool, idempotencyKey}`; bounded read of the configured status endpoint |
+| `GET /api/adapters/:adapterId/health` | Explicit backend health request when a healthPath is declared |
+
+Execution returns `completed` for a successful read or terminal pilot transport
+response. It means HTTP completion, not independently proven business fulfillment.
+A pilot mutation returning 202, non-2xx or an unconfirmed dispatched transport error
+stays `uncertain` (API 202), because even an HTTP 5xx/4xx does not establish rollback.
+Only a transport preflight known not to dispatch can report a failed mutation.
+Raw upstream errors are replaced with safe messages.
+
+`reconcile` never repeats the original mutation. It reads `statusPath` and accepts
+only an authoritative 2xx response with `status: completed` or `status: failed`.
+Other results remain uncertain. Without a status endpoint, it returns manual
+lookup instructions. Do not retry uncertain work with a new key.
+
+## Replay limits and verification
+
+The pilot cache binds a key to canonical arguments, reserves it before dispatch,
+and shares concurrent attempts. Changed arguments return 409. An active execution
+cannot race a status lookup into a conflicting cached result. Capacity is bounded
+and refuses new keyed work before dispatch rather than evicting unexpired entries.
+Completed/failed/uncertain results can be replayed during the cache lifetime.
+
+This is still a **single-process, in-memory, 24-hour cache**, not durable dedupe.
+It is lost on restart, does not coordinate replicas and expires old records.
+Qualified backend idempotency and the orchestrator's durable effect ledger remain
+necessary before customer mutations can be supported. There is no webhook receiver,
+customer-delegated OAuth, production mutation switch or generic action installer.
+
+The MCP regression suite covers malformed declarations, nested/unknown arguments,
+namespace collisions, mandatory service identity, production mutation denial,
+concurrent replay/argument conflicts, uncertain outcomes, bounded read retries,
+OAuth rotation/scope/expiry, restricted DNS, pinned fixture sockets, redirect refusal
+and response limits. Tests use deterministic transports and local synthetic HTTP
+servers; they do not qualify an enterprise CRM, live provider or billing outcome.
+Run `npm test -w services/mcp-service -- --runInBand` with Node 22.

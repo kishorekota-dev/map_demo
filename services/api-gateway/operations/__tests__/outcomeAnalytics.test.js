@@ -14,7 +14,7 @@ describe('outcome analytics', () => {
   ];
 
   test('computes completion, FCR, containment, repeat and channel breakdown', () => {
-    const metrics = computeOutcomeMetrics(events);
+    const metrics = computeOutcomeMetrics(events, { windowEnd: "2026-10-20T00:00:00Z" });
     expect(metrics.interactions).toBe(4);
     expect(metrics.completed).toBe(3);
     expect(metrics.completionRate).toBe(0.75);
@@ -22,7 +22,8 @@ describe('outcome analytics', () => {
     expect(metrics.firstContactResolved).toBe(2);
     expect(metrics.firstContactResolutionRate).toBeCloseTo(2 / 3, 4);
     // Containment: s1, s2, s3 contained; s4 has a case.
-    expect(metrics.containmentRate).toBe(0.75);
+    expect(metrics.containmentRate).toBeNull();
+    expect(metrics.observedAutomatedCompletionRate).toBe(0.75);
     // Repeat: B has 2 sessions, A and C have 1.
     expect(metrics.repeatContactRate).toBeCloseTo(1 / 3, 4);
     const ivr = metrics.byChannel.find((c) => c.channel === 'ivr');
@@ -56,4 +57,52 @@ describe('knowledge validation', () => {
     expect(batch.valid).toBe(false);
     expect(batch.errors.some((e) => e.includes('duplicate id'))).toBe(true);
   });
+});
+
+const conversation = (sessionId, interactionId, createdAt, overrides = {}) => ({ sessionId, interactionId, createdAt,
+  actorHash: sessionId, type: 'runtime.execution', stage: 'conversation', channel: 'digital', outcome: 'completed', ...overrides });
+test('counts distinct interactions and takes the final outcome despite unsorted events', () => {
+  const result = computeOutcomeMetrics([
+    conversation('session', 'first', '2026-10-02T00:00:00Z', { outcome: 'awaiting_input' }),
+    conversation('session', 'second', '2026-10-03T00:00:00Z'),
+    conversation('session', 'first', '2026-10-01T00:00:00Z'),
+  ], { windowEnd: '2026-10-20T00:00:00Z' });
+  expect(result).toMatchObject({ interactions: 2, sessions: 1, completed: 1, completionRate: 0.5, firstContactEligibleCompleted: 1 });
+});
+test('recent and anonymous completions cannot inflate first-contact resolution', () => {
+  const result = computeOutcomeMetrics([
+    conversation('recent', 'i', '2026-10-19T00:00:00Z'),
+    conversation('anonymous', 'i', '2026-10-01T00:00:00Z', { actorHash: null }),
+  ], { windowEnd: '2026-10-20T00:00:00Z' });
+  expect(result).toMatchObject({ completed: 2, firstContactResolved: 0, firstContactEligibleCompleted: 0,
+    firstContactPendingObservation: 1, firstContactUnknownCustomer: 1, firstContactResolutionRate: null });
+});
+test('failed and handed-off sessions are not automated completions; earlier unrelated cases do not poison FCR', () => {
+  const result = computeOutcomeMetrics([
+    { type: 'case.created', sessionId: 'old', actorHash: 'customer', createdAt: '2026-09-01T00:00:00Z' },
+    conversation('success', 'i', '2026-10-01T00:00:00Z', { actorHash: 'customer' }),
+    conversation('failed', 'i', '2026-10-01T00:00:00Z', { outcome: 'failed' }),
+    conversation('human', 'i', '2026-10-01T00:00:00Z', { outcome: 'handoff' }),
+    conversation('human', 'i', '2026-10-02T00:00:00Z'),
+  ], { windowEnd: '2026-10-20T00:00:00Z' });
+  expect(result).toMatchObject({ interactions: 3, completed: 2, observedAutomatedCompletions: 1, firstContactResolved: 1, containmentRate: null });
+});
+test('malformed/future evidence is excluded and equal timestamps use sequence order', () => {
+  const result = computeOutcomeMetrics([null, {}, conversation('s', 'i', 'invalid'),
+    conversation('future', 'i', '2026-11-01T00:00:00Z'),
+    conversation('s', 'i', '2026-10-01T00:00:00Z', { sequence: 2, outcome: 'failed' }),
+    conversation('s', 'i', '2026-10-01T00:00:00Z', { sequence: 1 }),
+  ], { windowEnd: '2026-10-20T00:00:00Z' });
+  expect(result).toMatchObject({ interactions: 1, completed: 0, observedAutomatedCompletions: 0 });
+});
+
+test('connector knowledge uses server-assigned revisions and rejects unsafe URLs and separated card patterns', () => {
+  const doc = { id: 'help', title: 'Approved help', content: 'This is a sufficiently detailed support guide.', source: 'Approved internal manual' };
+  expect(validateKnowledgeDocument(doc).valid).toBe(true);
+  expect(validateKnowledgeDocument({ ...doc, version: 1 }).valid).toBe(true);
+  expect(validateKnowledgeDocument({ ...doc, source: 'https://user:password@example.invalid/path' }).valid).toBe(false);
+  expect(validateKnowledgeDocument({ ...doc, source: 'javascript:alert(1)' }).valid).toBe(false);
+  expect(validateKnowledgeDocument({ ...doc, content: 'This private card number is 4111 1111 1111 1111.' }).valid).toBe(false);
+  expect(validateKnowledgeDocument({ ...doc, version: {} }).valid).toBe(false);
+  expect(validateKnowledgeBatch([]).valid).toBe(false);
 });

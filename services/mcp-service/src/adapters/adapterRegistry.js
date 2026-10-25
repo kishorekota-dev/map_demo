@@ -12,11 +12,21 @@
  * AdapterRegistry instances instead of touching the singleton.
  */
 
-const { validateAdapterDefinition, sanitizeAdapter } = require('./adapterContract');
-const { GenericHttpAdapter } = require('./genericHttpAdapter');
-const IdempotencyStore = require('./idempotencyStore');
-const logger = require('../utils/logger');
+const {
+  validateAdapterDefinition,
+  sanitizeAdapter,
+} = require("./adapterContract");
+const { GenericHttpAdapter } = require("./genericHttpAdapter");
+const IdempotencyStore = require("./idempotencyStore");
+const logger = require("../utils/logger");
 
+function freeze(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
 class AdapterRegistry {
   constructor({ httpClient = null, env = process.env } = {}) {
     this.adapters = new Map();
@@ -26,18 +36,21 @@ class AdapterRegistry {
   }
 
   register(definition) {
-    const adapter = validateAdapterDefinition(definition, this.env);
+    const adapter = freeze(validateAdapterDefinition(definition, this.env));
     if (this.adapters.has(adapter.id)) {
       throw new Error(`Adapter already registered: ${adapter.id}`);
     }
     // Tool names must be unique across adapters once namespaced.
     const existingNamespaced = new Set();
     for (const existing of this.adapters.values()) {
-      for (const tool of existing.tools) existingNamespaced.add(tool.namespacedName);
+      for (const tool of existing.definition.tools)
+        existingNamespaced.add(tool.namespacedName);
     }
     for (const tool of adapter.tools) {
       if (existingNamespaced.has(tool.namespacedName)) {
-        throw new Error(`Namespaced tool already registered: ${tool.namespacedName}`);
+        throw new Error(
+          `Namespaced tool already registered: ${tool.namespacedName}`,
+        );
       }
     }
     const options = { idempotencyStore: this.idempotencyStore, env: this.env };
@@ -46,7 +59,7 @@ class AdapterRegistry {
       definition: adapter,
       executor: new GenericHttpAdapter(adapter, options),
     });
-    logger.info('Generic backend adapter registered', {
+    logger.info("Generic backend adapter registered", {
       adapterId: adapter.id,
       tools: adapter.tools.map((t) => t.namespacedName),
     });
@@ -59,7 +72,9 @@ class AdapterRegistry {
   }
 
   listAdapters() {
-    return [...this.adapters.values()].map((entry) => sanitizeAdapter(entry.definition));
+    return [...this.adapters.values()].map((entry) =>
+      sanitizeAdapter(entry.definition),
+    );
   }
 
   listTools() {
@@ -81,7 +96,8 @@ class AdapterRegistry {
 
   executor(adapterId) {
     const entry = this.adapters.get(adapterId);
-    if (!entry) throw new Error(`Adapter not found: ${adapterId}`);
+    if (!entry)
+      throw Object.assign(new Error("Adapter not found"), { status: 404 });
     return entry.executor;
   }
 

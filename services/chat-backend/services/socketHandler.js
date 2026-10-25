@@ -2,8 +2,10 @@ const logger = require('./logger');
 const jwt = require('jsonwebtoken');
 const { isQualityDelegation } = require('./accessTokenPolicy');
 const HandoffService = require('./handoffService');
-const { LiveAgentQueue, isLiveAgentSession, validateLiveSender, buildLiveMessage, buildTransferContext } = require('./liveAgentChat');
+const { LiveAgentQueue, isLiveAgentSession, validateLiveSender, buildLiveMessage, buildTransferContext, queueName, boundedReason, hasLiveRequest } = require('./liveAgentChat');
 const axios = require('axios');
+const KeyedMutex = require('./keyedMutex');
+const liveMutex = new KeyedMutex();
 
 class SocketHandler {
     constructor(io, chatService, agentOrchestrator, sessionManager) {
@@ -92,14 +94,14 @@ class SocketHandler {
         socket.on('requestHandoff', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
-                if (!principal?.isAuthenticated) throw new Error('Authentication required');
+                this.assertAuthenticated(principal);
                 socket.emit('handoffCreated', await this.handoffService.issue(principal, principal.sessionId, data.targetChannel));
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
         socket.on('resumeSession', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
-                if (!principal?.isAuthenticated) throw new Error('Authentication required');
+                this.assertAuthenticated(principal);
                 const result = await this.handoffService.resume(principal, data.grant, principal.authToken);
                 principal.sessionId = result.sessionId;
                 await socket.join(`session:${result.sessionId}`);
@@ -107,81 +109,58 @@ class SocketHandler {
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
 
-        // Live human agent chat: queue, accept, and end. The back-and-forth
-        // itself runs through handleSendMessage's live-agent branch (see
-        // liveAgentChat.js) so it uses the same transcript persistence.
         socket.on('requestLiveAgent', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
-                if (!principal?.isAuthenticated || !principal.sessionId) throw new Error('Authentication required');
-                const session = await this.sessionManager.getSession(principal.sessionId);
-                if (!session || String(session.userId) !== String(principal.userId)) throw new Error('Access denied');
-                if (isLiveAgentSession(session)) throw new Error('Session is already in live agent mode');
-                const queued = this.liveAgentQueue.enqueue({
-                    queue: typeof data.queue === 'string' && data.queue ? data.queue : 'default',
-                    sessionId: principal.sessionId,
-                    customerId: principal.userId,
-                    intent: session.state?.lastIntent || null,
+                this.assertAuthenticated(principal);
+                if (principal.isAgentPrincipal || !principal.sessionId) throw new Error('Customer session required');
+                const queue = queueName(data.queue || 'default');
+                const session = await this.withLiveSession(principal, principal.sessionId, async session => {
+                    if (String(session.userId) !== String(principal.userId)) throw new Error('Access denied');
+                    if (isLiveAgentSession(session)) throw new Error('Session is already in live agent mode');
+                    if (session.state?.pendingFeedback || session.state?.workflowRecoveryRequired) throw new Error('Finish or recover the active request before requesting an agent');
+                    const queued = this.liveAgentQueue.enqueue({ queue, sessionId: session.sessionId, customerId: principal.userId, intent: session.state?.lastIntent || null });
+                    await this.sessionManager.updateSessionState(session.sessionId, { liveAgentRequestedAt: queued.requestedAt, liveAgentQueue: queue });
+                    socket.emit('liveAgentQueued', { sessionId: session.sessionId, queuePosition: queued.queuePosition });
+                    return { ...session, state: { ...session.state, liveAgentRequestedAt: queued.requestedAt, liveAgentQueue: queue } };
                 });
-                // Agent dashboard sees session + intent only, never transcript.
-                this.io.to('agents').emit('liveAgentRequested', {
-                    sessionId: principal.sessionId,
-                    queue: typeof data.queue === 'string' && data.queue ? data.queue : 'default',
-                    intent: session.state?.lastIntent || null,
-                    requestedAt: queued.requestedAt,
-                });
-                socket.emit('liveAgentQueued', { sessionId: principal.sessionId, queuePosition: queued.queuePosition });
+                this.io.to('agents').emit('liveAgentRequested', { sessionId: session.sessionId, queue, intent: session.state?.lastIntent || null, requestedAt: session.state?.liveAgentRequestedAt });
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
         socket.on('agentAcceptLiveChat', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
-                if (!principal?.isAuthenticated || !principal.isAgentPrincipal) throw new Error('Agent authentication required');
-                const sessionId = data.sessionId || principal.sessionId;
-                if (!sessionId) throw new Error('Session ID required');
-                const session = await this.sessionManager.getSession(sessionId);
-                if (!session) throw new Error('Session not found');
-                if (isLiveAgentSession(session)) throw new Error('Session is already in live agent mode');
-                const agentId = principal.principalId || principal.userId;
-                await this.sessionManager.updateSessionState(sessionId, {
-                    liveAgentActive: true,
-                    liveAgentId: agentId,
-                    liveAgentStartedAt: new Date().toISOString(),
-                    liveAgentReason: data.reason || 'customer_requested',
-                    assignmentStatus: 'assigned',
+                this.assertAuthenticated(principal);
+                if (!principal.isAgentPrincipal) throw new Error('Agent authentication required');
+                const agentId = this.getRequestedAgentId(data) || (!principal.canRelayAgent ? principal.principalId : null);
+                if (!agentId || (!principal.canRelayAgent && agentId !== principal.principalId)) throw new Error('Access denied');
+                const session = await this.claimLiveSession(principal, data.sessionId, agentId, data.reason);
+                await this.withLiveSession(principal, session.sessionId, async current => {
+                    if (!this.getAssignedSessionAccess(principal, current, agentId).authorized) throw new Error('Assignment has changed');
+                    await this.moveSocketSession(principal, session.sessionId);
+                    principal.agentAssignments.set(session.sessionId, agentId);
+                    const history = await this.chatService.getConversationHistory(session.sessionId);
+                    socket.emit('liveAgentStarted', { sessionId: session.sessionId, agentId, transferContext: buildTransferContext(current, history) });
                 });
-                this.liveAgentQueue.remove(data.queue || 'default', sessionId);
-                principal.sessionId = sessionId;
-                await socket.join(`session:${sessionId}`);
-                const history = await this.chatService.getConversationHistory(sessionId);
-                // Transfer context goes to the accepting agent only.
-                socket.emit('liveAgentStarted', {
-                    sessionId,
-                    agentId,
-                    transferContext: buildTransferContext({ ...session, state: { ...session.state, liveAgentActive: true, liveAgentId: agentId } }, history),
-                });
-                this.broadcastToSession(sessionId, 'liveAgentJoined', { sessionId, agentId });
+                await this.broadcastToSession(session.sessionId, 'liveAgentJoined', { sessionId: session.sessionId, agentId });
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
         socket.on('endLiveChat', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
-                if (!principal?.isAuthenticated || !principal.sessionId) throw new Error('Authentication required');
-                const session = await this.sessionManager.getSession(principal.sessionId);
-                if (!session || !isLiveAgentSession(session)) throw new Error('Session is not in live agent mode');
-                validateLiveSender({
-                    role: principal.isAgentPrincipal ? 'agent' : 'customer',
-                    senderId: principal.isAgentPrincipal ? (principal.principalId || principal.userId) : principal.userId,
-                    session,
+                this.assertAuthenticated(principal);
+                const sessionId = principal.sessionId;
+                const reason = boundedReason(data.reason);
+                await this.withLiveSession(principal, sessionId, async session => {
+                    const owner = !principal.isAgentPrincipal && String(session.userId) === String(principal.userId);
+                    if (!owner && !this.getAssignedSessionAccess(principal, session, this.getRequestedAgentId(data) || principal.agentAssignments?.get(sessionId)).authorized) throw new Error('Access denied');
+                    if (!isLiveAgentSession(session) && !session.state?.liveAgentRequestedAt) throw new Error('Session is not in live agent mode');
+                    await this.sessionManager.updateSessionState(sessionId, { liveAgentActive: false, liveAgentId: null, assignedAgentId: null, liveAgentRequestedAt: null, liveAgentEndedAt: new Date().toISOString(), assignmentStatus: 'completed' });
+                    this.liveAgentQueue.remove(session.state?.liveAgentQueue || 'default', sessionId);
                 });
-                await this.sessionManager.updateSessionState(principal.sessionId, {
-                    liveAgentActive: false,
-                    liveAgentId: null,
-                    liveAgentEndedAt: new Date().toISOString(),
-                    assignmentStatus: 'completed',
-                });
-                this.broadcastToSession(principal.sessionId, 'liveAgentEnded', { sessionId: principal.sessionId, reason: data.reason || 'ended' });
-                socket.emit('liveAgentEnded', { sessionId: principal.sessionId });
+                await this.evictAgentRooms(sessionId);
+                await this.broadcastToSession(sessionId, 'liveAgentEnded', { sessionId, reason });
+                socket.emit('liveAgentEnded', { sessionId });
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
 
@@ -231,6 +210,83 @@ class SocketHandler {
      * matching 'response' { requestId, success, result|error }. Without this the
      * client times out on every call. Routing is a fixed switch (deterministic).
      */
+    assertAuthenticated(client) {
+        if (!client?.isAuthenticated || (client.authExpiresAt && client.authExpiresAt <= Date.now())) {
+            if (client) this.revokeSocketAccess(client);
+            throw new Error('Authentication required');
+        }
+    }
+
+    revokeSocketAccess(client) {
+        clearTimeout(client.expiryTimer);
+        for (const sessionId of new Set([client.sessionId, ...(client.agentAssignments?.keys() || [])])) if (sessionId) void client.socket.leave(`session:${sessionId}`);
+        void client.socket.leave('agents');
+        client.sessionId = null; client.isAuthenticated = false; client.agentAssignments = new Map();
+    }
+
+    async moveSocketSession(client, sessionId) {
+        if (!client.canRelayAgent && client.sessionId && client.sessionId !== sessionId) await client.socket.leave(`session:${client.sessionId}`);
+        client.sessionId = sessionId;
+        await client.socket.join(`session:${sessionId}`);
+    }
+
+    sameTenant(client, session) {
+        const tenant = process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+        return (client.tenantId || tenant) === (session?.metadata?.tenantId || tenant);
+    }
+
+    async withLiveSession(client, sessionId, action) {
+        this.assertAuthenticated(client);
+        if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new Error('Session ID required');
+        const tenant = client.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+        return liveMutex.runExclusive(`${tenant}:${sessionId}`, async () => {
+            let lock; let lost = false; const onError = () => { lost = true; };
+            try {
+                if (this.sessionManager.databaseService) {
+                    await this.handoffService.initialize();
+                    if (!this.handoffService.pool) throw new Error('Durable live chat coordination is unavailable');
+                    lock = await this.handoffService.pool.connect(); lock.on('error', onError);
+                    await lock.query("SET lock_timeout TO '15s'");
+                    await lock.query('SELECT pg_advisory_lock(hashtextextended($1,0))', [`chat-live:${tenant}:${sessionId}`]);
+                } else if (process.env.NODE_ENV === 'production') throw new Error('Durable live chat coordination is unavailable');
+                const session = await this.sessionManager.getSession(sessionId, { refresh: true });
+                if (!session || !this.sameTenant(client, session)) throw new Error('Session access denied');
+                this.assertAuthenticated(client);
+                if (lost) throw new Error('Live chat coordination lost');
+                const result = await action(session);
+                if (lost) throw new Error('Live chat coordination lost');
+                return result;
+            } finally {
+                if (lock) {
+                    if (!lost) await lock.query('SELECT pg_advisory_unlock(hashtextextended($1,0))', [`chat-live:${tenant}:${sessionId}`]).catch(() => { lost = true; });
+                    lock.removeListener('error', onError); lock.release(lost);
+                }
+            }
+        });
+    }
+
+    async claimLiveSession(client, sessionId, agentId, reason) {
+        const note = boundedReason(reason);
+        return this.withLiveSession(client, sessionId, async session => {
+            const current = this.getAssignedAgentId(session);
+            if (this.hasActiveAssignment(session) && current !== agentId) throw new Error('Session already assigned');
+            if (!this.hasActiveAssignment(session) && !hasLiveRequest(session)) throw new Error('Customer has not requested live agent assistance');
+            if (session.state?.pendingFeedback || session.state?.workflowRecoveryRequired) throw new Error('Active workflow must be completed or recovered first');
+            await this.sessionManager.updateSession(sessionId, { state: { liveAgentActive: true, liveAgentId: agentId, assignedAgentId: agentId, liveAgentStartedAt: new Date().toISOString(), liveAgentReason: note, assignmentStatus: 'assigned' } });
+            this.liveAgentQueue.remove(session.state?.liveAgentQueue || 'default', sessionId);
+            return { ...session, state: { ...session.state, liveAgentActive: true, liveAgentId: agentId, assignedAgentId: agentId, assignmentStatus: 'assigned' } };
+        });
+    }
+
+    async evictAgentRooms(sessionId, retainedAgentId = null) {
+        for (const client of this.connectedClients.values()) {
+            if (client.isAgentPrincipal && (client.sessionId === sessionId || client.agentAssignments?.has(sessionId)) && client.agentAssignments?.get(sessionId) !== retainedAgentId && client.principalId !== retainedAgentId) {
+                await client.socket.leave(`session:${sessionId}`); if (client.sessionId === sessionId) client.sessionId = null;
+                client.agentAssignments?.delete(sessionId);
+            }
+        }
+    }
+
     async handleAgentRequest(socket, envelope = {}) {
         const { requestId, type, data = {} } = envelope;
         const respond = (success, payload) => {
@@ -241,9 +297,7 @@ class SocketHandler {
 
         try {
             const clientInfo = this.connectedClients.get(socket.id);
-            if (!clientInfo || !clientInfo.isAuthenticated) {
-                return respond(false, 'Not authenticated');
-            }
+            this.assertAuthenticated(clientInfo);
             if (!clientInfo.isAgentPrincipal) {
                 return respond(false, 'Agent authorization required');
             }
@@ -262,6 +316,7 @@ class SocketHandler {
                     );
                     if (!access.authorized) return respond(false, 'Access denied');
                     const history = await this.chatService.getMessageHistory?.(data.sessionId)
+                        ?? await this.chatService.getConversationHistory?.(data.sessionId)
                         ?? session.messages
                         ?? session.state?.conversationHistory
                         ?? [];
@@ -276,20 +331,13 @@ class SocketHandler {
                     const maxLength = parseInt(process.env.MAX_MESSAGE_LENGTH, 10) || 2000;
                     if (data.content.length > maxLength) return respond(false, 'Message too long');
 
-                    const session = await this.sessionManager.getSession(data.sessionId);
-                    if (!session) return respond(false, 'Session not found');
-                    // Agent UI historically nested this field in metadata. It is
-                    // still treated only as an assertion and must match the live
-                    // session assignment before it can affect attribution.
-                    const requestedAgentId = this.getRequestedAgentId(data, true);
-                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
-                    if (!access.authorized) return respond(false, 'Access denied');
-
-                    await this.chatService.sendResponse(
-                        data.sessionId,
-                        { content: data.content, type: data.type || 'text' },
-                        { agentId: access.agentId, agentType: 'human' }
-                    );
+                    let access;
+                    await this.withLiveSession(clientInfo, data.sessionId, async session => {
+                        const requestedAgentId = this.getRequestedAgentId(data, true);
+                        access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
+                        if (!access.authorized) throw new Error('Access denied');
+                        await this.chatService.sendResponse(data.sessionId, { content: data.content, type: data.type || 'text' }, { agentId: access.agentId, agentType: 'human' });
+                    });
                     return respond(true, {
                         sessionId: data.sessionId,
                         agentId: access.agentId,
@@ -306,13 +354,7 @@ class SocketHandler {
                     if (!clientInfo.canRelayAgent && requestedAgentId !== clientInfo.principalId) {
                         return respond(false, 'Access denied');
                     }
-                    const currentAgentId = this.getAssignedAgentId(session);
-                    if (this.hasActiveAssignment(session) && currentAgentId !== requestedAgentId) {
-                        return respond(false, 'Session already assigned');
-                    }
-                    await this.sessionManager.updateSession(data.sessionId, {
-                        state: { assignedAgentId: requestedAgentId, assignmentStatus: 'assigned' }
-                    });
+                    await this.claimLiveSession(clientInfo, data.sessionId, requestedAgentId);
                     clientInfo.agentAssignments.set(data.sessionId, requestedAgentId);
                     this.broadcastToSession(data.sessionId, 'agentAssigned', {
                         sessionId: data.sessionId, agentId: requestedAgentId
@@ -327,33 +369,25 @@ class SocketHandler {
                 case 'transferSession': {
                     const destinationAgentId = this.getRequestedAgentId({ agentId: data.toAgentId });
                     if (!destinationAgentId) return respond(false, 'Destination agent ID required');
-                    const session = await this.sessionManager.getSession(data.sessionId);
-                    if (!session) return respond(false, 'Session not found');
-                    const requestedAgentId = this.getRequestedAgentId({ agentId: data.fromAgentId })
-                        || clientInfo.agentAssignments?.get(data.sessionId);
-                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
-                    if (!access.authorized) return respond(false, 'Access denied');
-                    await this.sessionManager.updateSession(data.sessionId, {
-                        state: { assignedAgentId: destinationAgentId, assignmentStatus: 'transferred' }
+                    await this.withLiveSession(clientInfo, data.sessionId, async session => {
+                        const requestedAgentId = this.getRequestedAgentId({ agentId: data.fromAgentId }) || clientInfo.agentAssignments?.get(data.sessionId);
+                        if (!this.getAssignedSessionAccess(clientInfo, session, requestedAgentId).authorized) throw new Error('Access denied');
+                        await this.sessionManager.updateSession(data.sessionId, { state: { assignedAgentId: destinationAgentId, liveAgentId: destinationAgentId, liveAgentActive: true, assignmentStatus: 'transferred' } });
                     });
-                    clientInfo.agentAssignments.set(data.sessionId, destinationAgentId);
-                    this.broadcastToSession(data.sessionId, 'agentAssigned', {
-                        sessionId: data.sessionId, agentId: destinationAgentId, transferred: true
-                    });
+                    await this.evictAgentRooms(data.sessionId, destinationAgentId);
+                    clientInfo.agentAssignments.delete(data.sessionId);
+                    await this.broadcastToSession(data.sessionId, 'agentAssigned', { sessionId: data.sessionId, agentId: destinationAgentId, transferred: true });
                     return respond(true, { sessionId: data.sessionId, transferred: true });
                 }
 
                 case 'endSession': {
-                    const session = await this.sessionManager.getSession(data.sessionId);
-                    if (!session) return respond(false, 'Session not found');
-                    const requestedAgentId = this.getRequestedAgentId(data)
-                        || clientInfo.agentAssignments?.get(data.sessionId);
-                    const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId);
-                    if (!access.authorized) return respond(false, 'Access denied');
-                    await this.sessionManager.updateSession(data.sessionId, {
-                        state: { assignmentStatus: 'ended' }
+                    await this.withLiveSession(clientInfo, data.sessionId, async session => {
+                        const requestedAgentId = this.getRequestedAgentId(data) || clientInfo.agentAssignments?.get(data.sessionId);
+                        if (!this.getAssignedSessionAccess(clientInfo, session, requestedAgentId).authorized) throw new Error('Access denied');
+                        await this.sessionManager.updateSession(data.sessionId, { state: { liveAgentActive: false, liveAgentId: null, liveAgentRequestedAt: null, assignmentStatus: 'ended' } });
                     });
-                    this.broadcastToSession(data.sessionId, 'sessionEnded', { sessionId: data.sessionId });
+                    await this.evictAgentRooms(data.sessionId);
+                    await this.broadcastToSession(data.sessionId, 'sessionEnded', { sessionId: data.sessionId });
                     return respond(true, { sessionId: data.sessionId, ended: true });
                 }
 
@@ -410,11 +444,11 @@ class SocketHandler {
         const value = data.agentId ?? (includeMetadata ? data.metadata?.agentId : null);
         if (typeof value !== 'string' && typeof value !== 'number') return null;
         const normalized = String(value).trim();
-        return normalized || null;
+        return normalized && normalized.length <= 128 ? normalized : null;
     }
 
     getAssignedAgentId(session) {
-        const value = session?.state?.assignedAgentId ?? session?.assignedAgentId;
+        const value = session?.state?.assignedAgentId ?? session?.state?.liveAgentId ?? session?.assignedAgentId;
         if (typeof value !== 'string' && typeof value !== 'number') return null;
         const normalized = String(value).trim();
         return normalized || null;
@@ -435,7 +469,7 @@ class SocketHandler {
         { requireActive = true } = {}
     ) {
         const assignedAgentId = this.getAssignedAgentId(session);
-        if (!clientInfo?.isAgentPrincipal
+        if (!this.sameTenant(clientInfo || {}, session) || !clientInfo?.isAgentPrincipal
             || !assignedAgentId
             || (requireActive && !this.hasActiveAssignment(session))) {
             return { authorized: false, agentId: null };
@@ -486,9 +520,21 @@ class SocketHandler {
 
         // Human-in-the-loop escalation: surface to the customer session and to
         // the agent dashboard queue so a human can take over.
-        this.agentOrchestrator.on('humanEscalation', (data) => {
-            this.broadcastToSession(data.sessionId, 'humanEscalation', data);
-            this.io.to('agents').emit('escalationRequested', data);
+        this.agentOrchestrator.on('humanEscalation', async (data) => {
+            try {
+                const session = await this.sessionManager.getSession(data.sessionId, { refresh: true });
+                if (!session) return;
+                const tenantId = session.metadata?.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+                const principal = { isAuthenticated: true, userId: session.userId, tenantId };
+                const queue = queueName(data.queue || 'default');
+                await this.withLiveSession(principal, data.sessionId, async current => {
+                    if (isLiveAgentSession(current) || current.state?.pendingFeedback || current.state?.workflowRecoveryRequired) return;
+                    const queued = this.liveAgentQueue.enqueue({ queue, sessionId: data.sessionId, customerId: current.userId, intent: current.state?.lastIntent || null });
+                    await this.sessionManager.updateSessionState(data.sessionId, { liveAgentRequestedAt: queued.requestedAt, liveAgentQueue: queue });
+                    this.io.to('agents').emit('escalationRequested', { sessionId: data.sessionId, queue, requestedAt: queued.requestedAt, reason: 'human_assistance_required' });
+                });
+                await this.broadcastToSession(data.sessionId, 'humanEscalation', { sessionId: data.sessionId, queue, reason: 'human_assistance_required' });
+            } catch { logger.error('Live assistance queue unavailable', { sessionId: data.sessionId }); }
         });
 
         // Session manager events
@@ -539,6 +585,7 @@ class SocketHandler {
                         ...principal,
                         // Retain the verified JWT so it can be propagated to the AI
                         // orchestrator and on to authenticated banking tool calls.
+                        authExpiresAt: decoded.exp ? decoded.exp * 1000 : null,
                         authToken: data.token
                     };
                 } catch (error) {
@@ -546,13 +593,13 @@ class SocketHandler {
                 }
             } else if (data.credentials) {
                 const validation = await this.validateUserCredentials(data.credentials);
-                if (validation.valid && validation.userId !== undefined && validation.userId !== null) {
-                    authResult = { authenticated: true, userId: validation.userId };
-                }
+                if (validation.valid && validation.authToken) return this.handleAuthentication(socket, { token: validation.authToken });
             }
 
             if (authResult.authenticated) {
                 const previousPrincipalId = clientInfo.principalId;
+                if (previousPrincipalId && (previousPrincipalId !== authResult.userId || clientInfo.role !== (authResult.role || null))) this.revokeSocketAccess(clientInfo);
+                clearTimeout(clientInfo.expiryTimer);
                 if (authResult.isAgentPrincipal) {
                     await socket.join('agents');
                 } else if (clientInfo.isAgentPrincipal) {
@@ -578,6 +625,11 @@ class SocketHandler {
                     : clientInfo.agentAssignments || new Map();
                 clientInfo.authToken = authResult.authToken || null;
                 clientInfo.authenticationTime = new Date();
+                clientInfo.authExpiresAt = authResult.authExpiresAt || null;
+                if (clientInfo.authExpiresAt) {
+                    clientInfo.expiryTimer = setTimeout(() => { this.revokeSocketAccess(clientInfo); socket.emit('authenticationError', { error: 'Access token expired' }); socket.disconnect?.(true); }, Math.max(1, Math.min(2147483647, clientInfo.authExpiresAt - Date.now())));
+                    clientInfo.expiryTimer.unref?.();
+                }
 
                 logger.info('Client authenticated', {
                     socketId: socket.id,
@@ -594,6 +646,7 @@ class SocketHandler {
                     timestamp: new Date().toISOString()
                 });
             } else {
+                this.revokeSocketAccess(clientInfo);
                 socket.emit('authenticationError', {
                     error: 'Authentication failed',
                     timestamp: new Date().toISOString()
@@ -630,15 +683,11 @@ class SocketHandler {
                 }
             );
 
-            const user = response.data?.data?.user;
-
-            return {
-                valid: true,
-                userId: user?.userId || user?.id || credentials.userId
-            };
+            const token = response.data?.data?.tokens?.accessToken;
+            return typeof token === 'string' && token ? { valid: true, authToken: token } : { valid: false };
         } catch (error) {
             logger.warn('Credential validation failed', {
-                error: error.response?.data || error.message
+                code: error.code || 'AUTHENTICATION_FAILED'
             });
 
             return { valid: false };
@@ -657,6 +706,7 @@ class SocketHandler {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             const sessionMetadata = {
                 ...clientInfo.metadata,
                 ...data.metadata,
@@ -730,8 +780,9 @@ class SocketHandler {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             // Get session info
-            const session = await this.sessionManager.getSession(data.sessionId);
+            const session = await this.sessionManager.getSession(data.sessionId, { refresh: true });
             if (!session) {
                 socket.emit('sessionError', { error: 'Session not found' });
                 return;
@@ -754,16 +805,13 @@ class SocketHandler {
             // active assignee; the trusted Agent UI service must identify the
             // active assignee it is relaying for (or have just assigned it on
             // this socket).
-            if (!ownsSession && !agentAccess.authorized) {
+            if (!this.sameTenant(clientInfo, session) || (!ownsSession && !agentAccess.authorized)) {
                 socket.emit('sessionError', { error: 'Access denied' });
                 return;
             }
 
             // Update client info
-            clientInfo.sessionId = data.sessionId;
-
-            // Join socket room
-            socket.join(`session:${data.sessionId}`);
+            await this.moveSocketSession(clientInfo, data.sessionId);
 
             // Get conversation history
             const history = await this.chatService.getConversationHistory(data.sessionId);
@@ -803,6 +851,7 @@ class SocketHandler {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             // Rate limiting
             if (!this.checkMessageRateLimit(socket.id)) {
                 socket.emit('messageError', { error: 'Rate limit exceeded' });
@@ -810,7 +859,7 @@ class SocketHandler {
             }
 
             // Validate message
-            if (!data.content || data.content.trim().length === 0) {
+            if (typeof data?.content !== 'string' || data.content.trim().length === 0) {
                 socket.emit('messageError', { error: 'Message content required' });
                 return;
             }
@@ -825,29 +874,42 @@ class SocketHandler {
 
             // Live human agent mode: route human-to-human, never through the
             // AI orchestrator, while keeping the same transcript persistence.
-            const liveSession = await this.sessionManager.getSession(clientInfo.sessionId);
-            if (liveSession && isLiveAgentSession(liveSession)) {
+            const liveSession = await this.sessionManager.getSession(clientInfo.sessionId, { refresh: true });
+            if (!liveSession || !this.sameTenant(clientInfo, liveSession)) throw new Error('Session access denied');
+            if (clientInfo.isAgentPrincipal && !this.getAssignedSessionAccess(clientInfo, liveSession, clientInfo.agentAssignments?.get(clientInfo.sessionId)).authorized) throw new Error('Access denied');
+            if (!clientInfo.isAgentPrincipal && String(liveSession.userId) !== String(clientInfo.userId)) throw new Error('Access denied');
+            if (!isLiveAgentSession(liveSession) && liveSession.state?.liveAgentRequestedAt && !hasLiveRequest(liveSession)) throw new Error('Live request expired; request assistance again or end live chat');
+            if (isLiveAgentSession(liveSession) || hasLiveRequest(liveSession)) {
+                return await this.withLiveSession(clientInfo, clientInfo.sessionId, async current => {
+                if (!isLiveAgentSession(current) && !hasLiveRequest(current)) throw new Error('Live assignment has changed');
+                const liveSession = current;
                 const senderRole = clientInfo.isAgentPrincipal ? 'agent' : 'customer';
-                const senderId = senderRole === 'agent' ? (clientInfo.principalId || clientInfo.userId) : clientInfo.userId;
-                validateLiveSender({ role: senderRole, senderId, session: liveSession });
+                const senderId = senderRole === 'agent' ? (clientInfo.canRelayAgent ? clientInfo.agentAssignments?.get(clientInfo.sessionId) : clientInfo.principalId) : clientInfo.userId;
+                if (isLiveAgentSession(liveSession)) {
+                    if (senderRole === 'agent' && clientInfo.canRelayAgent) { if (!this.getAssignedSessionAccess(clientInfo, liveSession, clientInfo.agentAssignments?.get(clientInfo.sessionId)).authorized) throw new Error('Access denied'); }
+                    else validateLiveSender({ role: senderRole, senderId, session: liveSession });
+                } else if (senderRole !== 'customer') throw new Error('Access denied');
                 const liveMessage = buildLiveMessage({ sessionId: clientInfo.sessionId, senderRole, senderId, content: data.content });
+                let stored;
                 if (senderRole === 'customer') {
-                    const stored = await this.chatService.processMessage(clientInfo.sessionId, {
+                    stored = await this.chatService.processMessage(clientInfo.sessionId, {
                         content: data.content,
                         type: data.type || 'text',
                         attachments: data.attachments || [],
                         clientInfo: { socketId: socket.id, userAgent: clientInfo.metadata.userAgent, ipAddress: clientInfo.metadata.ipAddress },
                     }, data.metadata || {});
-                    this.broadcastToSession(clientInfo.sessionId, 'liveMessage', { ...liveMessage, messageId: stored.id });
+                    await this.deliverMessage(stored);
                 } else {
-                    await this.chatService.sendResponse(clientInfo.sessionId, { content: data.content, type: data.type || 'text' }, {
+                    stored = await this.chatService.sendResponse(clientInfo.sessionId, { content: data.content, type: data.type || 'text' }, {
                         agentId: senderId,
                         agentType: 'human',
                     });
                 }
-                await this.sessionManager.incrementSessionStatistics(clientInfo.sessionId, { messageCount: 1 });
-                socket.emit('messageReceived', { messageId: liveMessage.id, timestamp: liveMessage.timestamp, status: 'delivered' });
+                let telemetryUnavailable = false;
+                try { await this.sessionManager.incrementSessionStatistics(clientInfo.sessionId, { messageCount: 1 }); } catch { telemetryUnavailable = true; }
+                socket.emit('messageReceived', { messageId: stored.id, timestamp: liveMessage.timestamp, status: 'stored', telemetryUnavailable });
                 return;
+                });
             }
 
             // Process message through chat service
@@ -944,13 +1006,14 @@ class SocketHandler {
     /**
      * Handle typing indicators
      */
-    handleTyping(socket, data) {
+    async handleTyping(socket, data) {
         try {
             const clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo || !clientInfo.sessionId) {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             const typingKey = `${clientInfo.sessionId}:${clientInfo.userId}`;
             this.activeTyping.set(typingKey, {
                 socketId: socket.id,
@@ -958,11 +1021,9 @@ class SocketHandler {
                 startedAt: new Date()
             });
 
-            // Broadcast to other users in session
-            socket.to(`session:${clientInfo.sessionId}`).emit('userTyping', {
-                userId: clientInfo.userId,
-                timestamp: new Date().toISOString()
-            });
+            const recipients = await this.authorizedSessionRecipients(clientInfo.sessionId);
+            if (!recipients.includes(socket)) return;
+            for (const recipient of recipients) if (recipient !== socket) recipient.emit('userTyping', { userId: clientInfo.userId, timestamp: new Date().toISOString() });
 
             // Auto-stop typing after timeout
             setTimeout(() => {
@@ -982,22 +1043,21 @@ class SocketHandler {
     /**
      * Handle stop typing
      */
-    handleStopTyping(socket, data) {
+    async handleStopTyping(socket, data) {
         try {
             const clientInfo = this.connectedClients.get(socket.id);
             if (!clientInfo || !clientInfo.sessionId) {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             const typingKey = `${clientInfo.sessionId}:${clientInfo.userId}`;
             if (this.activeTyping.has(typingKey)) {
                 this.activeTyping.delete(typingKey);
 
-                // Broadcast to other users in session
-                socket.to(`session:${clientInfo.sessionId}`).emit('userStoppedTyping', {
-                    userId: clientInfo.userId,
-                    timestamp: new Date().toISOString()
-                });
+                const recipients = await this.authorizedSessionRecipients(clientInfo.sessionId);
+                if (!recipients.includes(socket)) return;
+                for (const recipient of recipients) if (recipient !== socket) recipient.emit('userStoppedTyping', { userId: clientInfo.userId, timestamp: new Date().toISOString() });
             }
 
         } catch (error) {
@@ -1019,6 +1079,7 @@ class SocketHandler {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
             // File upload logic would go here
             // For now, just acknowledge
             socket.emit('fileUploadSuccess', {
@@ -1050,6 +1111,9 @@ class SocketHandler {
                 return;
             }
 
+            this.assertAuthenticated(clientInfo);
+            const session = await this.sessionManager.getSession(clientInfo.sessionId, { refresh: true });
+            if (!session || !this.sameTenant(clientInfo, session) || clientInfo.isAgentPrincipal || String(session.userId) !== String(clientInfo.userId)) throw new Error('Access denied');
             const endedSessionId = clientInfo.sessionId;
 
             // End chat session
@@ -1132,6 +1196,7 @@ class SocketHandler {
             const clientInfo = this.connectedClients.get(socket.id);
             
             if (clientInfo) {
+                clearTimeout(clientInfo.expiryTimer);
                 logger.info('Client disconnected', {
                     socketId: socket.id,
                     userId: clientInfo.userId,
@@ -1168,49 +1233,34 @@ class SocketHandler {
     /**
      * Deliver message to specific session
      */
-    deliverMessage(message) {
-        try {
-            if (message.sessionId) {
-                this.io.to(`session:${message.sessionId}`).emit('newMessage', message);
-                
-                logger.debug('Message delivered', {
-                    sessionId: message.sessionId,
-                    messageId: message.id,
-                    direction: message.direction
-                });
-            }
-        } catch (error) {
-            logger.error('Message delivery error', {
-                error: error.message,
-                sessionId: message.sessionId,
-                messageId: message.id
-            });
+    async authorizedSessionRecipients(sessionId) {
+        const session = await this.sessionManager.getSession(sessionId, { refresh: true });
+        if (!session) return [];
+        const recipients = [];
+        for (const client of this.connectedClients.values()) {
+            if (client.sessionId !== sessionId && !client.agentAssignments?.has(sessionId)) continue;
+            try {
+                this.assertAuthenticated(client);
+                const authorized = this.sameTenant(client, session) && (!client.isAgentPrincipal
+                    ? String(session.userId) === String(client.userId)
+                    : this.getAssignedSessionAccess(client, session, client.agentAssignments?.get(sessionId)).authorized);
+                if (authorized) recipients.push(client.socket);
+                else { await client.socket.leave(`session:${sessionId}`); if (client.sessionId === sessionId) client.sessionId = null; client.agentAssignments?.delete(sessionId); }
+            } catch { /* Expired authentication is revoked by assertAuthenticated. */ }
         }
+        return recipients;
     }
 
-    /**
-     * Broadcast event to session
-     */
-    broadcastToSession(sessionId, event, data) {
+    async deliverMessage(message) {
         try {
-            this.io.to(`session:${sessionId}`).emit(event, {
-                ...data,
-                timestamp: new Date().toISOString()
-            });
+            for (const socket of await this.authorizedSessionRecipients(message.sessionId)) socket.emit('newMessage', message);
+        } catch { logger.error('Message delivery authorization failed', { sessionId: message.sessionId }); }
+    }
 
-            logger.debug('Event broadcasted to session', {
-                sessionId,
-                event,
-                dataKeys: Object.keys(data)
-            });
-
-        } catch (error) {
-            logger.error('Broadcast error', {
-                error: error.message,
-                sessionId,
-                event
-            });
-        }
+    async broadcastToSession(sessionId, event, data) {
+        try {
+            for (const socket of await this.authorizedSessionRecipients(sessionId)) socket.emit(event, { ...data, timestamp: new Date().toISOString() });
+        } catch { logger.error('Session event authorization failed', { sessionId, event }); }
     }
 
     /**

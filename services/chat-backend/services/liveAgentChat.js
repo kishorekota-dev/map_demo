@@ -32,6 +32,11 @@
 const { randomUUID } = require('crypto');
 
 const MAX_LIVE_MESSAGE_LENGTH = 2000;
+const LIVE_REQUEST_TTL_MS = 15 * 60 * 1000;
+const queueName = value => { if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value)) throw new Error('Invalid live agent queue'); return value; };
+const boundedReason = value => { if (value === undefined) return 'customer_requested'; if (typeof value !== 'string' || !value.trim() || value.length > 500) throw new Error('Invalid live agent reason'); return value; };
+const hasLiveRequest = session => Boolean(session?.state?.liveAgentRequestedAt && Date.parse(session.state.liveAgentRequestedAt) + LIVE_REQUEST_TTL_MS > Date.now());
+const redact = value => typeof value === 'string' ? value.slice(0, 2000).replace(/Bearer\s+\S+/gi, 'Bearer [redacted]').replace(/\b(password|secret|token|api[_-]?key)\s*[:=]\s*\S+/gi, '$1=[redacted]').replace(/\b\d{6,}\b/g, '[number]') : null;
 
 class LiveAgentQueue {
   constructor() {
@@ -40,9 +45,13 @@ class LiveAgentQueue {
 
   enqueue({ queue = 'default', sessionId, customerId, intent = null }) {
     if (!sessionId || !customerId) throw new Error('Live agent queue requires sessionId and customerId');
+    queueName(queue);
+    for (const [name, items] of this.queues) { const active = items.filter(entry => Date.parse(entry.requestedAt) + LIVE_REQUEST_TTL_MS > Date.now()); if (active.length) this.queues.set(name, active); else this.queues.delete(name); }
+    for (const [name, items] of this.queues) if (name !== queue && items.some(entry => entry.sessionId === sessionId)) throw new Error('Session is already queued');
     const list = this.queues.get(queue) || [];
     const existing = list.find((entry) => entry.sessionId === sessionId);
     if (existing) return { ...existing, queuePosition: list.indexOf(existing) + 1, alreadyQueued: true };
+    if ([...this.queues.values()].reduce((sum, items) => sum + items.length, 0) >= 1000) throw new Error('Live agent queue is full');
     const entry = { sessionId, customerId, intent, requestedAt: new Date().toISOString() };
     list.push(entry);
     this.queues.set(queue, list);
@@ -118,15 +127,14 @@ function buildLiveMessage({ sessionId, senderRole, senderId, content }) {
 /**
  * Transfer context for the assigned agent. Built from session state and
  * the recent transcript (last 10 messages, content + direction only).
- * Never includes auth tokens, secrets, or full account numbers — the
- * transcript already contains only what the customer said in this session,
- * and the agent is the assigned human for that session.
+ * Applies bounded credential/long-number redaction to transcript text. This is
+ * not comprehensive PII classification; only the assigned agent may receive it.
  */
 function buildTransferContext(session, history = []) {
   const state = session?.state || {};
   const recent = (Array.isArray(history) ? history : []).slice(-10).map((message) => ({
     direction: message.direction || null,
-    content: typeof message.content === 'string' ? message.content.slice(0, 2000) : null,
+    content: redact(message.content),
     timestamp: message.timestamp || null,
   }));
   return {
@@ -136,7 +144,7 @@ function buildTransferContext(session, history = []) {
     conversationStage: state.conversationStage || null,
     liveAgentId: state.liveAgentId || null,
     liveAgentStartedAt: state.liveAgentStartedAt || null,
-    reason: state.liveAgentReason || null,
+    reason: redact(state.liveAgentReason),
     recentMessages: recent,
   };
 }
@@ -150,4 +158,5 @@ module.exports = {
   buildLiveMessage,
   buildTransferContext,
   MAX_LIVE_MESSAGE_LENGTH,
+  LIVE_REQUEST_TTL_MS, queueName, boundedReason, hasLiveRequest,
 };

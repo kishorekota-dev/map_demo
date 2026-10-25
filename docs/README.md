@@ -29,6 +29,9 @@ executable migration scripts resolve conflicts with old implementation reports.
 | Pinned runtime behavior and durable effect records | [Runtime reference](../services/ai-orchestrator/CONTROL-PLANE-RUNTIME.md) |
 | Enterprise packaging and supported boundaries | [Productization](guides/productization.md) |
 | Delivered market gaps and verification evidence | [Implementation record](guides/servicing-product-implementation.md) |
+| Recent integration changes, fixes and qualification scope | [Change review](guides/recent-changes-review.md) |
+| Backend adapter contract and restrictions | [Backend integration](guides/backend-integration-framework.md) |
+| Digital assistant pilot acceptance | [Pilot checklist](guides/digital-assistant-pilot-checklist.md) |
 | Current gaps, new implementation and differentiation | [Platform assessment](guides/platform-gap-assessment.md) |
 | Measured model responses and exact-evidence release gates | [Response quality](guides/model-evaluation.md) |
 | Case assignment, citations and handling | [Agent workspace](../services/api-gateway/operations/AGENT-WORKSPACE.md) |

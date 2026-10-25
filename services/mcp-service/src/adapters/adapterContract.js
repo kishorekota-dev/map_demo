@@ -1,249 +1,445 @@
-/**
- * Generic backend adapter contract (v1).
- *
- * A backend adapter is a server-side declaration of how the platform talks to
- * ONE company's backend system (CRM, ticketing, core banking, billing, ...).
- * It is NOT a plugin marketplace: adapters are declared in a server-side
- * config file read at startup, never registered through a public API, so a
- * caller cannot point the platform at an arbitrary endpoint or smuggle in
- * credentials. Service credentials always come from environment variables
- * named in the declaration; they are never accepted in a request body, never
- * logged, and never returned in any response.
- *
- * Existing banking tools (completeBankingTools) are unchanged. This framework
- * sits beside them so new backends do not require a new hard-coded tool
- * class per company.
- *
- * Naming: a tool is discovered as `<adapterId>_<toolName>` with `-` in the
- * adapter id converted to `_`, so tools from different adapters can never
- * collide with each other or with the existing un-prefixed banking tools.
- */
-
+/** Server-owned adapter declarations; this validates the supported bounded schema subset. */
+const { validateEndpoint } = require("./adapterNetwork");
 const ID_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]{1,99}$/;
-const PATH_TEMPLATE_PATTERN = /^\/[A-Za-z0-9\-._~!$&'()*+,;=:@{}%/]*$/;
-const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-const AUTH_TYPES = new Set(['none', 'apiKey', 'bearer', 'basic', 'oauth2-client-credentials']);
-const FORBIDDEN_STATIC_HEADERS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie']);
-
+const ENV_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
+const FIELD = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const FORBIDDEN_FIELDS = new Set(["__proto__", "prototype", "constructor"]);
+const HEADER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const FORBIDDEN_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "cookie",
+  "set-cookie",
+  "host",
+  "connection",
+  "content-length",
+  "transfer-encoding",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-connection",
+  "idempotency-key",
+]);
 class AdapterValidationError extends Error {
   constructor(message) {
     super(message);
-    this.name = 'AdapterValidationError';
+    this.name = "AdapterValidationError";
   }
 }
-
-function isPlainObject(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
+const object = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const only = (value, allowed) =>
+  object(value) && Object.keys(value).every((key) => allowed.includes(key));
+const text = (value, max) =>
+  typeof value === "string" && !!value.trim() && value.length <= max;
+const field = (name) => FIELD.test(name) && !FORBIDDEN_FIELDS.has(name);
 function namespacedToolName(adapterId, toolName) {
-  return `${adapterId.replace(/-/g, '_')}_${toolName}`;
+  return `${adapterId.replace(/-/g, "_")}_${toolName}`;
 }
-
-/**
- * Validate an adapter definition and return a normalized copy with defaults
- * applied. Throws AdapterValidationError on the first problem found. Pure:
- * no I/O, no environment access (credential presence is checked separately
- * by credentialResolver at execution time, so a definition can be validated
- * without its secrets being present).
- *
- * @param {object} definition raw adapter definition
- * @param {object} [env] environment used only for the production-https rule
- */
+function validPath(path, allowedFields = []) {
+  if (
+    typeof path !== "string" ||
+    path.length > 2000 ||
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    /[\\?#\s]/.test(path)
+  )
+    return false;
+  if (
+    [...path.matchAll(/\{([^{}]*)\}/g)].some(
+      (match) => !allowedFields.includes(match[1]),
+    )
+  )
+    return false;
+  const rendered = path.replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, "value");
+  if (/[{}]/.test(rendered)) return false;
+  try {
+    return rendered.split("/").every((segment) => {
+      const decoded = decodeURIComponent(segment);
+      return (
+        ![".", ".."].includes(decoded) &&
+        !/[\\/%?#\s]/.test(decoded) &&
+        ![...decoded].some(
+          (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+        )
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+function validHeader(name, value, auth = false) {
+  return (
+    typeof name === "string" &&
+    name.length <= 100 &&
+    HEADER.test(name) &&
+    !(auth
+      ? new Set([
+          "host",
+          "connection",
+          "content-length",
+          "transfer-encoding",
+          "cookie",
+          "set-cookie",
+          "proxy-authorization",
+          "idempotency-key",
+        ]).has(name.toLowerCase())
+      : FORBIDDEN_HEADERS.has(name.toLowerCase())) &&
+    (value === undefined ||
+      (typeof value === "string" &&
+        value.length <= 2000 &&
+        !/[\r\n\0]/.test(value)))
+  );
+}
+function validateSchema(schema, depth = 0) {
+  if (
+    depth > 5 ||
+    !object(schema) ||
+    (schema.description !== undefined && !text(schema.description, 2000))
+  )
+    return false;
+  const primitive = ["string", "number", "integer", "boolean", "null"];
+  if (schema.type === "object") {
+    if (
+      !only(schema, [
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "description",
+      ]) ||
+      !object(schema.properties) ||
+      Object.keys(schema.properties).length > 64 ||
+      schema.additionalProperties === true
+    )
+      return false;
+    if (
+      schema.additionalProperties !== undefined &&
+      schema.additionalProperties !== false
+    )
+      return false;
+    const required = schema.required === undefined ? [] : schema.required;
+    return (
+      Array.isArray(required) &&
+      new Set(required).size === required.length &&
+      required.every(
+        (name) => field(name) && Object.hasOwn(schema.properties, name),
+      ) &&
+      Object.entries(schema.properties).every(
+        ([name, rule]) => field(name) && validateSchema(rule, depth + 1),
+      )
+    );
+  }
+  if (schema.type === "array")
+    return (
+      only(schema, ["type", "items", "minItems", "maxItems", "description"]) &&
+      validateSchema(schema.items, depth + 1) &&
+      (schema.minItems === undefined ||
+        (Number.isInteger(schema.minItems) &&
+          schema.minItems >= 0 &&
+          schema.minItems <= 100)) &&
+      (schema.maxItems === undefined ||
+        (Number.isInteger(schema.maxItems) &&
+          schema.maxItems >= (schema.minItems || 0) &&
+          schema.maxItems <= 100))
+    );
+  if (
+    !primitive.includes(schema.type) ||
+    !only(schema, [
+      "type",
+      "enum",
+      "minimum",
+      "maximum",
+      "minLength",
+      "maxLength",
+      "description",
+    ])
+  )
+    return false;
+  if (
+    schema.enum !== undefined &&
+    (!Array.isArray(schema.enum) ||
+      !schema.enum.length ||
+      schema.enum.length > 100 ||
+      schema.enum.some(
+        (value) =>
+          !["string", "number", "boolean"].includes(typeof value) &&
+          value !== null,
+      ))
+  )
+    return false;
+  for (const bound of ["minimum", "maximum"])
+    if (
+      schema[bound] !== undefined &&
+      (!["number", "integer"].includes(schema.type) ||
+        !Number.isFinite(schema[bound]))
+    )
+      return false;
+  if (
+    schema.minimum !== undefined &&
+    schema.maximum !== undefined &&
+    schema.minimum > schema.maximum
+  )
+    return false;
+  for (const bound of ["minLength", "maxLength"])
+    if (
+      schema[bound] !== undefined &&
+      (schema.type !== "string" ||
+        !Number.isInteger(schema[bound]) ||
+        schema[bound] < 0 ||
+        schema[bound] > 4000)
+    )
+      return false;
+  return !(
+    schema.minLength !== undefined &&
+    schema.maxLength !== undefined &&
+    schema.minLength > schema.maxLength
+  );
+}
 function validateAdapterDefinition(definition, env = process.env) {
-  if (!isPlainObject(definition)) {
-    throw new AdapterValidationError('Adapter definition must be an object');
-  }
-  const errors = [];
-  const fail = (message) => errors.push(message);
-
-  if (!ID_PATTERN.test(definition.id || '')) {
-    fail('id must match /^[a-z][a-z0-9-]{1,63}$/ (lowercase, starts with a letter)');
-  }
-  if (typeof definition.name !== 'string' || !definition.name.trim()) {
-    fail('name is required');
-  }
-  if (typeof definition.version !== 'string' || !definition.version.trim()) {
-    fail('version is required');
-  }
-
-  // Base URL: http/https only, no embedded credentials, no trailing slash.
-  let baseUrl = '';
-  if (typeof definition.baseUrl !== 'string' || !definition.baseUrl.trim()) {
-    fail('baseUrl is required');
-  } else {
-    baseUrl = definition.baseUrl.trim().replace(/\/+$/, '');
-    let parsed;
-    try {
-      parsed = new URL(baseUrl);
-    } catch {
-      fail('baseUrl must be a valid URL');
-    }
-    if (parsed) {
-      if (!['http:', 'https:'].includes(parsed.protocol)) fail('baseUrl must use http or https');
-      if (parsed.username || parsed.password) fail('baseUrl must not embed credentials');
-      if (env && env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
-        fail('baseUrl must use https in production');
-      }
-    }
-  }
-
-  // Auth: credentials are referenced by environment variable name only.
-  const auth = definition.auth || { type: 'none' };
-  if (!isPlainObject(auth) || !AUTH_TYPES.has(auth.type)) {
-    fail(`auth.type must be one of: ${[...AUTH_TYPES].join(', ')}`);
-  } else if (auth.type === 'apiKey' || auth.type === 'bearer') {
-    if (typeof auth.envVar !== 'string' || !auth.envVar.trim()) fail(`auth.envVar is required for ${auth.type}`);
-    if (auth.headerName !== undefined && (typeof auth.headerName !== 'string' || !auth.headerName.trim())) {
-      fail('auth.headerName must be a non-empty string when provided');
-    }
-  } else if (auth.type === 'basic') {
-    if (typeof auth.envVarUsername !== 'string' || !auth.envVarUsername.trim()) fail('auth.envVarUsername is required for basic');
-    if (typeof auth.envVarPassword !== 'string' || !auth.envVarPassword.trim()) fail('auth.envVarPassword is required for basic');
-  } else if (auth.type === 'oauth2-client-credentials') {
-    if (typeof auth.envVarClientId !== 'string' || !auth.envVarClientId.trim()) fail('auth.envVarClientId is required for oauth2-client-credentials');
-    if (typeof auth.envVarClientSecret !== 'string' || !auth.envVarClientSecret.trim()) fail('auth.envVarClientSecret is required for oauth2-client-credentials');
-    if (typeof auth.tokenUrl !== 'string' || !auth.tokenUrl.trim()) fail('auth.tokenUrl is required for oauth2-client-credentials');
-  }
-
-  // Static headers: literal values only, never a credential header.
-  const headers = definition.headers || {};
-  if (!isPlainObject(headers)) {
-    fail('headers must be an object');
-  } else {
-    for (const [name, value] of Object.entries(headers)) {
-      if (FORBIDDEN_STATIC_HEADERS.has(name.toLowerCase())) {
-        fail(`headers must not include "${name}" — use auth instead`);
-      }
-      if (typeof value !== 'string') fail(`headers["${name}"] must be a string`);
-    }
-  }
-
-  if (definition.healthPath !== undefined) {
-    if (typeof definition.healthPath !== 'string' || !PATH_TEMPLATE_PATTERN.test(definition.healthPath)) {
-      fail('healthPath must start with / and contain only URL-safe characters');
-    }
-  }
-
-  // Tools.
-  if (!Array.isArray(definition.tools) || definition.tools.length === 0) {
-    fail('tools must be a non-empty array');
-  }
-  const seenToolNames = new Set();
-  const tools = [];
-  if (Array.isArray(definition.tools)) {
-    for (const tool of definition.tools) {
-      if (!isPlainObject(tool)) {
-        fail('each tool must be an object');
-        continue;
-      }
-      if (!TOOL_NAME_PATTERN.test(tool.name || '')) {
-        fail(`tool name "${tool.name}" must match /^[a-z][a-z0-9_]{1,99}$/`);
-        continue;
-      }
-      if (seenToolNames.has(tool.name)) {
-        fail(`duplicate tool name "${tool.name}"`);
-        continue;
-      }
-      seenToolNames.add(tool.name);
-      if (typeof tool.description !== 'string' || !tool.description.trim()) {
-        fail(`tool "${tool.name}" requires a description`);
-      }
-      if (!METHODS.has(tool.method)) {
-        fail(`tool "${tool.name}" method must be one of: ${[...METHODS].join(', ')}`);
-      }
-      if (typeof tool.path !== 'string' || !PATH_TEMPLATE_PATTERN.test(tool.path)) {
-        fail(`tool "${tool.name}" path must start with / and contain only URL-safe characters`);
-      }
-      if (tool.path.includes('..')) fail(`tool "${tool.name}" path must not contain ".."`);
-      if (!isPlainObject(tool.inputSchema) || tool.inputSchema.type !== 'object' || !isPlainObject(tool.inputSchema.properties)) {
-        fail(`tool "${tool.name}" inputSchema must be an object schema with properties`);
-      }
-      if (tool.inputSchema.required !== undefined && !Array.isArray(tool.inputSchema.required)) {
-        fail(`tool "${tool.name}" inputSchema.required must be an array`);
-      }
-      const readOnly = tool.readOnly === true || tool.method === 'GET';
-      // Mutating tools are idempotent by default; a caller must supply an
-      // idempotencyKey, and the adapter forwards it as Idempotency-Key so
-      // the backend can dedupe even if this process restarts.
-      const idempotency = tool.idempotency || (readOnly ? 'optional' : 'required');
-      if (!['required', 'optional'].includes(idempotency)) {
-        fail(`tool "${tool.name}" idempotency must be "required" or "optional"`);
-      }
-      const timeoutMs = tool.timeoutMs === undefined ? 30000 : tool.timeoutMs;
-      if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
-        fail(`tool "${tool.name}" timeoutMs must be an integer between 1000 and 120000`);
-      }
-      const retry = tool.retry || {};
-      const maxAttempts = retry.maxAttempts === undefined ? 1 : retry.maxAttempts;
-      // Automatic retries are read-only only (see genericHttpAdapter): a
-      // retried mutation could execute twice.
-      if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) {
-        fail(`tool "${tool.name}" retry.maxAttempts must be an integer between 1 and 3`);
-      }
-      if (tool.statusPath !== undefined && (typeof tool.statusPath !== 'string' || !PATH_TEMPLATE_PATTERN.test(tool.statusPath))) {
-        fail(`tool "${tool.name}" statusPath must start with / and contain only URL-safe characters`);
-      }
-      tools.push({
-        ...tool,
-        readOnly,
-        idempotency,
-        timeoutMs,
-        retry: { maxAttempts },
-        namespacedName: namespacedToolName(definition.id, tool.name),
-      });
-    }
-  }
-
-  if (errors.length) {
-    throw new AdapterValidationError(`Invalid adapter "${definition.id || 'unknown'}": ${errors.join('; ')}`);
-  }
-  return {
-    ...definition,
-    baseUrl,
-    auth: { ...auth },
-    headers: { ...headers },
-    tools,
+  const fail = (message) => {
+    throw new AdapterValidationError(`Invalid adapter definition: ${message}`);
   };
+  if (
+    !only(definition, [
+      "id",
+      "name",
+      "version",
+      "baseUrl",
+      "auth",
+      "headers",
+      "healthPath",
+      "tools",
+    ]) ||
+    !ID_PATTERN.test(definition.id || "") ||
+    definition.id === "banking" ||
+    !text(definition.name, 120) ||
+    !text(definition.version, 100)
+  )
+    fail("provide supported fields, id, name and version");
+  let url;
+  try {
+    url = validateEndpoint(definition.baseUrl, env);
+  } catch (error) {
+    fail(error.message);
+  }
+  const baseUrl = url.toString().replace(/\/+$/, "");
+  const auth = definition.auth || { type: "none" };
+  const authFields = {
+    none: ["type"],
+    apiKey: ["type", "envVar", "headerName"],
+    bearer: ["type", "envVar"],
+    basic: ["type", "envVarUsername", "envVarPassword"],
+    "oauth2-client-credentials": [
+      "type",
+      "envVarClientId",
+      "envVarClientSecret",
+      "tokenUrl",
+      "scope",
+    ],
+  };
+  if (
+    !object(auth) ||
+    !Object.hasOwn(authFields, auth.type) ||
+    !only(auth, authFields[auth.type])
+  )
+    fail("unsupported auth definition");
+  for (const name of authFields[auth.type].filter((name) =>
+    name.startsWith("envVar"),
+  ))
+    if (!ENV_NAME.test(auth[name] || ""))
+      fail("credentials must reference valid environment names");
+  if (
+    auth.type === "apiKey" &&
+    !validHeader(auth.headerName || "X-Api-Key", undefined, true)
+  )
+    fail("invalid API-key header");
+  if (auth.type === "oauth2-client-credentials") {
+    try {
+      validateEndpoint(auth.tokenUrl, env);
+    } catch (error) {
+      fail(error.message);
+    }
+    if (auth.scope !== undefined && !text(auth.scope, 2000))
+      fail("invalid OAuth scope");
+  }
+  const headers = definition.headers || {};
+  if (
+    !object(headers) ||
+    Object.keys(headers).length > 20 ||
+    new Set(Object.keys(headers).map((name) => name.toLowerCase())).size !==
+      Object.keys(headers).length ||
+    (auth.type === "apiKey" &&
+      Object.keys(headers).some(
+        (name) =>
+          name.toLowerCase() === (auth.headerName || "X-Api-Key").toLowerCase(),
+      )) ||
+    Object.entries(headers).some(([name, value]) => !validHeader(name, value))
+  )
+    fail(
+      "static headers must be bounded and cannot override transport/credential headers",
+    );
+  if (definition.healthPath !== undefined && !validPath(definition.healthPath))
+    fail("invalid healthPath");
+  if (
+    !Array.isArray(definition.tools) ||
+    !definition.tools.length ||
+    definition.tools.length > 100
+  )
+    fail("provide 1–100 tools");
+  const names = new Set();
+  const tools = definition.tools.map((tool) => {
+    if (
+      !only(tool, [
+        "name",
+        "description",
+        "method",
+        "path",
+        "readOnly",
+        "idempotency",
+        "inputSchema",
+        "timeoutMs",
+        "retry",
+        "statusPath",
+      ]) ||
+      !TOOL_NAME_PATTERN.test(tool.name || "") ||
+      names.has(tool.name) ||
+      !text(tool.description, 2000)
+    )
+      fail("invalid or duplicate tool name/description");
+    names.add(tool.name);
+    if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(tool.method))
+      fail("unsupported tool method");
+    if (!validateSchema(tool.inputSchema) || tool.inputSchema.type !== "object")
+      fail(
+        "invalid inputSchema; only the documented bounded schema subset is supported",
+      );
+    const fields = Object.entries(tool.inputSchema.properties)
+      .filter(([, rule]) => ["string", "number", "integer"].includes(rule.type))
+      .map(([name]) => name);
+    if (
+      !validPath(tool.path, fields) ||
+      (tool.statusPath !== undefined &&
+        (!validPath(tool.statusPath, ["idempotencyKey"]) ||
+          !tool.statusPath.includes("{idempotencyKey}")))
+    )
+      fail("invalid path template");
+    if (tool.readOnly !== undefined && typeof tool.readOnly !== "boolean")
+      fail("readOnly must be a boolean");
+    if (
+      (tool.method !== "GET" && tool.readOnly === true) ||
+      (tool.method === "GET" && tool.readOnly === false)
+    )
+      fail("only GET tools are readOnly");
+    const readOnly = tool.method === "GET";
+    const idempotency =
+      tool.idempotency || (readOnly ? "optional" : "required");
+    if (
+      !["required", "optional"].includes(idempotency) ||
+      (!readOnly && idempotency !== "required")
+    )
+      fail("mutations require idempotency");
+    const timeoutMs = tool.timeoutMs === undefined ? 30000 : tool.timeoutMs;
+    const retry = tool.retry || {};
+    const maxAttempts = retry.maxAttempts === undefined ? 1 : retry.maxAttempts;
+    if (
+      !Number.isInteger(timeoutMs) ||
+      timeoutMs < 1000 ||
+      timeoutMs > 120000 ||
+      !only(retry, ["maxAttempts"]) ||
+      !Number.isInteger(maxAttempts) ||
+      maxAttempts < 1 ||
+      maxAttempts > 3 ||
+      (!readOnly && maxAttempts !== 1)
+    )
+      fail("invalid timeout/retry; mutations cannot auto-retry");
+    return {
+      ...tool,
+      readOnly,
+      idempotency,
+      timeoutMs,
+      retry: { maxAttempts },
+      namespacedName: namespacedToolName(definition.id, tool.name),
+    };
+  });
+  return JSON.parse(
+    JSON.stringify({ ...definition, baseUrl, auth, headers, tools }),
+  );
 }
-
-/**
- * Validate tool parameters against its inputSchema. Same checks as the
- * banking tool validator: required presence, primitive type, enum
- * membership, numeric minimum. Deterministic and dependency-free.
- */
 function validateParameters(tool, parameters) {
-  const schema = tool.inputSchema || {};
-  const props = schema.properties || {};
-  const required = schema.required || [];
   const errors = [];
-  for (const field of required) {
-    if (parameters[field] === undefined || parameters[field] === null || parameters[field] === '') {
-      errors.push(`missing required field "${field}"`);
+  function visit(schema, value, path) {
+    if (schema.type === "object") {
+      if (!object(value)) {
+        errors.push(`${path} must be an object`);
+        return;
+      }
+      for (const key of Object.keys(value))
+        if (!Object.hasOwn(schema.properties, key))
+          errors.push(`${path}.${key} is not a declared field`);
+      for (const key of schema.required || [])
+        if (
+          !Object.hasOwn(value, key) ||
+          value[key] === undefined ||
+          value[key] === null ||
+          value[key] === ""
+        )
+          errors.push(`${path}.${key} is required`);
+      for (const [key, rule] of Object.entries(schema.properties))
+        if (Object.hasOwn(value, key))
+          visit(rule, value[key], `${path}.${key}`);
+    } else if (schema.type === "array") {
+      if (
+        !Array.isArray(value) ||
+        value.length > (schema.maxItems ?? 100) ||
+        value.length < (schema.minItems || 0)
+      ) {
+        errors.push(`${path} must be a bounded array`);
+        return;
+      }
+      value.forEach((item, index) =>
+        visit(schema.items, item, `${path}.${index}`),
+      );
+    } else {
+      const valid =
+        schema.type === "null"
+          ? value === null
+          : schema.type === "integer"
+            ? Number.isSafeInteger(value)
+            : schema.type === "number"
+              ? typeof value === "number" && Number.isFinite(value)
+              : typeof value === schema.type;
+      if (!valid) {
+        errors.push(`${path} has an invalid type`);
+        return;
+      }
+      if (
+        typeof value === "string" &&
+        (value.length > (schema.maxLength ?? 4000) ||
+          value.length < (schema.minLength || 0))
+      )
+        errors.push(`${path} has an invalid length`);
+      if (
+        typeof value === "number" &&
+        ((schema.minimum !== undefined && value < schema.minimum) ||
+          (schema.maximum !== undefined && value > schema.maximum))
+      )
+        errors.push(`${path} is outside numeric bounds`);
+      if (schema.enum && !schema.enum.includes(value))
+        errors.push(`${path} is outside the declared enum`);
     }
   }
-  for (const [field, rule] of Object.entries(props)) {
-    const value = parameters[field];
-    if (value === undefined || value === null) continue;
-    if (rule.type === 'number') {
-      if (typeof value !== 'number' || Number.isNaN(value)) errors.push(`"${field}" must be a number`);
-      else if (rule.minimum !== undefined && value < rule.minimum) errors.push(`"${field}" must be >= ${rule.minimum}`);
-    } else if (rule.type === 'string' && typeof value !== 'string') {
-      errors.push(`"${field}" must be a string`);
-    } else if (rule.type === 'boolean' && typeof value !== 'boolean') {
-      errors.push(`"${field}" must be a boolean`);
-    } else if (rule.type === 'integer' && !Number.isInteger(value)) {
-      errors.push(`"${field}" must be an integer`);
-    }
-    if (Array.isArray(rule.enum) && !rule.enum.includes(value)) {
-      errors.push(`"${field}" must be one of: ${rule.enum.join(', ')}`);
-    }
+  visit(tool.inputSchema, parameters, "parameters");
+  try {
+    if (Buffer.byteLength(JSON.stringify(parameters)) > 65536)
+      errors.push("parameters exceed 64KiB");
+  } catch {
+    errors.push("parameters must be JSON data");
   }
-  return { valid: errors.length === 0, errors };
+  return { valid: !errors.length, errors };
 }
-
-/** Public view of an adapter: no credential values, only their names. */
 function sanitizeAdapter(adapter) {
   return {
     id: adapter.id,
@@ -265,11 +461,11 @@ function sanitizeAdapter(adapter) {
     })),
   };
 }
-
 module.exports = {
   AdapterValidationError,
   validateAdapterDefinition,
   validateParameters,
   namespacedToolName,
   sanitizeAdapter,
+  validPath,
 };
