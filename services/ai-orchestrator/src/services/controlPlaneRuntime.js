@@ -122,6 +122,19 @@ class ControlPlaneRuntime {
     });
     return validateSnapshot(response.data);
   }
+
+  // A specific published release, read with the caller's own credentials.
+  async getRelease(authToken, version) {
+    const axios = require('axios');
+    const baseUrl = (process.env.CONTROL_PLANE_URL || 'http://localhost:3001/api/control-plane').replace(/\/$/, '');
+    const response = await axios.get(`${baseUrl}/runtime/config`, {
+      params: { version },
+      headers: { Authorization: `Bearer ${authToken}` },
+      timeout: 5000,
+      maxRedirects: 0
+    });
+    return validateSnapshot(response.data);
+  }
 }
 
 module.exports = { ControlPlaneRuntime, normalizeChannel, classifyPublishedIntent, resolvePublishedRoute, validateSnapshot };

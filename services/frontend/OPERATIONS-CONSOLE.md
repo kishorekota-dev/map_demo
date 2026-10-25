@@ -184,11 +184,16 @@ See [evaluation guide and limits](../../docs/guides/model-evaluation.md).
 
 ## Procedures and guardrails
 
-**Procedures & guardrails** imports SOPs as Markdown or text (paste or upload).
-Parsing turns numbered lists into steps and rules under a guardrails heading into
+**Procedures & guardrails** imports SOPs from Word (`.docx`), PDF, HTML, Markdown
+or text files, up to 20 at a time, or from pasted text. Files are read in the
+browser; headings and numbered lists are kept, scanned PDFs are refused with a
+request for OCR, and each file's text can be inspected before it is used. Parsing
+turns numbered lists into steps and rules under a guardrails heading into
 enforced guardrails, reports lines it cannot interpret, and suggests guardrails
-from policy-like sentences for the author to accept. Imported procedures are added
-to the draft disabled. Editors bind intents and channels, choose an internal or
+from policy-like sentences for the author to accept. The batch table shows each
+document's procedure, step and guardrail counts and whether it is ready, needs
+fixes or failed; **Add N ready to draft** adds the ready ones together. Imported
+procedures are added to the draft disabled. Editors bind intents and channels, choose an internal or
 customer audience, edit steps, remove guardrails or edit the procedure as JSON,
 then save, simulate and publish through the normal release gates. Badges show
 new procedures and unpublished changes.
@@ -199,7 +204,14 @@ number of excerpts and optional model task prefixes. **Run evaluation** measures
 the draft as shown on cases written `question | procedure_id` or
 `question | none`, reports top-result accuracy, top-3 accuracy, MRR and correct
 "no match" rate for each strategy, and suggests a floor that **Use** applies to
-the draft. Evaluation is available outside production only. See
+the draft. Evaluation is available outside production only.
+
+The **Procedure retrieval index** panel shows how many customer procedure chunks
+have vectors for the draft and the latest published release, overall and per
+procedure, without calling the model. **Build index for published vN** embeds the
+release's missing chunks in the background (also in production, because only
+approved content is embedded) and follows the build to completion, reporting the
+provider tokens it used. See
 [Procedures and guardrails](../../docs/guides/procedures-and-guardrails.md#retrieval).
 
 ## Knowledge management
@@ -209,7 +221,15 @@ and optional expiry. Editors can save drafts; administrators can publish or
 archive documents. Saving a new draft preserves the prior published version.
 Archiving withdraws the document from retrieval.
 
-Import supports JSON batches of up to 50 documents, saved as drafts for review.
+**Import knowledge files** turns Word, PDF, HTML, Markdown or text files into
+draft documents. A shared source location and role list apply to the batch; each
+file's document id (from the file name) and title (from its first heading) can be
+edited. **Check documents** asks the server to validate the batch without saving
+it, showing every blocking issue per file (duplicate ids, sensitive content,
+unsafe sources, size). **Import as drafts** imports only the files that passed.
+Nothing is retrievable until an administrator publishes each document.
+
+Import also accepts JSON batches of up to 50 documents, saved as drafts for review.
 Each document contains `id`, `title`, `content`, `source`, `allowedRoles`, and an
 optional `expiresAt`. A source URL is provenance; saving it does not crawl it.
 Provider imports are available through a configured knowledge connection.

@@ -1061,6 +1061,7 @@ export default function ControlPlanePage() {
           <ProcedureConsole
             config={draft}
             published={state.published.config}
+            publishedVersion={state.published.version}
             onChange={mutateDraft}
             editable={editable}
           />

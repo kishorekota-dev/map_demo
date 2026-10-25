@@ -18,6 +18,7 @@ import {
   formatDate,
   useConsoleAction,
 } from "./ConsoleElements";
+import KnowledgeIngestion from "./KnowledgeIngestion";
 
 export type StudioSection = "evaluations" | "knowledge" | "environments";
 const newSuite = (): EvaluationSuite => ({
@@ -909,8 +910,14 @@ export default function DesignStudioConsole({
               )}
             </section>
           </div>
+          <KnowledgeIngestion
+            revision={studio.revision}
+            existingIds={studio.knowledge.map((entry) => entry.id)}
+            editable={editable}
+            onImported={accept}
+          />
           <details className="cp-panel cp-shared-prompts">
-            <summary>Import knowledge documents as drafts</summary>
+            <summary>Import knowledge documents from JSON</summary>
             <p>
               Upload or paste a JSON array of up to 50 documents with id, title,
               content, source, allowedRoles, and optional expiresAt. Imported

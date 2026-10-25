@@ -58,18 +58,52 @@ case and surrounding whitespace. Every guardrail accepts an optional `message`
 An unbound procedure may only carry `prohibited_phrases` and `required_disclosure`.
 They apply to any answer grounded in that procedure.
 
-## Importing a procedure document
+## Importing procedure documents
 
 In Servicing Studio open **Procedures & guardrails**, then:
 
-1. Enter the governing **source** (for example `SOP-CARD-014 rev 3` or an HTTPS
-   link), choose the audience, the bound intents and channels.
-2. Paste or upload Markdown or text (up to 30,000 characters; split longer manuals
-   into one document per procedure) and choose **Parse document**.
-3. Review the parsed steps, guardrails, warnings and suggestions. Remove anything
+1. Enter a **source location** (an SOP library name such as `Servicing SOP
+   library`, or an HTTPS folder) and choose the audience, the bound intents and
+   the channels. These settings apply to every document in the batch. Each
+   procedure's source is the file name under the location, or just the file name
+   when no location is given. Pasted text needs a location.
+2. Upload up to 20 files at a time, or paste text, and choose **Parse**.
+3. Each document gets a row with its procedure id, step and guardrail counts and
+   a status: **Ready**, **Needs fixes** (it would block saving the draft, for
+   example a confirmation guardrail on a procedure with no bound intent) or
+   **Failed** (it could not be read or parsed). **Review** shows the steps,
+   guardrails, warnings, suggestions and the extracted text. Remove anything
    wrong and **Accept** suggestions you agree with.
-4. **Add to draft**. The procedure is added disabled. Edit it, enable it, **Save
-   draft**, simulate, and publish through the normal release gates.
+4. **Add N ready to draft** adds every Ready procedure at once, or **Add to draft**
+   adds the one under review. Procedures are added disabled. Edit them, enable
+   them, **Save draft**, simulate, and publish through the normal release gates.
+
+Documents with different bindings belong in separate batches. For example, import
+customer references (no intents) together, then an internal SOP bound to its
+intent on its own. Two documents in a batch whose titles give the same id get
+`_2`, `_3` suffixes instead of replacing each other; a document whose id matches
+a procedure already in the draft is marked as replacing it.
+
+### Supported files
+
+Files are read in the browser and only the extracted text is sent to the parser,
+which validates it like pasted text. Each file may be up to 10 MB, and each
+procedure body up to 30,000 characters (split longer manuals into one document per
+procedure).
+
+| Format | What is kept |
+| --- | --- |
+| Markdown, text | As written. |
+| Word (`.docx`) | Headings (from the paragraph style, its name or outline level, including localized and custom heading styles), numbered and bulleted lists (direct or style-based numbering, nested levels), tables as `cell \| cell` rows. Tracked deletions are dropped. Password-protected files, legacy `.doc` and parts larger than 25 MB uncompressed are refused. |
+| PDF | Text lines rebuilt from positions, wrapped lines joined into paragraphs and list items, lines set noticeably larger than body text marked as headings. Up to 300 pages. Scanned PDFs without a text layer are refused; run OCR first. Layout is approximated, so review the result. |
+| HTML | Headings, ordered and unordered lists (including `start` and nesting), paragraphs, line breaks, tables and preformatted text. Scripts, styles and other markup are dropped. |
+
+PDF text is extracted with Mozilla's pdf.js, loaded only when a PDF is chosen.
+Version 6 never evaluates font programs; fonts and XFA forms are not rendered.
+
+Everything under a guardrails heading is read as a rule, including table rows. A
+table or note placed there is reported as an unrecognized guardrail and is not
+enforced, so give tables and notes their own heading.
 
 Parsing is deterministic and never saves anything. It reads:
 
@@ -138,6 +172,8 @@ a changed procedure with the same `id` is reported as a conflict for review.
 | --- | --- | --- |
 | POST | `/api/control-plane/studio/procedures/parse` | Editor/admin. Body `{document:{source,content,title?,id?,intents?,channels?,audience?}}`. Returns `{procedure,suggestions,warnings,errors,replaces}`. Nothing is stored. |
 | PUT | `/api/control-plane/draft` | Save `config.procedures` with the rest of the draft. |
+| POST | `/api/orchestrator/llm/retrieval/index/status` | Control-plane viewer or above. Body `{config, version?}`. Returns chunk and indexed counts per channel and procedure, whether storage is durable, whether a build is running and, with `version`, the last build of that release on this instance. Never calls a provider. |
+| POST | `/api/orchestrator/llm/retrieval/index/build` | Editor/admin, 5 per minute. Body `{version}`. Loads that published release from the control plane and embeds its missing chunks in the background; returns 202 with the status and build record, 404 for an unknown version and 409 when the release is lexical or has no embedding route. |
 | POST | `/api/orchestrator/llm/retrieval/evaluate` | Editor/admin, 10 per minute. Body `{config,cases,channel?,minSimilarity?}`; `cases` are `{question, expectedProcedureId|null}`. Returns per-strategy scores, the suggested floor and per-case results. Nothing is stored. |
 | POST | `/api/control-plane/simulate` | `{channel,utterance}` returns `procedure` (id, title, source, step count, guardrail IDs/types) and `requiredFields` including procedure fields. |
 
@@ -207,6 +243,33 @@ procedures.
   request and is never cached or persisted. Embedding calls are metered as
   `service: embedding`, `metric: input_tokens` usage events like other model
   calls.
+
+### Index status and builds
+
+The **Procedure retrieval index** panel in **Procedures & guardrails** shows, for
+the draft as edited and for the latest published release, the strategy, the
+embedding model and how many customer procedure chunks already have vectors,
+overall and per procedure. Checking status never calls the embedding provider;
+vectors are looked up by their content key.
+
+**Build index for published vN** embeds that release's missing chunks for every
+channel in the background, exactly as the runtime would on first use, and the
+panel follows it until it finishes. Build after publishing (or before promoting a
+canary) so the first customers get semantic answers instead of `index_warming`
+fallbacks. Because vectors are content-addressed, chunks the draft shares with a
+built release are indexed too, and editing one procedure leaves the rest
+indexed. Evaluating a draft also fills the index for the chunks it embeds.
+
+- Only a published, approved release is embedded, loaded from the control plane
+  with the caller's own credentials, so builds are allowed in production.
+  Editors and administrators can build (5 per minute); control-plane viewers can
+  check status.
+- A build reports its state, missing chunks at start, remaining chunks and the
+  provider's measured input tokens. That usage belongs to no customer
+  interaction, so it is reported on the build rather than as customer usage.
+- With PostgreSQL workflow persistence the vectors are shared by every
+  orchestrator instance. Without it, only the instance that ran the build is
+  warmed, and the panel says so.
 
 ### Fallback
 
@@ -285,9 +348,15 @@ publishing.
   into a new workflow.
 - Prohibited-phrase matching is literal. It catches the exact wording, not every
   paraphrase.
-- The agent workspace does not yet show the governing procedure to human agents,
-  and document import accepts text and Markdown only (no PDF or Word extraction or
-  source synchronization).
+- The agent workspace does not yet show the governing procedure to human agents.
+- Document import reads Word, PDF, HTML, Markdown and text in the browser. There
+  is no OCR for scanned PDFs, no legacy `.doc`, PowerPoint or spreadsheet support,
+  and no synchronization from a document library: re-import a changed SOP, which
+  replaces the draft procedure with the same id. PDF layout is approximated.
+- A build runs on the orchestrator instance that received the request, and its
+  record lives in that instance's memory. With several instances, a status check
+  answered by another instance shows the indexed counts (from shared storage) but
+  not the build record; a restart loses the record, not the stored vectors.
 - Procedures are stored in the release snapshot, which is also pinned to each
   session. Keep bodies focused; very large procedure sets increase session storage.
 
@@ -308,6 +377,14 @@ publishing.
 - `services/ai-orchestrator/src/llm/__tests__/embeddings.test.js` and
   `retrievalEvaluation.test.js`: the provider embedding contract for each plugin,
   usage metering, the evaluation route and floor calibration.
-- `services/frontend/src/components/control-plane/ProcedureConsole.test.ts` and
-  `RetrievalPanel.test.ts`: guardrail wording, the import client and evaluation
-  case parsing.
+- `services/ai-orchestrator/src/llm/__tests__/retrievalIndex.test.js`: index
+  status per channel and procedure, builds through the published release with the
+  caller's credentials, shared stored vectors, storage outages, failures and
+  permissions.
+- `services/frontend/src/services/documentExtraction.test.ts`: Word (direct and
+  style-based numbering, headings, tables, tracked deletions, encrypted and
+  oversized packages), HTML, PDF layout rebuilding, file limits and naming.
+- `services/frontend/src/components/control-plane/ProcedureConsole.test.ts`,
+  `RetrievalPanel.test.ts`, `RetrievalIndexPanel.test.ts` and
+  `procedureIngestion.test.ts`: guardrail wording, the import, evaluation and
+  index clients, batch ids, sources and status wording.

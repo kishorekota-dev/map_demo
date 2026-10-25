@@ -1676,3 +1676,37 @@
   gap: 0.75rem;
   margin-top: 1rem;
 }
+.cp-ingest-table caption {
+  caption-side: top;
+  text-align: left;
+  margin-bottom: 0.5rem;
+}
+.cp-ingest-table tbody th {
+  color: #43573c;
+  font-size: 10px;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+.cp-ingest-table tbody th small {
+  display: block;
+  font-weight: 400;
+}
+.cp-ingest-table td:last-child {
+  white-space: nowrap;
+}
+.cp-ingest-row--active {
+  background: #f0f6e9;
+}
+.cp-extracted-text {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.cp-index-status {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.cp-procedure-binding {
+  margin-top: 12px;
+}

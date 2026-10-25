@@ -1,5 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import controlApi from "@/services/controlPlaneService";
+import {
+  ACCEPTED_DOCUMENTS,
+  EXTRACTION_LIMITS,
+  ExtractionError,
+  extractDocument,
+  formatOf,
+} from "@/services/documentExtraction";
 import type {
   ChannelId,
   ProcedureGuardrail,
@@ -14,6 +21,17 @@ import {
   useConsoleAction,
 } from "./ConsoleElements";
 import RetrievalPanel from "./RetrievalPanel";
+import RetrievalIndexPanel from "./RetrievalIndexPanel";
+import {
+  FORMAT_LABELS,
+  MAX_BATCH,
+  STATUS_LABELS,
+  counts,
+  parseable,
+  sourceFor,
+  uniqueId,
+  type IngestItem,
+} from "./procedureIngestion";
 
 const CHANNELS: ChannelId[] = ["digital", "ava", "ivr"];
 const OPERATOR_LABELS: Record<string, string> = {
@@ -72,7 +90,7 @@ function BindingFields({
   onChannels: (value: ChannelId[]) => void;
 }) {
   return (
-    <div className="cp-form-grid">
+    <div className="cp-form-grid cp-procedure-binding">
       <Field
         label="Bound intents"
         hint="The procedure instructs the assistant and enforces its guardrails for these intents. Leave empty for a customer reference that only grounds answers."
@@ -342,22 +360,29 @@ function ProcedureEditor({
 export default function ProcedureConsole({
   config,
   published,
+  publishedVersion,
   onChange,
   editable,
 }: {
   config: ServicingConfig;
   published: ServicingConfig;
+  publishedVersion?: number;
   onChange: (config: ServicingConfig) => void;
   editable: boolean;
 }) {
   const procedures = config.procedures || [];
   const action = useConsoleAction();
-  const [source, setSource] = useState("");
+  const [location, setLocation] = useState("");
   const [content, setContent] = useState("");
   const [audience, setAudience] = useState<"internal" | "customer">("internal");
   const [intents, setIntents] = useState<string[]>([]);
   const [channels, setChannels] = useState<ChannelId[]>(["digital", "ava"]);
-  const [preview, setPreview] = useState<ProcedureImport | null>(null);
+  const [items, setItems] = useState<IngestItem[]>([]);
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
+  const nextKey = useRef(0);
+  const reviewed = items.find((item) => item.key === reviewKey && item.result);
+  const preview = reviewed?.result || null;
+  const tally = counts(items);
   const setProcedures = (next: ServicingProcedure[]) =>
     onChange({ ...config, procedures: next });
   const replace = (procedure: ServicingProcedure) =>
@@ -365,13 +390,120 @@ export default function ProcedureConsole({
       ...procedures.filter((entry) => entry.id !== procedure.id),
       procedure,
     ]);
+  const patchItem = (key: string, patch: Partial<IngestItem>) =>
+    setItems((current) =>
+      current.map((item) => (item.key === key ? { ...item, ...patch } : item)),
+    );
+  const setPreview = (result: ProcedureImport) =>
+    reviewed && patchItem(reviewed.key, { result });
 
-  const parse = () =>
-    action.run(async () => {
-      setPreview(
-        await controlApi.parseProcedure({ source, content, audience, intents, channels }),
+  const addFiles = async (files: File[]) => {
+    const room = MAX_BATCH - items.length;
+    const chosen = files.slice(0, Math.max(0, room));
+    if (files.length > chosen.length)
+      action.setNotice(
+        `Up to ${MAX_BATCH} documents can be reviewed at a time; ${files.length - chosen.length} were not added.`,
       );
+    const fresh: IngestItem[] = chosen.map((file) => ({
+      key: `document-${(nextKey.current += 1)}`,
+      name: file.name,
+      format: formatOf(file.name) || "text",
+      status: "extracting",
+      text: "",
+      extractionWarnings: [],
+    }));
+    setItems((current) => [...current, ...fresh]);
+    for (const [index, file] of chosen.entries()) {
+      try {
+        const extracted = await extractDocument(file);
+        patchItem(fresh[index].key, {
+          status: "extracted",
+          text: extracted.text,
+          extractionWarnings: extracted.warnings,
+        });
+      } catch (error) {
+        patchItem(fresh[index].key, {
+          status: "failed",
+          error:
+            error instanceof ExtractionError
+              ? error.message
+              : "The file could not be read.",
+        });
+      }
+    }
+  };
+
+  const parseAll = () =>
+    action.run(async () => {
+      let batch = items;
+      if (content.trim()) {
+        if (!location.trim())
+          throw new Error("Name the source of the pasted text.");
+        const pasted: IngestItem = {
+          key: `document-${(nextKey.current += 1)}`,
+          name: "Pasted text",
+          format: "pasted",
+          status: "extracted",
+          text: content,
+          extractionWarnings: [],
+        };
+        batch = [...items, pasted];
+        setItems(batch);
+        setContent("");
+      }
+      const targets = batch.filter(parseable);
+      if (!targets.length) throw new Error("Choose files or paste a procedure first.");
+      const taken = new Set<string>();
+      let lastParsed: string | null = null;
+      for (const item of targets) {
+        patchItem(item.key, { status: "parsing", error: undefined });
+        const document = {
+          source: item.format === "pasted" ? location.trim() : sourceFor(location, item.name),
+          content: item.text,
+          audience,
+          intents,
+          channels,
+        };
+        try {
+          let result = await controlApi.parseProcedure(document);
+          // Two documents with the same title would otherwise replace each other.
+          const id = uniqueId(result.procedure.id, taken);
+          if (id !== result.procedure.id)
+            result = await controlApi.parseProcedure({ ...document, id });
+          taken.add(result.procedure.id);
+          patchItem(item.key, {
+            status: result.errors.length ? "blocked" : "ready",
+            result,
+          });
+          lastParsed = item.key;
+        } catch (error) {
+          patchItem(item.key, {
+            status: "failed",
+            result: undefined,
+            error: error instanceof Error ? error.message : "The document could not be parsed.",
+          });
+        }
+      }
+      if (targets.length === 1 && lastParsed) setReviewKey(lastParsed);
     });
+
+  const addReady = () => {
+    const ready = items.filter((item) => item.status === "ready" && item.result);
+    const additions = ready.map((item) => item.result!.procedure);
+    const ids = new Set(additions.map((procedure) => procedure.id));
+    setProcedures([
+      ...procedures.filter((entry) => !ids.has(entry.id)),
+      ...additions,
+    ]);
+    const added = new Set(ready.map((item) => item.key));
+    setItems((current) =>
+      current.map((item) => (added.has(item.key) ? { ...item, status: "added" } : item)),
+    );
+    setReviewKey(null);
+    action.setNotice(
+      `${additions.length} procedure${additions.length === 1 ? "" : "s"} added to the draft, disabled. Review them below, enable them, save the draft and publish through the release gates.`,
+    );
+  };
 
   return (
     <>
@@ -389,24 +521,30 @@ export default function ProcedureConsole({
 
       <section className="cp-panel" aria-labelledby="procedure-import">
         <div className="cp-panel-heading">
-          <span className="cp-eyebrow">Import</span>
-          <h3 id="procedure-import">Import a procedure document</h3>
+          <span className="cp-eyebrow">Ingest</span>
+          <h3 id="procedure-import">Import procedure documents</h3>
         </div>
         <p>
-          Paste or upload Markdown or plain text. Numbered lists become steps.
-          Rules under a <code>## Guardrails</code> heading become guardrails,
-          for example <code>Require confirmation</code>,{" "}
+          Upload Word, PDF, HTML, Markdown or text files (up to {MAX_BATCH} at
+          a time), or paste text. Headings and numbered lists are kept:
+          numbered lists become steps, and rules under a{" "}
+          <code>## Guardrails</code> heading become guardrails, for example{" "}
+          <code>Require confirmation</code>,{" "}
           <code>Require fields: replacementAddress</code>,{" "}
           <code>Escalate when amount &gt; 5000</code>,{" "}
           <code>Never say: &quot;no fee&quot;</code> and{" "}
           <code>Disclose: Fees may apply.</code> Policy-like sentences
-          elsewhere are suggested for your review. Nothing is enforced until
-          you add the procedure, enable it and publish.
+          elsewhere are suggested for your review. Files are read in your
+          browser; scanned PDFs need OCR first. Nothing is enforced until you
+          add a procedure, enable it and publish.
         </p>
         <fieldset className="cp-fieldset" disabled={!editable || action.busy}>
           <div className="cp-form-grid">
-            <Field label="Source" hint="For example SOP-CARD-014 rev 3 or an HTTPS link to the governing document.">
-              <input value={source} maxLength={1000} onChange={(e) => setSource(e.target.value)} />
+            <Field
+              label="Source location"
+              hint="Recorded as each procedure's source, for example an SOP library name or an HTTPS folder. Files are added under it by name; with no location the file name is used. Required for pasted text."
+            >
+              <input value={location} maxLength={900} onChange={(e) => setLocation(e.target.value)} />
             </Field>
             <Field label="Audience">
               <select
@@ -417,13 +555,18 @@ export default function ProcedureConsole({
                 <option value="customer">Customer</option>
               </select>
             </Field>
-            <Field label="Upload file" hint="Markdown or text, up to 30,000 characters.">
+            <Field
+              label="Upload files"
+              hint={`Word (.docx), PDF, HTML, Markdown or text, up to ${EXTRACTION_LIMITS.fileBytes / 1024 / 1024} MB each. Each procedure body is limited to 30,000 characters; split long manuals into one document per procedure.`}
+            >
               <input
                 type="file"
-                accept=".md,.markdown,.txt,text/markdown,text/plain"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) setContent(await file.text());
+                multiple
+                accept={ACCEPTED_DOCUMENTS}
+                onChange={(e) => {
+                  const files = [...(e.target.files || [])];
+                  e.target.value = "";
+                  if (files.length) void addFiles(files);
                 }}
               />
             </Field>
@@ -435,29 +578,133 @@ export default function ProcedureConsole({
             onIntents={setIntents}
             onChannels={setChannels}
           />
-          <Field label="Procedure text" wide>
+          <Field label="Or paste procedure text" wide>
             <textarea
-              rows={10}
+              rows={6}
               maxLength={30000}
               value={content}
               onChange={(e) => setContent(e.target.value)}
             />
           </Field>
-          <button
-            type="button"
-            className="cp-button"
-            disabled={!source.trim() || content.trim().length < 20}
-            onClick={parse}
-          >
-            Parse document
-          </button>
+          <div className="cp-actions">
+            <button
+              type="button"
+              className="cp-button"
+              disabled={tally.busy > 0 || (!tally.parseable && content.trim().length < 20)}
+              onClick={parseAll}
+            >
+              Parse {tally.parseable + (content.trim() ? 1 : 0) > 1 ? `${tally.parseable + (content.trim() ? 1 : 0)} documents` : "document"}
+            </button>
+            {tally.ready > 0 && (
+              <button type="button" className="cp-button" onClick={addReady}>
+                Add {tally.ready} ready to draft
+              </button>
+            )}
+            {items.length > 0 && (
+              <button
+                type="button"
+                className="cp-button cp-button--quiet"
+                onClick={() => {
+                  setItems([]);
+                  setReviewKey(null);
+                }}
+              >
+                Clear list
+              </button>
+            )}
+          </div>
         </fieldset>
         {action.messages}
-        {preview && (
+        {items.length > 0 && (
+          <div className="cp-table-scroll">
+            <table className="cp-ingest-table">
+              <caption className="cp-footnote">
+                {items.length} document{items.length === 1 ? "" : "s"}: {tally.ready} ready, {tally.blocked} need fixes, {tally.failed} failed, {tally.added} added.
+                The batch shares the source location, audience, intents and channels above.
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Document</th>
+                  <th scope="col">Procedure</th>
+                  <th scope="col">Steps</th>
+                  <th scope="col">Guardrails</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.key} className={item.key === reviewKey ? "cp-ingest-row--active" : undefined}>
+                    <th scope="row">
+                      {item.name}
+                      <small className="cp-muted">
+                        {" "}
+                        {FORMAT_LABELS[item.format]}
+                        {item.text ? ` · ${item.text.length.toLocaleString()} characters` : ""}
+                      </small>
+                    </th>
+                    <td>
+                      {item.result ? (
+                        <>
+                          {item.result.procedure.title} <code>{item.result.procedure.id}</code>
+                          {item.result.replaces && <small className="cp-inline-note"> Replaces a draft procedure</small>}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>{item.result ? item.result.procedure.steps.length : "—"}</td>
+                    <td>
+                      {item.result
+                        ? `${(item.result.procedure.guardrails || []).length}${item.result.suggestions.length ? ` (+${item.result.suggestions.length} suggested)` : ""}`
+                        : "—"}
+                    </td>
+                    <td>
+                      <StatusPill good={item.status === "ready" || item.status === "added"} warning={item.status === "blocked" || item.status === "failed"}>
+                        {STATUS_LABELS[item.status]}
+                      </StatusPill>
+                      {item.error && <small className="cp-inline-note"> {item.error}</small>}
+                      {item.result && item.result.errors.length > 0 && (
+                        <small className="cp-inline-note"> {item.result.errors.length} blocking issue{item.result.errors.length === 1 ? "" : "s"}</small>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="cp-button cp-button--light"
+                        disabled={!item.result}
+                        aria-label={`Review ${item.name}`}
+                        onClick={() => setReviewKey(item.key)}
+                      >
+                        Review
+                      </button>{" "}
+                      <button
+                        type="button"
+                        className="cp-button cp-button--quiet"
+                        aria-label={`Remove ${item.name}`}
+                        disabled={item.status === "extracting" || item.status === "parsing"}
+                        onClick={() => {
+                          setItems((current) => current.filter((entry) => entry.key !== item.key));
+                          if (reviewKey === item.key) setReviewKey(null);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {preview && reviewed && (
           <div className="cp-procedure-preview">
             <h4>
               {preview.procedure.title} <code>{preview.procedure.id}</code>
             </h4>
+            <p className="cp-footnote">
+              From {reviewed.name} · source <code>{preview.procedure.source}</code>
+            </p>
             {preview.replaces && (
               <div className="cp-alert cp-alert--pending">
                 Adding this replaces the draft procedure with the same id.
@@ -473,10 +720,10 @@ export default function ProcedureConsole({
                 </ul>
               </div>
             )}
-            {preview.warnings.length > 0 && (
+            {[...reviewed.extractionWarnings, ...preview.warnings].length > 0 && (
               <div className="cp-alert cp-alert--pending">
                 <ul>
-                  {preview.warnings.map((warning) => (
+                  {[...reviewed.extractionWarnings, ...preview.warnings].map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>
@@ -541,11 +788,11 @@ export default function ProcedureConsole({
               <button
                 type="button"
                 className="cp-button"
-                disabled={!editable}
+                disabled={!editable || reviewed.status === "added"}
                 onClick={() => {
                   replace(preview.procedure);
-                  setPreview(null);
-                  setContent("");
+                  patchItem(reviewed.key, { status: "added" });
+                  setReviewKey(null);
                   action.setNotice(
                     "Procedure added to the draft, disabled. Review it below, enable it, save the draft and publish through the release gates.",
                   );
@@ -553,16 +800,21 @@ export default function ProcedureConsole({
               >
                 Add to draft
               </button>
-              <button type="button" className="cp-button cp-button--quiet" onClick={() => setPreview(null)}>
-                Discard
+              <button type="button" className="cp-button cp-button--quiet" onClick={() => setReviewKey(null)}>
+                Close review
               </button>
             </div>
+            <details className="cp-evidence">
+              <summary>Extracted text</summary>
+              <pre className="cp-extracted-text">{reviewed.text}</pre>
+            </details>
             <JsonEvidence value={preview.procedure} title="Inspect parsed procedure" />
           </div>
         )}
       </section>
 
       <RetrievalPanel config={config} onChange={onChange} editable={editable} />
+      <RetrievalIndexPanel draft={config} published={published} publishedVersion={publishedVersion} editable={editable} />
 
       <section className="cp-panel" aria-labelledby="procedure-list">
         <div className="cp-panel-heading">

@@ -187,6 +187,28 @@ function attachStudioRoutes({ router, store, route, authorize }) {
       for (const document of documents) await saveDocument(records, document, req.controlPlane.actor);
     }, { count: documents.length }));
   }));
+  // Dry run for document ingestion: what would block each document, without
+  // storing anything, so a batch can be corrected before it is imported.
+  router.post('/studio/knowledge/validate', authorize('canEdit'), route(async (req, res) => {
+    const documents = req.body.documents;
+    if (!Array.isArray(documents) || !documents.length || documents.length > 50) throw new ControlPlaneError(400, 'Validate 1–50 knowledge documents at a time.');
+    const seen = new Map();
+    const results = documents.map((document, index) => {
+      const errors = [];
+      try { validateDocument(document, req.controlPlane); }
+      catch (error) {
+        if (!(error instanceof ControlPlaneError)) throw error;
+        errors.push(...(error.details?.errors || [error.message]));
+      }
+      const id = object(document) && typeof document.id === 'string' ? document.id : null;
+      if (id !== null) {
+        if (seen.has(id)) errors.push(`duplicate id in batch (same as document ${seen.get(id) + 1})`);
+        else seen.set(id, index);
+      }
+      return { id, valid: errors.length === 0, errors };
+    });
+    res.json({ valid: results.every((result) => result.valid), results });
+  }));
   // Converts an SOP document into a disabled draft procedure with suggested
   // guardrails. Nothing is stored; authors review it and save it into the draft.
   router.post('/studio/procedures/parse', authorize('canEdit'), route(async (req, res) => {

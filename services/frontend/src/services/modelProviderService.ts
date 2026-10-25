@@ -38,6 +38,42 @@ export type StrategyScore =
     }
   | { available: false; reason: string };
 
+export interface RetrievalIndexBuild {
+  state: "running" | "succeeded" | "failed";
+  version: number;
+  startedAt: string;
+  startedBy: string;
+  finishedAt?: string;
+  missingAtStart: number;
+  remaining?: number;
+  inputTokens: number;
+  reason?: string;
+}
+
+/** Embedded procedure chunks for a configuration; indexed is null when not semantic. */
+export interface RetrievalIndexStatus {
+  strategy: RetrievalStrategy;
+  embedding: { profileId: string; providerId: string; model: string } | null;
+  reason?: "lexical_strategy" | "embedding_route_not_configured";
+  durable: boolean;
+  building: boolean;
+  maxChunks: number;
+  totals: { chunks: number; indexed: number | null };
+  channels: Array<{
+    channel: ChannelId;
+    chunks: number;
+    indexed: number | null;
+    tooLarge: boolean;
+  }>;
+  procedures: Array<{
+    id: string;
+    title: string;
+    chunks: number;
+    indexed: number | null;
+  }>;
+  build?: RetrievalIndexBuild;
+}
+
 export interface RetrievalEvaluation {
   channel: ChannelId;
   minSimilarity: number;
@@ -53,7 +89,10 @@ export interface RetrievalEvaluation {
     question: string;
     expectedProcedureId: string | null;
     strategies: Partial<
-      Record<RetrievalStrategy, { procedures: string[]; mode: string; fallbackReason?: string }>
+      Record<
+        RetrievalStrategy,
+        { procedures: string[]; mode: string; fallbackReason?: string }
+      >
     >;
     similarity?: {
       expected: number | null;
@@ -105,6 +144,18 @@ const modelProviderService = {
       "/orchestrator/llm/retrieval/evaluate",
       "POST",
       input,
+    ),
+  retrievalIndexStatus: (config: ServicingConfig, version?: number) =>
+    request<RetrievalIndexStatus>(
+      "/orchestrator/llm/retrieval/index/status",
+      "POST",
+      version ? { config, version } : { config },
+    ),
+  buildRetrievalIndex: (version: number) =>
+    request<RetrievalIndexStatus>(
+      "/orchestrator/llm/retrieval/index/build",
+      "POST",
+      { version },
     ),
 };
 

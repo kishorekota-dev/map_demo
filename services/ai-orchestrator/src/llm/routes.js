@@ -64,4 +64,61 @@ router.post('/retrieval/evaluate', authorize(true), (req, res, next) => {
     res.status(error.status || 503).json({ error: failure(error) });
   }
 });
+// Retrieval index coverage and builds. Builds run in the background on this
+// instance; with durable workflow persistence their vectors are shared.
+const builds = new Map();
+const MAX_BUILD_RECORDS = 50;
+const limiter = max => rateLimit({ windowMs: 60000, max, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: req => `${req.user.tenantId}:${req.user.userId}` });
+const buildKey = (req, version) => `${req.user.tenantId}:${version}`;
+const validVersion = version => Number.isInteger(version) && version >= 1;
+
+// Read-only: looks vectors up by content key and never calls a provider.
+router.post('/retrieval/index/status', authorize(), limiter(60), async (req, res) => {
+  const { config, version } = req.body || {};
+  if (Object.keys(req.body || {}).some(key => !['config', 'version'].includes(key)) || (version !== undefined && !validVersion(version))) {
+    return res.status(400).json({ error: 'Provide a servicing config and an optional published version.' });
+  }
+  try { require('../services/controlPlaneRuntime').validateSnapshot({ version: version || 1, config }); }
+  catch (_error) { return res.status(400).json({ error: 'The configuration is not a valid servicing configuration. Validate the draft first.' }); }
+  try {
+    const status = await require('../services/procedureRetrieval').indexStatus({ config });
+    res.json({ ...status, ...(version && builds.has(buildKey(req, version)) ? { build: builds.get(buildKey(req, version)) } : {}) });
+  } catch (error) { res.status(503).json({ error: failure(error) }); }
+});
+
+// Embeds a published release's customer procedures before traffic arrives,
+// exactly as the runtime would on first use. Only published (approved)
+// content is embedded, so this is allowed in production.
+router.post('/retrieval/index/build', authorize(true), limiter(5), async (req, res) => {
+  const { version } = req.body || {};
+  if (Object.keys(req.body || {}).some(key => key !== 'version') || !validVersion(version)) {
+    return res.status(400).json({ error: 'Provide the published version to index.' });
+  }
+  const { ControlPlaneRuntime } = require('../services/controlPlaneRuntime');
+  const { indexStatus, buildIndex } = require('../services/procedureRetrieval');
+  let snapshot;
+  try { snapshot = await new ControlPlaneRuntime().getRelease(req.headers.authorization.slice(7), version); }
+  catch (error) {
+    const status = error.response?.status === 404 ? 404 : 502;
+    return res.status(status).json({ error: { code: 'RELEASE_UNAVAILABLE', message: status === 404 ? 'Published version not found.' : 'The published release could not be loaded.' } });
+  }
+  const before = await indexStatus({ config: snapshot.config });
+  if (!before.embedding || before.strategy === 'lexical') {
+    return res.status(409).json({ error: { code: 'RETRIEVAL_NOT_SEMANTIC', message: 'This release uses lexical retrieval or has no embedding route, so there is nothing to index.' } });
+  }
+  const key = buildKey(req, version);
+  if (builds.get(key)?.state === 'running') return res.status(202).json({ ...before, build: builds.get(key) });
+  const record = { state: 'running', version, startedAt: new Date().toISOString(), startedBy: req.user.userId, missingAtStart: before.totals.chunks - before.totals.indexed, inputTokens: 0 };
+  builds.delete(key); builds.set(key, record);
+  while (builds.size > MAX_BUILD_RECORDS) builds.delete(builds.keys().next().value);
+  // Measured provider tokens are reported on the build, not as customer usage.
+  void buildIndex({ config: snapshot.config, recordUsage: usage => { record.inputTokens += usage.units; } })
+    .then(async ({ ok }) => {
+      const after = await indexStatus({ config: snapshot.config }).catch(() => null);
+      Object.assign(record, { state: ok && after && after.totals.indexed === after.totals.chunks ? 'succeeded' : 'failed', finishedAt: new Date().toISOString(),
+        ...(after ? { remaining: after.totals.chunks - after.totals.indexed } : {}), ...(ok ? {} : { reason: 'embedding_unavailable' }) });
+    });
+  res.status(202).json({ ...before, building: true, build: record });
+});
 module.exports = router;

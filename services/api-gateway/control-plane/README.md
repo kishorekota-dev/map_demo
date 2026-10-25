@@ -210,6 +210,7 @@ detailed results. Get a record by ID for details, or page the list with
 | PUT | `/studio/rollout-policy` | `{revision,policy:{enabled,minSamples,maxFailureRate,windowMinutes}}` |
 | PUT | `/studio/knowledge/:id` | `{revision,document}` |
 | POST | `/studio/knowledge/import` | `{revision,documents}`; 1–50 documents atomically |
+| POST | `/studio/knowledge/validate` | Editor/admin. `{documents}` (1–50); returns `{valid, results:[{id, valid, errors}]}` with every blocking issue per document, including duplicate ids in the batch and publish permission. Stores nothing. |
 | GET | `/studio/knowledge/:id/versions` | Paginated author/release history |
 | POST | `/studio/procedures/parse` | Editor/admin. `{document:{source,content,title?,id?,intents?,channels?,audience?}}`; returns a disabled draft procedure, suggested guardrails, warnings and blocking errors. Stores nothing. |
 | GET | `/releases`, `/audit`, `/work-items` | Paginated legacy records; release lists omit config bodies |

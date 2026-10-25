@@ -223,6 +223,8 @@ const databaseUrl = process.env.RUNTIME_TEST_DATABASE_URL;
     await store.put([[key, vector]], { providerId: 'embedder', model: 'concepts' });
     await store.put([[key, [9, 9, 9]]], { providerId: 'embedder', model: 'concepts' });
     expect((await store.get([key, 'b'.repeat(64)])).get(key)).toEqual(vector);
+    expect([...await store.has([key, 'b'.repeat(64)])]).toEqual([key]);
+    expect(await store.has([])).toEqual(new Set());
     await expect(pool.query("INSERT INTO servicing_retrieval_embeddings (cache_key,provider_id,model,dimensions,vector) VALUES ('not-a-hash','p','m',1,'{1}')")).rejects.toThrow();
     await expect(pool.query(`INSERT INTO servicing_retrieval_embeddings (cache_key,provider_id,model,dimensions,vector) VALUES ('${'c'.repeat(64)}','p','m',2,'{1}')`)).rejects.toThrow();
   });

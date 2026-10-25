@@ -8,6 +8,7 @@
 // lexical result is used and the reason is reported.
 const procedureRuntime = require('./procedureRuntime');
 const { getEmbeddingIndex } = require('./embeddingIndex');
+const { selectProfile } = require('../llm/profiles');
 
 const STRATEGIES = new Set(['lexical', 'semantic', 'hybrid']);
 const RRF_K = 60;
@@ -108,4 +109,62 @@ async function procedureSimilarities({ procedures, question, channel = 'digital'
   return best;
 }
 
-module.exports = { validateRetrieval, retrieveProcedures, procedureSimilarities, documentText, cosine, RRF_K };
+const CHANNELS = ['digital', 'ava', 'ivr'];
+const embeddingProfile = (llm) => {
+  try { return llm?.enabled && llm.routing?.embedding ? selectProfile(llm, 'embedding') : null; } catch (_error) { return null; }
+};
+
+// What a configuration's semantic index holds, per channel and per procedure.
+// Vectors are looked up by content key only; the provider is never called.
+async function indexStatus({ config, index = getEmbeddingIndex() }) {
+  const retrieval = config.retrieval;
+  const strategy = retrieval?.strategy || 'lexical';
+  const titles = new Map((config.procedures || []).map(procedure => [procedure.id, procedure.title]));
+  // Embedded text -> owning procedure, across channels (a chunk shared by
+  // channels is one vector).
+  const owner = new Map();
+  const channels = CHANNELS.map(channel => {
+    const chunks = procedureRuntime.documentChunks(config.procedures, { channel });
+    const texts = new Set();
+    for (const chunk of chunks) {
+      const text = documentText(chunk, retrieval);
+      texts.add(text);
+      if (!owner.has(text)) owner.set(text, chunk.procedureId);
+    }
+    return { channel, texts: [...texts], size: chunks.length };
+  });
+  const profile = embeddingProfile(config.llm);
+  const semantic = strategy !== 'lexical' && profile;
+  const presence = semantic ? await index.presence(config.llm, [...owner.keys()]) : null;
+  const indexed = new Set(presence ? [...owner.keys()].filter((_text, position) => presence.present.has(presence.keys[position])) : []);
+  const count = texts => (semantic ? texts.filter(text => indexed.has(text)).length : null);
+  const byProcedure = new Map();
+  for (const text of owner.keys()) byProcedure.set(owner.get(text), [...(byProcedure.get(owner.get(text)) || []), text]);
+  return {
+    strategy,
+    embedding: profile ? { profileId: profile.id, providerId: profile.providerId, model: profile.model } : null,
+    ...(semantic ? {} : { reason: strategy === 'lexical' ? 'lexical_strategy' : 'embedding_route_not_configured' }),
+    durable: presence ? presence.durable && !presence.storeError : index.storeAvailable(),
+    building: Boolean(presence?.building),
+    maxChunks: index.maxChunks,
+    totals: { chunks: owner.size, indexed: count([...owner.keys()]) },
+    channels: channels.map(({ channel, texts, size }) => ({ channel, chunks: texts.length, indexed: count(texts), tooLarge: size > index.maxChunks })),
+    procedures: [...byProcedure.entries()].map(([id, texts]) => ({ id, title: titles.get(id) || id, chunks: texts.length, indexed: count(texts) }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
+
+// Embeds every channel's customer procedure chunks, as the runtime would on
+// first use. Resolves with the outcome; never rejects.
+async function buildIndex({ config, index = getEmbeddingIndex(), recordUsage }) {
+  if (!embeddingProfile(config.llm) || (config.retrieval?.strategy || 'lexical') === 'lexical') return { ok: false, reason: 'not_semantic' };
+  let ok = true;
+  for (const channel of CHANNELS) {
+    const chunks = procedureRuntime.documentChunks(config.procedures, { channel });
+    if (!chunks.length || chunks.length > index.maxChunks) continue;
+    ok = (await index.warm(config.llm, chunks.map(chunk => documentText(chunk, config.retrieval)), { recordUsage })) && ok;
+  }
+  return { ok };
+}
+
+module.exports = { validateRetrieval, retrieveProcedures, procedureSimilarities, indexStatus, buildIndex, documentText, cosine, RRF_K };

@@ -181,6 +181,32 @@ describe('provider-neutral control-plane studio', () => {
     await call('post', '/studio/knowledge/import', { revision: 4, documents: [document('admin-needed')] }, 'editor-c', 'control_plane_editor').expect(403);
     await call('post', '/studio/knowledge/import', { revision: 4, documents: [document('unsafe-source', { source: ' javascript:alert(1)' })] }).expect(400);
   });
+  test('knowledge validation reports every blocking issue per document without storing anything', async () => {
+    const { call } = setup();
+    const before = (await call('get', '/studio/state')).body;
+    const result = await call('post', '/studio/knowledge/validate', { documents: [
+      document('card-guide', { status: 'draft' }),
+      document('card-guide', { status: 'draft' }),
+      document('Bad Id', { status: 'draft' }),
+      document('short-guide', { status: 'draft', content: 'Too short.' }),
+      document('unsafe-guide', { status: 'draft', source: 'javascript:alert(1)' }),
+      document('contact-guide', { status: 'draft', content: 'Email jane.doe@example.com for replacement cards.' }),
+    ] }).expect(200);
+    expect(result.body.valid).toBe(false);
+    expect(result.body.results.map((entry) => entry.valid)).toEqual([true, false, false, false, false, false]);
+    expect(result.body.results[1].errors).toEqual(['duplicate id in batch (same as document 1)']);
+    expect(result.body.results[3].errors).toContain('content must be at least 20 characters');
+    expect(result.body.results[4].errors.join(' ')).toContain('source must be a safe HTTP(S) URL');
+    expect(result.body.results[5].errors.join(' ')).toMatch(/content .*email/i);
+    // Validation needs edit permission, applies publish permission, and stores nothing.
+    const editor = await call('post', '/studio/knowledge/validate', { documents: [document('published-guide')] }, 'editor-c', 'control_plane_editor').expect(200);
+    expect(editor.body.results[0].errors).toEqual(['Publishing or withdrawing knowledge requires administrator permission.']);
+    await call('post', '/studio/knowledge/validate', { documents: [document('x-guide')] }, 'viewer-a', 'control_plane_viewer').expect(403);
+    await call('post', '/studio/knowledge/validate', { documents: [] }).expect(400);
+    const after = (await call('get', '/studio/state')).body;
+    expect(after.revision).toBe(before.revision);
+    expect(after.knowledge).toEqual(before.knowledge);
+  });
   test('pagination is bounded and operator state never includes studio record payloads', async () => {
     const { call, store } = setup();
     await store.update(1, 'system', 'test.seed', async (state, records) => {

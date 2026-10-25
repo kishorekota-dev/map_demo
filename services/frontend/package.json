@@ -19,12 +19,13 @@
     "test:coverage": "vitest run --coverage --passWithNoTests"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^7.18.2",
     "axios": "^1.20.0",
     "clsx": "^2.0.0",
     "date-fns": "^2.30.0",
+    "pdfjs-dist": "6.3.289",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.18.2",
     "uuid": "^11.1.1",
     "zustand": "^4.4.1"
   },

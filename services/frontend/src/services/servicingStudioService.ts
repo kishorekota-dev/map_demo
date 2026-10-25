@@ -92,6 +92,11 @@ export const studioApi = {
       revision,
       documents,
     }),
+  validateKnowledge: (documents: KnowledgeDocument[]) =>
+    request<{
+      valid: boolean;
+      results: Array<{ id: string | null; valid: boolean; errors: string[] }>;
+    }>(`${studio}/knowledge/validate`, "POST", { documents }),
   searchKnowledge: (query: string) =>
     request<Record<string, unknown>>(
       "/control-plane/runtime/knowledge/search",
@@ -105,13 +110,34 @@ export const operationsApi = {
     request<{ items: Connection[]; total: number }>(
       `${operations}/connections?limit=50&offset=${offset}`,
     ),
-  connectorCatalog: () => request<{ items: Array<Pick<Connection, "id" | "name" | "kind" | "baseUrl" | "credentialRef" | "webhookSecretRef" | "webhookPublicUrl">> }>(`${operations}/connections/catalog`),
+  connectorCatalog: () =>
+    request<{
+      items: Array<
+        Pick<
+          Connection,
+          | "id"
+          | "name"
+          | "kind"
+          | "baseUrl"
+          | "credentialRef"
+          | "webhookSecretRef"
+          | "webhookPublicUrl"
+        >
+      >;
+    }>(`${operations}/connections/catalog`),
   saveConnection: (connection: Connection) =>
     request<Connection>(
       `${operations}/connections/${encodeURIComponent(connection.id)}`,
       "PUT",
-      { name: connection.name, kind: connection.kind, enabled: connection.enabled, timeoutMs: connection.timeoutMs,
-        ...(connection.revision !== undefined ? { revision: connection.revision } : {}) },
+      {
+        name: connection.name,
+        kind: connection.kind,
+        enabled: connection.enabled,
+        timeoutMs: connection.timeoutMs,
+        ...(connection.revision !== undefined
+          ? { revision: connection.revision }
+          : {}),
+      },
     ),
   testConnection: (id: string) =>
     request<{ ok: boolean; checkedAt: string; message: string }>(

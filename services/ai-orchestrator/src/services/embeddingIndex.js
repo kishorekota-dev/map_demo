@@ -46,6 +46,12 @@ class EmbeddingStore {
     }
     return new Map(rows.map(row => [row.cache_key, row.vector.map(value => Math.fround(Number(value)))]));
   }
+  async has(keys) {
+    if (!keys.length) return new Set();
+    await this.initialize();
+    const rows = (await this.persistence.pool.query('SELECT cache_key FROM servicing_retrieval_embeddings WHERE cache_key = ANY($1)', [keys])).rows;
+    return new Set(rows.map(row => row.cache_key));
+  }
   async put(entries, { providerId, model }) {
     if (!entries.length) return;
     await this.initialize();
@@ -64,7 +70,7 @@ class EmbeddingIndex {
   constructor({ store = null, embed = embedWithProfile, ...options } = {}) {
     Object.assign(this, DEFAULTS, options);
     this.store = store; this.embed = embed;
-    this.memory = new Map(); this.pending = new Map();
+    this.memory = new Map(); this.pending = new Map(); this.warming = 0;
   }
   key(profile, text) { return createHash('sha256').update(JSON.stringify([profile.providerId, profile.model, text])).digest('hex'); }
   remember(key, vector) {
@@ -128,7 +134,23 @@ class EmbeddingIndex {
 
   // Builds the index for a release ahead of customer questions. Never throws.
   warm(llm, texts, options = {}) {
-    return this.documentVectors(llm, texts, { ...options, wait: true }).then(() => true, () => false);
+    this.warming += 1;
+    return this.documentVectors(llm, texts, { ...options, wait: true })
+      .then(() => true, () => false)
+      .finally(() => { this.warming -= 1; });
+  }
+
+  // Which texts already have vectors, in memory or stored. No provider calls.
+  async presence(llm, texts) {
+    const profile = selectProfile(llm, 'embedding');
+    const keys = texts.map(text => this.key(profile, text));
+    const present = new Set(keys.filter(key => this.memory.has(key)));
+    const unknown = [...new Set(keys.filter(key => !present.has(key)))];
+    let storeError = false;
+    if (unknown.length && this.storeAvailable()) {
+      try { for (const key of await this.store.has(unknown)) present.add(key); } catch (_error) { storeError = true; }
+    }
+    return { keys, present, building: this.warming > 0 || keys.some(key => this.pending.has(key)), durable: this.storeAvailable(), storeError };
   }
 
   async queryVector(llm, question, recordUsage) {
