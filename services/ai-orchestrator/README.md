@@ -13,6 +13,24 @@ The orchestrator runs the published customer-servicing workflow on port **3007**
 
 These are current entry points. Files labeled Historical retain earlier design/test notes and do not establish current readiness.
 
+## IVR and conversation evaluation
+
+- **IVR** (`src/ivr/`, routes under `/api/ivr`): a provider-neutral
+  telephony adapter plus a Twilio-compatible adapter (HMAC-SHA1 webhook
+  signature validation, TwiML, speech/DTMF gather with barge-in) and a
+  state machine that blocks account actions until caller verification
+  succeeds and carries transfer context to a human agent. Webhooks are
+  rejected unless `IVR_ENABLED=true` and the provider secret is set; the
+  simulator is disabled in production. No provider is configured by
+  default — a Twilio number and a pilot call are still required.
+- **Conversation evaluation** (`src/services/conversationEvaluator.js`):
+  a deterministic transcript lint (mutation without confirmation,
+  transfer without intent, uncited amounts, repeated questions, intent
+  drift) for pilot triage, not a quality ranking.
+
+See `docs/guides/digital-assistant-pilot-checklist.md` for the pass
+criteria for each phase.
+
 ## Execution contract
 
 With `CONTROL_PLANE_ENABLED=true`, a new workflow fetches published environment configuration using the verified customer's JWT. The full snapshot is stored before tool execution and retained for feedback and handoff. Draft edits are not live. Missing configuration fails closed. Literal and lexical recognition are deterministic; external/LLM recognition remains constrained to the catalog and ambiguity policy.

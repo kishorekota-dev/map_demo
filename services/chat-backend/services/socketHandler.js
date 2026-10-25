@@ -2,6 +2,7 @@ const logger = require('./logger');
 const jwt = require('jsonwebtoken');
 const { isQualityDelegation } = require('./accessTokenPolicy');
 const HandoffService = require('./handoffService');
+const { LiveAgentQueue, isLiveAgentSession, validateLiveSender, buildLiveMessage, buildTransferContext } = require('./liveAgentChat');
 const axios = require('axios');
 
 class SocketHandler {
@@ -11,6 +12,7 @@ class SocketHandler {
         this.agentOrchestrator = agentOrchestrator;
         this.sessionManager = sessionManager;
         this.handoffService = new HandoffService(sessionManager);
+        this.liveAgentQueue = new LiveAgentQueue();
         this.connectedClients = new Map();
         this.activeTyping = new Map();
         this.messageRateLimit = new Map();
@@ -102,6 +104,84 @@ class SocketHandler {
                 principal.sessionId = result.sessionId;
                 await socket.join(`session:${result.sessionId}`);
                 socket.emit('sessionResumed', result);
+            } catch (error) { socket.emit('sessionError', { error: error.message }); }
+        });
+
+        // Live human agent chat: queue, accept, and end. The back-and-forth
+        // itself runs through handleSendMessage's live-agent branch (see
+        // liveAgentChat.js) so it uses the same transcript persistence.
+        socket.on('requestLiveAgent', async (data = {}) => {
+            const principal = this.connectedClients.get(socket.id);
+            try {
+                if (!principal?.isAuthenticated || !principal.sessionId) throw new Error('Authentication required');
+                const session = await this.sessionManager.getSession(principal.sessionId);
+                if (!session || String(session.userId) !== String(principal.userId)) throw new Error('Access denied');
+                if (isLiveAgentSession(session)) throw new Error('Session is already in live agent mode');
+                const queued = this.liveAgentQueue.enqueue({
+                    queue: typeof data.queue === 'string' && data.queue ? data.queue : 'default',
+                    sessionId: principal.sessionId,
+                    customerId: principal.userId,
+                    intent: session.state?.lastIntent || null,
+                });
+                // Agent dashboard sees session + intent only, never transcript.
+                this.io.to('agents').emit('liveAgentRequested', {
+                    sessionId: principal.sessionId,
+                    queue: typeof data.queue === 'string' && data.queue ? data.queue : 'default',
+                    intent: session.state?.lastIntent || null,
+                    requestedAt: queued.requestedAt,
+                });
+                socket.emit('liveAgentQueued', { sessionId: principal.sessionId, queuePosition: queued.queuePosition });
+            } catch (error) { socket.emit('sessionError', { error: error.message }); }
+        });
+        socket.on('agentAcceptLiveChat', async (data = {}) => {
+            const principal = this.connectedClients.get(socket.id);
+            try {
+                if (!principal?.isAuthenticated || !principal.isAgentPrincipal) throw new Error('Agent authentication required');
+                const sessionId = data.sessionId || principal.sessionId;
+                if (!sessionId) throw new Error('Session ID required');
+                const session = await this.sessionManager.getSession(sessionId);
+                if (!session) throw new Error('Session not found');
+                if (isLiveAgentSession(session)) throw new Error('Session is already in live agent mode');
+                const agentId = principal.principalId || principal.userId;
+                await this.sessionManager.updateSessionState(sessionId, {
+                    liveAgentActive: true,
+                    liveAgentId: agentId,
+                    liveAgentStartedAt: new Date().toISOString(),
+                    liveAgentReason: data.reason || 'customer_requested',
+                    assignmentStatus: 'assigned',
+                });
+                this.liveAgentQueue.remove(data.queue || 'default', sessionId);
+                principal.sessionId = sessionId;
+                await socket.join(`session:${sessionId}`);
+                const history = await this.chatService.getConversationHistory(sessionId);
+                // Transfer context goes to the accepting agent only.
+                socket.emit('liveAgentStarted', {
+                    sessionId,
+                    agentId,
+                    transferContext: buildTransferContext({ ...session, state: { ...session.state, liveAgentActive: true, liveAgentId: agentId } }, history),
+                });
+                this.broadcastToSession(sessionId, 'liveAgentJoined', { sessionId, agentId });
+            } catch (error) { socket.emit('sessionError', { error: error.message }); }
+        });
+        socket.on('endLiveChat', async (data = {}) => {
+            const principal = this.connectedClients.get(socket.id);
+            try {
+                if (!principal?.isAuthenticated || !principal.sessionId) throw new Error('Authentication required');
+                const session = await this.sessionManager.getSession(principal.sessionId);
+                if (!session || !isLiveAgentSession(session)) throw new Error('Session is not in live agent mode');
+                validateLiveSender({
+                    role: principal.isAgentPrincipal ? 'agent' : 'customer',
+                    senderId: principal.isAgentPrincipal ? (principal.principalId || principal.userId) : principal.userId,
+                    session,
+                });
+                await this.sessionManager.updateSessionState(principal.sessionId, {
+                    liveAgentActive: false,
+                    liveAgentId: null,
+                    liveAgentEndedAt: new Date().toISOString(),
+                    assignmentStatus: 'completed',
+                });
+                this.broadcastToSession(principal.sessionId, 'liveAgentEnded', { sessionId: principal.sessionId, reason: data.reason || 'ended' });
+                socket.emit('liveAgentEnded', { sessionId: principal.sessionId });
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
 
@@ -742,6 +822,33 @@ class SocketHandler {
 
             // Update client activity
             clientInfo.lastActivity = new Date();
+
+            // Live human agent mode: route human-to-human, never through the
+            // AI orchestrator, while keeping the same transcript persistence.
+            const liveSession = await this.sessionManager.getSession(clientInfo.sessionId);
+            if (liveSession && isLiveAgentSession(liveSession)) {
+                const senderRole = clientInfo.isAgentPrincipal ? 'agent' : 'customer';
+                const senderId = senderRole === 'agent' ? (clientInfo.principalId || clientInfo.userId) : clientInfo.userId;
+                validateLiveSender({ role: senderRole, senderId, session: liveSession });
+                const liveMessage = buildLiveMessage({ sessionId: clientInfo.sessionId, senderRole, senderId, content: data.content });
+                if (senderRole === 'customer') {
+                    const stored = await this.chatService.processMessage(clientInfo.sessionId, {
+                        content: data.content,
+                        type: data.type || 'text',
+                        attachments: data.attachments || [],
+                        clientInfo: { socketId: socket.id, userAgent: clientInfo.metadata.userAgent, ipAddress: clientInfo.metadata.ipAddress },
+                    }, data.metadata || {});
+                    this.broadcastToSession(clientInfo.sessionId, 'liveMessage', { ...liveMessage, messageId: stored.id });
+                } else {
+                    await this.chatService.sendResponse(clientInfo.sessionId, { content: data.content, type: data.type || 'text' }, {
+                        agentId: senderId,
+                        agentType: 'human',
+                    });
+                }
+                await this.sessionManager.incrementSessionStatistics(clientInfo.sessionId, { messageCount: 1 });
+                socket.emit('messageReceived', { messageId: liveMessage.id, timestamp: liveMessage.timestamp, status: 'delivered' });
+                return;
+            }
 
             // Process message through chat service
             const message = await this.chatService.processMessage(

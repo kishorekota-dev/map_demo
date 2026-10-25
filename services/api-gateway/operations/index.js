@@ -9,6 +9,7 @@ const { receiveWebhook } = require("./webhooks");
 const { retainOperations } = require("./maintenance");
 const { RolloutMonitor } = require("./rollout-monitor");
 const { mountUsageRoutes } = require("./usage");
+const { computeOutcomeMetrics } = require("./outcomeAnalytics");
 const { mountAgentRoutes } = require("./agent-workspace");
 const { identifier, text } = require("../control-plane/config");
 
@@ -829,6 +830,35 @@ function createOperationsRouter(options = {}) {
     runtime,
     fingerprintActor,
   });
+  // Outcome analytics: FCR, containment and channel breakdown from the
+  // same event stream as /analytics. Kept as a separate endpoint so a
+  // query problem here cannot break the existing /analytics response.
+  router.get(
+    "/analytics/outcomes",
+    authorize("canView"),
+    route(async (req, res) => {
+      const days = req.query.days === undefined ? 30 : Number(req.query.days);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        throw new OperationsError(400, "days must be an integer from 1 to 365.");
+      }
+      const rows = await store.query(
+        "SELECT document->>'sessionId' AS session_id,document->>'actorHash' AS actor_hash,document->>'channel' AS channel,document->>'intent' AS intent,document->>'outcome' AS outcome,document->>'stage' AS stage,document->>'type' AS type,document->>'kind' AS kind,created_at FROM servicing_operations_events WHERE tenant_id=$1 AND document->>'type' IN ('runtime.execution','case.created') AND created_at>=NOW()-($2::int*INTERVAL '1 day')",
+        [store.tenantId, days],
+      );
+      const events = rows.rows.map((r) => ({
+        sessionId: r.session_id,
+        actorHash: r.actor_hash,
+        channel: r.channel,
+        intent: r.intent,
+        outcome: r.outcome,
+        stage: r.stage,
+        type: r.type,
+        kind: r.kind,
+        createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+      }));
+      res.json({ windowDays: days, ...computeOutcomeMetrics(events) });
+    }),
+  );
   router.use((error, _req, res, _next) => {
     if (error.code === "23505")
       return res

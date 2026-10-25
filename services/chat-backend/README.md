@@ -51,6 +51,19 @@ curl http://localhost:3001/api/sessions/OWNED_SESSION_ID/messages \
 
 Retain `X-Interaction-ID` when retrying the same new request. Do not reuse it for a different intended action.
 
+## Live human agent chat
+
+When a session is in live agent mode, `sendMessage` routes human-to-human
+instead of through the AI orchestrator, using the same transcript
+persistence (customer messages via `processMessage`, agent messages via
+`sendResponse` with agentType `human`). Socket events:
+`requestLiveAgent` (customer, joins the queue), `agentAcceptLiveChat`
+(agent principal, assigns and receives the transfer context),
+`endLiveChat` (either side, returns the session to AI). The agent
+dashboard queue sees session + intent only; the transfer context goes to
+the accepting agent only. See `services/liveAgentChat.js` and
+`docs/guides/digital-assistant-pilot-checklist.md`.
+
 ## Socket.IO
 
 Connect to the chat backend's `/socket.io` with `auth:{token:accessToken}`. This is Socket.IO, not a raw WebSocket JSON protocol. Key customer events are `createSession`, `joinSession`, `sendMessage`, `endSession`, `typing`, `stopTyping`, `requestHandoff`, and `resumeSession`. Use `clientMessageId` to retain a request's identity. Operator request-envelope events are separately authorized; a browser-supplied agent flag does not grant operator rights. See the [event reference](QUICK-REFERENCE.md).

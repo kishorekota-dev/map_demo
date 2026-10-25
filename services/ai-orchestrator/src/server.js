@@ -16,6 +16,7 @@ const WorkflowService = require('./services/workflowService');
 // Import routes
 const orchestratorRoutes = require('./routes/orchestrator.routes');
 const healthRoutes = require('./routes/health');
+const { createIvrRouter } = require('./routes/ivr.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 
 // Initialize Express app
@@ -153,6 +154,9 @@ function configureRoutes() {
   // API routes
   app.use('/health', healthRoutes);
   app.use('/api/orchestrator', orchestratorRoutes);
+  // IVR webhooks: the router itself rejects unconfigured/unsigned calls
+  // (see routes/ivr.routes.js); mounting it does not enable telephony.
+  app.use('/api/ivr', createIvrRouter());
 
   // 404 handler
   app.use(notFoundHandler);
