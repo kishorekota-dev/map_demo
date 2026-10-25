@@ -8,7 +8,7 @@ module.exports = {
 
   // Security configuration
   security: {
-    jwtSecret: process.env.JWT_SECRET || 'fallback-secret-change-me',
+    jwtSecret: process.env.JWT_SECRET || '',
     jwtExpiry: process.env.JWT_EXPIRY || '24h',
     corsOrigins: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']
   },
@@ -25,7 +25,7 @@ module.exports = {
   // DialogFlow configuration
   dialogflow: {
     projectId: process.env.GOOGLE_PROJECT_ID || 'poc-banking-chatbot-dev',
-    credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || './config/dialogflow-service-account-dev.json',
+    credentialRef: 'env:DIALOGFLOW_CREDENTIALS_JSON',
     languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'en',
     sessionPathPrefix: process.env.DIALOGFLOW_SESSION_PATH_PREFIX || 'projects/poc-banking-chatbot-dev/agent/sessions',
     clientEmail: process.env.DIALOGFLOW_CLIENT_EMAIL || '',

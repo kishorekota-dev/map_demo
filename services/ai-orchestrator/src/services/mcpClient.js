@@ -80,10 +80,12 @@ class MCPClient {
       logger.error('MCP tool execution failed', {
         requestId,
         toolName,
-        error: error.message,
-        response: error.response?.data
+        code: error.code || 'MCP_UNAVAILABLE'
       });
-      throw new Error(`MCP tool execution failed: ${error.message}`);
+      const status = error.response?.status || error.status;
+      const notSent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID'].includes(error.code);
+      throw Object.assign(new Error('MCP tool execution did not complete'), { status, dispatched: notSent ? false : undefined,
+        outcome: error.response?.data?.outcome || (notSent || (status >= 400 && status <= 599) ? 'failed' : 'uncertain') });
     }
   }
 

@@ -263,8 +263,9 @@ describe("mutation and replay boundaries", () => {
     );
     expect(pendingReconcile.reason).toBe("execution-in-progress");
     release();
-    expect((await first).outcome).toBe("completed");
-    expect((await second).replayed).toBe(true);
+    const firstResult = await first;
+    expect(firstResult.outcome).toBe("completed");
+    expect(await second).toEqual(firstResult);
     await expect(
       adapter.execute(
         "create_record",
@@ -274,29 +275,36 @@ describe("mutation and replay boundaries", () => {
     ).rejects.toMatchObject({ status: 409 });
     expect(client).toHaveBeenCalledTimes(1);
   });
-  test.each([500, 503, 202])(
-    "HTTP %s does not prove mutation completed or rolled back",
+  test.each([400, 401, 409, 422, 500, 503])(
+    "HTTP %s is a definitive uncached failure with an explicit same-key retry",
     async (status) => {
-      const client = jest.fn(async () => ({
-        status,
-        data: { message: "credential=fixture-secret-value" },
-      }));
+      const client = jest.fn(async () => ({ status, data: { message: "Provider rejected request" } }));
       const adapter = executor(client);
-      const result = await adapter.execute("create_record", args, {
-        idempotencyKey: "error-key",
-      });
-      expect(result.outcome).toBe("uncertain");
-      expect(JSON.stringify(result)).not.toContain("fixture-secret-value");
-      expect(
-        (
-          await adapter.execute("create_record", args, {
-            idempotencyKey: "error-key",
-          })
-        ).replayed,
-      ).toBe(true);
+      const first = await adapter.execute("create_record", args, { idempotencyKey: "error-key" });
+      expect(first).toMatchObject({ outcome: "failed", status });
       expect(client).toHaveBeenCalledTimes(1);
+      await expect(adapter.execute("create_record", { subject: "Changed" }, { idempotencyKey: "error-key" })).rejects.toMatchObject({ status: 409 });
+      await adapter.execute("create_record", args, { idempotencyKey: "error-key" });
+      expect(client).toHaveBeenCalledTimes(2);
     },
   );
+  test("asynchronous acceptance stays uncertain with a concrete reconcile path", async () => {
+    const client = jest.fn(async () => ({ status: 202, data: { accepted: true } }));
+    const adapter = executor(client);
+    const first = await adapter.execute("create_record", args, { idempotencyKey: "accepted-key" });
+    expect(first).toMatchObject({ outcome: "uncertain", reconciliationReference: "accepted-key", reconciliationPath: "/api/adapters/test-crm/reconcile", reconciliationTool: "create_record" });
+    expect(await adapter.execute("create_record", args, { idempotencyKey: "accepted-key" })).toEqual(first);
+    expect(client).toHaveBeenCalledTimes(1);
+  });
+  test("known pre-dispatch failures are not cached and may be explicitly retried", async () => {
+    const client = jest.fn(async () => { throw Object.assign(new Error("Network preflight rejected"), { dispatched: false }); });
+    const adapter = executor(client);
+    const first = await adapter.execute("create_record", args, { idempotencyKey: "preflight-key" });
+    expect(first.outcome).toBe("failed");
+    expect(first).not.toHaveProperty("reconciliationReference");
+    await adapter.execute("create_record", args, { idempotencyKey: "preflight-key" });
+    expect(client).toHaveBeenCalledTimes(2);
+  });
   test("unknown post-dispatch errors remain uncertain without raw error leakage", async () => {
     const client = jest.fn(async () => {
       throw new Error("api-key=fixture-secret-value");

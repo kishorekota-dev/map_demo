@@ -102,7 +102,7 @@ a reference adapter; they do not claim live telephony or enterprise IdP/provider
 qualification.
 
 The model extension adds fixture checks for Ollama, OpenAI Responses, compatible
-servers, Vertex ADC and Gemini protocols, credential isolation, JSON validation,
+servers, Vertex explicit bearer-token and Gemini protocols, credential isolation, JSON validation,
 disabled/legacy states, pinned continuations and fail-closed extraction. Exact
 model-profile changes invalidate evaluation and approval evidence. Confirmation
 retries survive a model outage without executing a tool during failure.

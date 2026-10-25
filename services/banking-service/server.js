@@ -2,13 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
-const morgan = require('morgan');
-const winston = require('winston');
 
-// Wrap in error handler
-process.on('uncaughtException', (error) => {
-  console.error('UNCAUGHT EXCEPTION:', error.message);
-  console.error('Stack:', error.stack);
+const logger = require('./utils/logger');
+
+process.on('uncaughtException', () => {
+  logger.error('Uncaught Exception');
   process.exit(1);
 });
 
@@ -34,22 +32,6 @@ const errorMiddleware = require('./middleware/error');
 const app = express();
 const PORT = process.env.PORT || 3005;
 
-// Configure Winston logger
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.simple()
-    }),
-    new winston.transports.File({ filename: 'logs/banking-service.log' })
-  ]
-});
-
 // Global middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -72,20 +54,16 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Servicing-Confirmation']
 }));
 
-app.use(morgan('combined', {
-  stream: {
-    write: (message) => logger.info(message.trim())
-  }
-}));
+app.use(logger.requestMiddleware);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files for API documentation
-app.use(express.static('public'));
+if (process.env.NODE_ENV !== 'production') app.use(express.static('public'));
 
 // Serve OpenAPI spec
 app.get('/openapi.yaml', (req, res) => {
@@ -102,6 +80,7 @@ app.use('/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 
 // API routes with authentication
+app.get('/api/v1/mutation-status/:key', authMiddleware.authenticateToken, require('./middleware/durableMutation').mutationStatus);
 app.use('/api/v1/accounts', authMiddleware.authenticateToken, accountRoutes);
 app.use('/api/v1/transactions', authMiddleware.authenticateToken, transactionRoutes);
 app.use('/api/v1/cards', authMiddleware.authenticateToken, cardRoutes);

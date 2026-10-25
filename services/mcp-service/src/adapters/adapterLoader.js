@@ -18,6 +18,8 @@
 
 const fs = require("fs");
 const logger = require("../utils/logger");
+const { validateAdapterDefinition } = require("./adapterContract");
+const { validateCredentialConfiguration } = require("./credentialResolver");
 
 function loadAdaptersFromConfig(registryInstance, configPath) {
   if (!configPath) {
@@ -40,19 +42,22 @@ function loadAdaptersFromConfig(registryInstance, configPath) {
   } catch (error) {
     throw new Error(`Adapters config at ${configPath} is not valid JSON`);
   }
-  if (!parsed || !Array.isArray(parsed.adapters)) {
+  if (!parsed || !Array.isArray(parsed.adapters) || Object.keys(parsed).some((key) => key !== "adapters")) {
     throw new Error(
       `Adapters config at ${configPath} must be an object with an "adapters" array`,
     );
   }
   const registered = [];
   for (const definition of parsed.adapters) {
+    validateCredentialConfiguration(
+      validateAdapterDefinition(definition, registryInstance.env),
+      registryInstance.env,
+    );
     const sanitized = registryInstance.register(definition);
     registered.push(sanitized.id);
   }
   logger.info("Generic backend adapters loaded from config", {
-    configPath,
-    registered,
+    adapterCount: registered.length,
   });
   return { registered, errors: [] };
 }

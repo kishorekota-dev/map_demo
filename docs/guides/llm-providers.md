@@ -17,13 +17,15 @@ machine has been verified. No cloud provider is enabled by the example registry.
 | `ollama` | `/api/chat`, `/api/tags`; non-streaming, thinking disabled | `http://mac-studio.local:11434` | None by default; an explicit credential reference is optional |
 | `openai_compatible` | `/chat/completions`, `/models` | LM Studio `http://mac-studio.local:1234/v1`; vLLM example `http://mac-studio.local:8000/v1` | Optional explicit bearer credential reference |
 | `openai` | Responses API `/responses`, `/models`; `store:false` | `https://api.openai.com/v1` | Explicit API-key environment reference |
-| `vertex_gemini` | Vertex `generateContent` | Regional or global `aiplatform.googleapis.com` | Application Default Credentials (ADC), or explicit bearer-token reference |
+| `vertex_gemini` | Vertex `generateContent` | Regional or global `aiplatform.googleapis.com` | Explicit bearer-token environment reference |
 | `gemini` | Gemini Developer API `generateContent`, model list | `https://generativelanguage.googleapis.com/v1beta` | Explicit API-key environment reference |
 
 The plugins normalize response text, JSON objects, measured token usage, model,
 provider, latency and call ID. They do not implement streaming, audio/media,
 embeddings or arbitrary model tool execution. Banking and fulfillment continue
 through the established workflow/MCP/adapter contracts.
+
+Production requires HTTPS for every enabled provider and explicit environment credential references for cloud providers. Local HTTP ports below are development/test defaults. Production synthetic `/test` and `/evaluate` endpoints return 403; qualify model behavior in a separate staging deployment. The shipped production registry stays empty until explicitly configured.
 
 ## 1. Make the Mac Studio endpoint reachable
 
@@ -96,7 +98,7 @@ uses `baseUrl`. `credentialRef` reads only its explicitly named environment
 variable, accepting `ENV_NAME` or `env:ENV_NAME`. Credentials and endpoint URLs are
 never stored in the published servicing configuration or exposed by provider
 discovery. `configured:true` means configuration is present; it does not verify
-connectivity, ADC or account permissions. For model restrictions add
+connectivity, token validity or account permissions. Enabled providers with a missing/invalid named credential fail startup; disabled placeholders may remain unconfigured. For model restrictions add
 `allowedModels`, an array of exact model
 IDs. An empty allowlist permits no models; omitting it permits discovered/selected
 models. Registry changes are server administration and require controlled
@@ -105,24 +107,20 @@ workflow releases pin profile IDs/settings, while the server owns endpoints and
 credentials.
 
 Compose includes the example registry in the image. To use another file, mount
-it read-only and set `LLM_PROVIDERS_FILE` to its container path. ADC credential
-files likewise require a read-only mount with `GOOGLE_APPLICATION_CREDENTIALS`
-set to the **container** path. Environment values alone do not mount host files.
-For example, in a deployment-specific Compose override:
+it read-only and set `LLM_PROVIDERS_FILE` to its container path. Supply credential values only through the environment variable named by `credentialRef`; this plugin does not read ADC files or ambient cloud credentials. For example, in a deployment-specific Compose override:
 
 ```yaml
 services:
   ai-orchestrator:
     volumes:
       - ./llm-providers.json:/run/config/llm-providers.json:ro
-      - ./vertex-adc.json:/run/secrets/vertex-adc.json:ro
     environment:
       LLM_PROVIDERS_FILE: /run/config/llm-providers.json
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/vertex-adc.json
+      LLM_VERTEX_ACCESS_TOKEN: ${LLM_VERTEX_ACCESS_TOKEN:?Set the named credential environment variable}
 ```
 
 Paths in an override resolve according to the base Compose project's directory.
-Include only the credential mount needed by the selected provider.
+The registry must explicitly name `LLM_VERTEX_ACCESS_TOKEN` as its Vertex `credentialRef`. Do not put its value into the registry file or source control.
 
 ## 3. Discover and smoke-test the exact model
 
@@ -142,8 +140,7 @@ bounded output and a 120-second deadline for a cold model. `--registry PATH`
 selects another registry file. A failed test exits nonzero and does not select
 another provider.
 
-Studio also offers discovery and a fixed synthetic connectivity test to signed
-editors/admins. It cannot send an arbitrary test prompt. A successful
+Studio offers discovery and, outside production, a fixed synthetic connectivity test to signed editors/admins. It cannot send an arbitrary test prompt. A successful
 connectivity check does not establish recognition accuracy, extraction quality,
 banking-task completion or production capacity.
 
@@ -228,12 +225,7 @@ For models that reject temperature, set server-registry
 `supportsTemperature:false`; the adapter omits that parameter without retrying
 the request. Other unsupported generation settings fail explicitly.
 
-For Vertex Gemini, replace `project` and `location`, enable `vertex-gemini`, and
-configure ADC for the runtime service identity with permission to invoke the
-model. For workstation development, Google documents
-`gcloud auth application-default login`. For deployed workloads, use the
-platform's workload identity or mounted credentials. A `credentialRef` can
-instead supply a bearer access token; the operator must refresh that token.
+For Vertex Gemini, replace `project` and `location`, enable `vertex-gemini`, and set the explicitly referenced `LLM_VERTEX_ACCESS_TOKEN` environment variable to a valid bearer token authorized for the model. The operator owns token refresh. The plugin no longer reads implicit ADC, workload identity or mounted credential files; existing deployments must migrate to an explicit environment reference.
 Vertex discovery returns the registry's `allowedModels` rather than inventing
 an accessible model list. Set that list or enter an approved exact model ID.
 See [Vertex authentication](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/gcp-auth)

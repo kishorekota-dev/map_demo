@@ -44,4 +44,14 @@ describe('authClient', () => {
             expect.objectContaining({ valid: false, userId: null })
         );
     });
+
+    test('requires an authoritative operator role and finite future expiry', async () => {
+        const authorized = { valid: true, userId: 'agent-one', roles: ['agent'], expires: new Date(Date.now() + 60000).toISOString() };
+        axios.post.mockResolvedValueOnce({ data: authorized });
+        expect((await validateAgentToken('fixture-token')).valid).toBe(true);
+        for (const data of [{ ...authorized, roles: ['customer'] }, { ...authorized, roles: [] }, { ...authorized, expires: undefined }, { ...authorized, expires: new Date(Date.now() - 1000).toISOString() }]) {
+            axios.post.mockResolvedValueOnce({ data });
+            expect((await validateAgentToken('fixture-token')).valid).toBe(false);
+        }
+    });
 });

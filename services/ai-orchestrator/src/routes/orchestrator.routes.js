@@ -53,14 +53,14 @@ router.post('/session/:sessionId/channel', authorizeSession, async (req, res, ne
     const persistence = req.app.locals.workflowService.persistence;
     await persistence.runSession(req.user.tenantId, session.sessionId, async () => {
       const current = await req.app.locals.sessionManager.getSession(session.sessionId);
-      if (!current || current.userId !== req.user.userId) throw Object.assign(new Error('Session access denied'), { status: 403 });
+      if (!current || current.userId !== req.user.userId || (current.metadata?.tenantId && current.metadata.tenantId !== req.user.tenantId)) throw Object.assign(new Error('Session access denied'), { status: 403 });
       if (current.metadata?.graphRun?.status === 'running') throw Object.assign(new Error('Recover the interrupted request before changing channel'), { status: 409 });
       const { resolvePublishedRoute } = require('../services/controlPlaneRuntime');
       const snapshot = current.metadata?.controlPlane;
       const route = snapshot ? { ...resolvePublishedRoute(snapshot, channel, current.intent), environment: snapshot.environment, cohort: snapshot.cohort } : null;
       if (route?.action === 'disabled') throw Object.assign(new Error('Target channel is disabled for this workflow'), { status: 409 });
       await req.app.locals.sessionManager.updateSession(current.sessionId, { metadata: { ...current.metadata, channel,
-        ...(route ? { runtimeContext: route } : {}) } });
+        runtimeContext: route || { ...current.metadata?.runtimeContext, channel } } });
     });
     return res.json({ updated: true, channel, version: session.metadata?.controlPlane?.version });
   } catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
@@ -150,6 +150,7 @@ router.post('/process', authorizeSession,
         question,
         userId,
         authToken,
+        ...(req.body.expectedChannel ? { expectedChannel: req.body.expectedChannel } : {}),
         metadata
       });
 
@@ -167,6 +168,7 @@ router.post('/process', authorizeSession,
       res.status(error.status || 500).json({
         success: false,
         error: 'Failed to process request',
+        ...(error.code === 'CHANNEL_CHANGED' ? { code: error.code } : {}),
         message: error.message
       });
     }
@@ -200,7 +202,8 @@ router.post('/feedback', authorizeSession,
         sessionId,
         response,
         confirmed,
-        authToken
+        authToken,
+        ...(req.body.expectedChannel ? { expectedChannel: req.body.expectedChannel } : {})
       });
 
       res.json({
@@ -216,6 +219,7 @@ router.post('/feedback', authorizeSession,
       res.status(error.status || 500).json({
         success: false,
         error: 'Failed to process feedback',
+        ...(error.code === 'CHANNEL_CHANGED' ? { code: error.code } : {}),
         message: error.message
       });
     }

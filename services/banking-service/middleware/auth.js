@@ -32,7 +32,7 @@ const authenticateToken = (req, res, next) => {
     });
   }
 
-  jwt.verify(token, config.security.jwtSecret, (err, decoded) => {
+  jwt.verify(token, config.security.jwtSecret, { algorithms: ['HS256'] }, (err, decoded) => {
     if (err) {
       logger.warn('Authentication failed: Invalid token', {
         ip: req.ip,
@@ -63,10 +63,18 @@ const authenticateToken = (req, res, next) => {
       return res.status(403).json({ error: 'Access denied', code: 'TOKEN_SCOPE_INVALID', message: 'Evaluation delegation cannot authenticate banking requests.' });
     }
 
+    const identity = decoded.userId || decoded.id;
+    const tenant = process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+    if (typeof identity !== 'string' || !identity || identity.length > 200 || (decoded.type && decoded.type !== 'access')
+      || (decoded.tenantId !== undefined && decoded.tenantId !== tenant) || decoded.purpose) {
+      return res.status(403).json({ error: 'Access denied', code: 'TOKEN_SCOPE_INVALID', message: 'A valid deployment access identity is required.' });
+    }
+
     // Add user info to request object
     req.user = {
       id: decoded.id || decoded.userId,
       userId: decoded.userId || decoded.id,
+      tenantId: tenant,
       email: decoded.email,
       role: decoded.role,
       permissions: decoded.permissions || []

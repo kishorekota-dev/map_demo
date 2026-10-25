@@ -1,4 +1,8 @@
 const winston = require('winston');
+const { operationalLog } = require('./operationalLog');
+const messages = require('./logMessages');
+const privacyFormat = winston.format(info => operationalLog(info, { service: 'poc-banking-service', messages }));
+
 const path = require('path');
 const config = require('../config');
 
@@ -11,10 +15,9 @@ if (!fs.existsSync(logsDir)) {
 
 // Custom format for banking service logs
 const bankingFormat = winston.format.combine(
-  winston.format.timestamp({
-    format: 'YYYY-MM-DD HH:mm:ss'
-  }),
   winston.format.errors({ stack: true }),
+  privacyFormat(),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ level, message, timestamp, ...meta }) => {
     let log = `${timestamp} [${level.toUpperCase()}] ${message}`;
     
@@ -38,10 +41,7 @@ const logger = winston.createLogger({
   transports: [
     // Console transport for development
     new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        bankingFormat
-      )
+      format: winston.format.colorize({ all: true })
     }),
     
     // File transport for all logs
@@ -118,7 +118,7 @@ const bankingLogger = {
   
   // Performance logging
   performance: (operation, duration, meta = {}) => {
-    logger.info(`PERFORMANCE: ${operation} completed in ${duration}ms`, {
+    logger.info(`PERFORMANCE: ${operation}`, {
       operation,
       duration,
       ...meta,
@@ -138,10 +138,8 @@ const bankingLogger = {
   
   // API request logging
   request: (method, path, userId, meta = {}) => {
-    logger.info(`API: ${method} ${path}`, {
+    logger.info('HTTP Request', {
       method,
-      path,
-      userId,
       ...meta,
       category: 'api'
     });
@@ -173,6 +171,16 @@ const bankingLogger = {
   debug: (message, meta = {}) => {
     logger.debug(message, meta);
   }
+};
+
+
+// HTTP metadata is enumerated; URLs, client addresses and headers are omitted.
+bankingLogger.requestMiddleware = (req, res, next) => {
+  const started = Date.now();
+  res.on('finish', () => bankingLogger.info('HTTP Request', {
+    method: req.method, statusCode: res.statusCode, duration: Date.now() - started
+  }));
+  next();
 };
 
 module.exports = bankingLogger;

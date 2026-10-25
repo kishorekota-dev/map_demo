@@ -105,11 +105,13 @@ export const operationsApi = {
     request<{ items: Connection[]; total: number }>(
       `${operations}/connections?limit=50&offset=${offset}`,
     ),
+  connectorCatalog: () => request<{ items: Array<Pick<Connection, "id" | "name" | "kind" | "baseUrl" | "credentialRef" | "webhookSecretRef" | "webhookPublicUrl">> }>(`${operations}/connections/catalog`),
   saveConnection: (connection: Connection) =>
     request<Connection>(
       `${operations}/connections/${encodeURIComponent(connection.id)}`,
       "PUT",
-      connection,
+      { name: connection.name, kind: connection.kind, enabled: connection.enabled, timeoutMs: connection.timeoutMs,
+        ...(connection.revision !== undefined ? { revision: connection.revision } : {}) },
     ),
   testConnection: (id: string) =>
     request<{ ok: boolean; checkedAt: string; message: string }>(

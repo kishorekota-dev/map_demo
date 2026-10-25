@@ -1,7 +1,6 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { randomBytes, createHash, createPublicKey } = require("crypto");
-const { resolveSecret } = require("../operations/connectors");
 const { equal } = require("../operations/auth");
 const { OperationsError } = require("../operations/store");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -66,6 +65,11 @@ function createIdentityRouter(options) {
   const store = options.store;
   const env = options.env || process.env;
   const secret = options.jwtSecret || env.JWT_SECRET;
+  if (env.AUTH_PROVIDER === "oidc" && !identityConfiguration(env))
+    throw new OperationsError(503, "Complete the server-owned OIDC configuration before startup.");
+  if (env.OIDC_CLIENT_SECRET_REF && (env.OIDC_CLIENT_SECRET_REF !== "env:OIDC_CLIENT_SECRET" || !env.OIDC_CLIENT_SECRET))
+    throw new OperationsError(503, "OIDC_CLIENT_SECRET_REF requires env:OIDC_CLIENT_SECRET and its environment value.");
+  const clientSecret = env.OIDC_CLIENT_SECRET_REF ? env.OIDC_CLIENT_SECRET : null;
   const fetcher = options.fetch || fetch;
   let cachedKeys = null;
   let keysUntil = 0;
@@ -289,11 +293,7 @@ function createIdentityRouter(options) {
         client_id: settings.clientId,
         code_verifier: transaction.verifier,
       });
-      if (env.OIDC_CLIENT_SECRET_REF)
-        body.set(
-          "client_secret",
-          resolveSecret(env.OIDC_CLIENT_SECRET_REF, env),
-        );
+      if (clientSecret) body.set("client_secret", clientSecret);
       const tokenResponse = await jsonResponse(
         await fetcher(settings.token, {
           method: "POST",

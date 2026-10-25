@@ -13,8 +13,8 @@ const runId = randomUUID();
 const env = { JWT_SECRET: secret, SERVICING_SERVICE_TOKEN: serviceToken };
 const token = overrides => jwt.sign({ userId: 'authorized-editor', tenantId: 'default-enterprise', roles: ['control_plane_editor'], type: 'access', purpose: 'quality_evaluation', runId, aud: 'servicing-quality', ...overrides }, secret, { expiresIn: '3m' });
 const body = () => ({ runId, caseId: 'fixture_case', providerId: 'fixture', request: { model: 'fixture-model', temperature: 0, maxOutputTokens: 32, timeoutMs: 1000, format: 'text', messages: [{ role: 'system', content: 'Reply READY.' }, { role: 'user', content: 'Synthetic probe.' }] } });
-function app(registry) {
-  const server = express(); server.use(express.json()); server.use('/api/orchestrator/llm', authenticate, createEvaluationRouter({ registry, env }));
+function app(registry, environment = env) {
+  const server = express(); server.use(express.json()); server.use('/api/orchestrator/llm', authenticate, createEvaluationRouter({ registry, env: environment }));
   server.get('/api/orchestrator/llm/providers', authenticate, (_req, res) => res.json({ providers: [] }));
   server.post('/api/orchestrator/process', authenticate, (_req, res) => res.json({ processed: true }));
   return server;
@@ -39,6 +39,12 @@ describe('scoped internal synthetic model evaluation', () => {
     await request(server).get('/api/orchestrator/llm/providers').set('Authorization', `Bearer ${token()}`).expect(403);
     await request(server).post('/api/orchestrator/process').set('Authorization', `Bearer ${token()}`).send({}).expect(403);
     await invoke(server, body(), token({ aud: 'wrong-audience' })).expect(403);
+  });
+  test('production refuses synthetic evaluation even with valid editor delegation and service identity', async () => {
+    const registry = { generate: jest.fn() };
+    const result = await invoke(app(registry, { ...env, NODE_ENV: 'production' })).expect(403);
+    expect(result.body.error.code).toBe('LLM_EVALUATION_DISABLED');
+    expect(registry.generate).not.toHaveBeenCalled();
   });
   test('bounded pinned request is executed once and prompt evidence is returned', async () => {
     const registry = { generate: jest.fn(async (providerId, input) => ({ providerId, model: input.model, text: 'READY', usage: { totalTokens: 5 }, latencyMs: 2 })) };

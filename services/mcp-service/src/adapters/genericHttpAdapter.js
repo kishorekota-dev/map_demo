@@ -3,7 +3,7 @@
  */
 const { createHash } = require("crypto");
 const { validateParameters } = require("./adapterContract");
-const { resolveAuthHeaders } = require("./credentialResolver");
+const { resolveAuthHeaders, credentialValues } = require("./credentialResolver");
 const { createSecureHttpClient } = require("./adapterNetwork");
 const IdempotencyStore = require("./idempotencyStore");
 class AdapterExecutionError extends Error {
@@ -67,6 +67,25 @@ const bounded = (request) => ({
   maxContentLength: 1048576,
   maxBodyLength: 65536,
 });
+const definitiveFailure = (status) => Number.isInteger(status) && status >= 400 && status < 600;
+function redactCredentialData(data, values) {
+  const secrets = [...new Set(values.filter((value) => typeof value === "string" && value.length))]
+    .sort((a, b) => b.length - a.length);
+  const redact = (value) => secrets.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
+  let nodes = 0;
+  const visit = (value, depth = 0) => {
+    if (++nodes > 100000 || depth > 64)
+      throw Object.assign(new Error("Adapter response exceeds safe processing limits"), { dispatched: true });
+    if (typeof value === "string") return redact(value);
+    if (typeof value === "number" && secrets.includes(String(value))) return "[redacted]";
+    if (Array.isArray(value)) return value.map((entry) => visit(entry, depth + 1));
+    if (value && typeof value === "object") return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [redact(key), visit(entry, depth + 1)]),
+    );
+    return value;
+  };
+  return visit(data);
+}
 class GenericHttpAdapter {
   constructor(
     adapter,
@@ -98,13 +117,20 @@ class GenericHttpAdapter {
         { status: 403 },
       );
   }
+  reconciliation(toolName, idempotencyKey) {
+    return {
+      reconciliationReference: idempotencyKey,
+      reconciliationPath: `/api/adapters/${this.adapter.id}/reconcile`,
+      reconciliationTool: toolName,
+    };
+  }
   async execute(toolName, parameters = {}, { idempotencyKey = null } = {}) {
     const tool = this.findTool(toolName);
     this.pilotOnly(tool);
     const validation = validateParameters(tool, parameters);
     if (!validation.valid)
       throw new AdapterExecutionError(
-        `Invalid arguments: ${validation.errors.join("; ")}`,
+        "Invalid arguments. Check the registered tool schema.",
       );
     if (tool.idempotency === "required" && !idempotencyKey)
       throw new AdapterExecutionError(
@@ -124,13 +150,11 @@ class GenericHttpAdapter {
       idempotencyKey,
       fingerprint(parameters),
       async () => {
+        const authHeaders = await resolveAuthHeaders(this.adapter, this.env, this.httpClient);
+        const credentials = credentialValues(this.adapter, this.env, authHeaders);
         const headers = {
           ...this.adapter.headers,
-          ...(await resolveAuthHeaders(
-            this.adapter,
-            this.env,
-            this.httpClient,
-          )),
+          ...authHeaders,
           ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         };
         const values = Object.fromEntries(
@@ -174,14 +198,21 @@ class GenericHttpAdapter {
                 ...base,
                 outcome: "completed",
                 status: response.status,
-                data: response.data,
+                data: redactCredentialData(response.data, credentials),
+              };
+            if (!tool.readOnly && definitiveFailure(response.status))
+              return {
+                ...base,
+                outcome: "failed",
+                status: response.status,
+                error: "Backend rejected the request. An explicit retry may use the same key.",
               };
             if (!tool.readOnly)
               return {
                 ...base,
                 outcome: "uncertain",
                 status: response.status,
-                reconciliationReference: idempotencyKey,
+                ...this.reconciliation(toolName, idempotencyKey),
                 error:
                   "Backend did not confirm a terminal outcome. Reconcile before retrying.",
               };
@@ -196,18 +227,19 @@ class GenericHttpAdapter {
               error: "Backend did not complete the read request.",
             };
           } catch (error) {
-            if (!tool.readOnly)
+            if (!tool.readOnly) {
+              const failed = definitiveFailure(error.response?.status)
+                || (error.dispatched === false && !error.response);
               return {
                 ...base,
-                outcome:
-                  error.dispatched === false && !error.response
-                    ? "failed"
-                    : "uncertain",
+                outcome: failed ? "failed" : "uncertain",
                 status: error.response?.status || null,
-                reconciliationReference: idempotencyKey,
-                error:
-                  "Backend completion is unconfirmed. Check the backend outcome before retrying.",
+                ...(failed ? {} : this.reconciliation(toolName, idempotencyKey)),
+                error: failed
+                  ? "Backend request failed. An explicit retry may use the same key."
+                  : "Backend completion is unconfirmed. Check the backend outcome before retrying.",
               };
+            }
             if (attempt < tool.retry.maxAttempts) {
               await sleep(200 * attempt);
               continue;
@@ -234,7 +266,7 @@ class GenericHttpAdapter {
         outcome: "uncertain",
         adapterId: this.adapter.id,
         tool: toolName,
-        reconciliationReference: idempotencyKey,
+        ...this.reconciliation(toolName, idempotencyKey),
         reason: "execution-in-progress",
       };
     const stored = this.idempotencyStore.get(
@@ -249,7 +281,7 @@ class GenericHttpAdapter {
         outcome: "uncertain",
         adapterId: this.adapter.id,
         tool: toolName,
-        reconciliationReference: idempotencyKey,
+        ...this.reconciliation(toolName, idempotencyKey),
         reason: "no-status-endpoint",
         manualSteps: [
           "Do not retry the original call with a new key.",
@@ -258,10 +290,12 @@ class GenericHttpAdapter {
       };
     const { filled } = fillPathTemplate(tool.statusPath, { idempotencyKey });
     try {
+      const authHeaders = await resolveAuthHeaders(this.adapter, this.env, this.httpClient);
       const headers = {
         ...this.adapter.headers,
-        ...(await resolveAuthHeaders(this.adapter, this.env, this.httpClient)),
+        ...authHeaders,
       };
+      const credentials = credentialValues(this.adapter, this.env, authHeaders);
       const response = await this.httpClient(
         bounded({
           method: "GET",
@@ -281,7 +315,7 @@ class GenericHttpAdapter {
           tool: toolName,
           namespacedTool: tool.namespacedName,
           status: response.status,
-          data: response.data,
+          data: redactCredentialData(response.data, credentials),
           replayed: false,
         };
         this.idempotencyStore.put(
@@ -299,7 +333,7 @@ class GenericHttpAdapter {
       outcome: "uncertain",
       adapterId: this.adapter.id,
       tool: toolName,
-      reconciliationReference: idempotencyKey,
+      ...this.reconciliation(toolName, idempotencyKey),
       reason: "backend-outcome-unconfirmed",
     };
   }

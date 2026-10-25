@@ -1,9 +1,10 @@
 const express = require("express");
 const { randomUUID, createHash, createPrivateKey, sign } = require("crypto");
-const { readFileSync } = require("fs");
 const { OperationsStore, OperationsError } = require("./store");
 const { authenticate, authorize, equal, actorHash } = require("./auth");
-const { validateBaseUrl, requestConnector } = require("./connectors");
+const { requestConnector } = require("./connectors");
+const { loadConnectorCatalog } = require("./connectorCatalog");
+const { verifyProof, KEY: mutationKey } = require('./mutationProof');
 const { FulfillmentWorker } = require("./worker");
 const { receiveWebhook } = require("./webhooks");
 const { retainOperations } = require("./maintenance");
@@ -12,6 +13,7 @@ const { mountUsageRoutes } = require("./usage");
 const { computeOutcomeMetrics, OUTCOME_EVENT_LIMIT } = require("./outcomeAnalytics");
 const { validateKnowledgeBatch } = require("./knowledgeValidation");
 const { mountAgentRoutes } = require("./agent-workspace");
+const { eventMetadata } = require('./eventMetadata');
 const { identifier, text } = require("../control-plane/config");
 
 const safeText = (value, max = 1000) =>
@@ -24,11 +26,20 @@ const route = (handler) => (req, res, next) =>
 function createOperationsRouter(options = {}) {
   const router = express.Router();
   const env = options.env || process.env;
+  const connectorCatalog = loadConnectorCatalog(env, options.connectorDefinitions);
+  let auditSigningKey = null;
+  if (env.AUDIT_SIGNING_KEY_FILE) throw new OperationsError(503, 'Use the AUDIT_SIGNING_KEY environment variable instead of a signing key file.');
+  if (env.AUDIT_SIGNING_KEY) {
+    try {
+      auditSigningKey = createPrivateKey(env.AUDIT_SIGNING_KEY);
+      if (auditSigningKey.asymmetricKeyType !== 'rsa') throw new Error();
+    } catch { throw new OperationsError(503, 'AUDIT_SIGNING_KEY must configure a valid RSA private key.'); }
+  }
   const store = options.store || new OperationsStore(options);
   const secret = options.jwtSecret || env.JWT_SECRET;
   const worker =
     options.worker ||
-    new FulfillmentWorker(store, { env, request: options.request });
+    new FulfillmentWorker(store, { env, request: options.request, connectorCatalog });
   const monitor = new RolloutMonitor(store, options.configStore, {
     env,
     fetch: options.fetch,
@@ -54,12 +65,18 @@ function createOperationsRouter(options = {}) {
           env,
           jwtSecret: secret,
           fetch: options.fetch,
+          connectorCatalog,
         }),
       ),
     ),
   );
   router.use(authenticate(secret, store.tenantId));
   mountAgentRoutes(router, { store, configStore: options.configStore, env: { ...env, JWT_SECRET: secret } });
+  router.get(
+    "/connections/catalog",
+    authorize("canView"),
+    (_req, res) => res.json({ items: connectorCatalog.list() }),
+  );
   router.get(
     "/status",
     authorize("canView"),
@@ -109,6 +126,9 @@ function createOperationsRouter(options = {}) {
     route(async (req, res) => {
       const b = req.body;
       if (
+        !b || typeof b !== 'object' || Array.isArray(b) ||
+        Object.keys(b).some(key => !['id', 'revision', 'name', 'kind', 'baseUrl', 'credentialRef', 'webhookSecretRef', 'webhookPublicUrl', 'enabled', 'timeoutMs', 'lastTest'].includes(key)) ||
+        (b.id !== undefined && b.id !== req.params.id) ||
         !identifier(req.params.id) ||
         !text(b.name, 120) ||
         !["case", "voice", "knowledge"].includes(b.kind) ||
@@ -121,20 +141,7 @@ function createOperationsRouter(options = {}) {
           400,
           "Provide id, name, kind, enabled and timeoutMs (1000–60000).",
         );
-      validateBaseUrl(b.baseUrl, env);
-      for (const value of [b.credentialRef, b.webhookSecretRef])
-        if (
-          value &&
-          (typeof value !== "string" ||
-            value.length > 300 ||
-            !/^(env:CONNECTOR_SECRET_[A-Z0-9_]+|file:[A-Za-z0-9_./-]+)$/.test(
-              value,
-            ))
-        )
-          throw new OperationsError(
-            400,
-            "Credentials must use server-managed secret references.",
-          );
+      const definition = connectorCatalog.configure(req.params.id, b);
       const result = await store.transaction(async (tx) => {
         const current = await tx.get("connection", req.params.id);
         if (current && !Number.isInteger(b.revision))
@@ -145,16 +152,7 @@ function createOperationsRouter(options = {}) {
         const item = await tx.put(
           "connection",
           req.params.id,
-          {
-            name: b.name.trim(),
-            kind: b.kind,
-            baseUrl: b.baseUrl.replace(/\/$/, ""),
-            credentialRef: b.credentialRef || null,
-            webhookSecretRef: b.webhookSecretRef || null,
-            enabled: b.enabled,
-            timeoutMs: b.timeoutMs,
-            lastTest: null,
-          },
+          definition,
           b.revision ?? 0,
         );
         await tx.event({
@@ -173,6 +171,7 @@ function createOperationsRouter(options = {}) {
     route(async (req, res) => {
       const connection = await store.get("connection", req.params.id);
       if (!connection) throw new OperationsError(404, "Connector not found.");
+      connectorCatalog.bind(connection);
       let ok = false;
       try {
         const result = await request(connection, "/health", { env });
@@ -212,6 +211,7 @@ function createOperationsRouter(options = {}) {
       const connection = await store.get("connection", req.params.id);
       if (!connection?.enabled || connection.kind !== "knowledge")
         throw new OperationsError(400, "Enable a knowledge connector first.");
+      connectorCatalog.bind(connection);
       const result = await request(connection, "/documents", { env });
       if (
         result.status !== 200 ||
@@ -282,24 +282,7 @@ function createOperationsRouter(options = {}) {
           400,
           "An event requires sessionId, interactionId, version, channel, intent, stage and outcome.",
         );
-      const metadata = {};
-      for (const key of [
-        "tool",
-        "reason",
-        "caseId",
-        "recognitionMethod",
-        "recognitionSource",
-        "reconciliationReference",
-        "confidence",
-        "workflowStatus",
-        "confirmationRequired",
-        "confirmationVerified",
-      ])
-        if (["string", "boolean", "number"].includes(typeof b.metadata?.[key]))
-          metadata[key] =
-            typeof b.metadata[key] === "string"
-              ? safeText(b.metadata[key], 200)
-              : b.metadata[key];
+      const metadata = eventMetadata(b.metadata);
       const event = await store.transaction((tx) =>
         tx.event({
           type: "runtime.execution",
@@ -337,7 +320,7 @@ function createOperationsRouter(options = {}) {
       const b = req.body;
       if (
         !text(b.sessionId, 200) ||
-        !text(b.idempotencyKey, 160) ||
+        !mutationKey.test(b.idempotencyKey || '') ||
         !text(b.reference, 200) ||
         !text(b.summary, 1000) ||
         !Number.isInteger(b.version) ||
@@ -424,6 +407,7 @@ function createOperationsRouter(options = {}) {
         version: b.version,
         channel: b.channel,
         journeyId: journey.id,
+        intent: intent.id,
         reference: safeText(b.reference, 200),
         summary: safeText(b.summary),
         details,
@@ -449,8 +433,22 @@ function createOperationsRouter(options = {}) {
               409,
               "Idempotency key was used with different details.",
             );
+          if (existing.definitiveFailure === true && (existing.status === 'failed' || (existing.status === 'in_progress' && existing.pendingOperation === 'escalate'))) {
+            if (!verifyProof(req.get('X-Servicing-Confirmation'), { scope: 'servicing_case', principalId: req.principal.actor,
+              tenantId: store.tenantId, key: b.idempotencyKey, method: 'POST', path: '/runtime/cases', body: b }, env))
+              throw new OperationsError(403, 'Verified confirmation for the original case request is required.');
+            const retried = await tx.put('case', existing.id, { ...existing, status: 'queued',
+              definitiveFailure: false, lastError: null, updatedAt: new Date().toISOString() });
+            await tx.enqueue(existing.id, existing.pendingOperation === 'escalate' ? 'escalate' : 'create');
+            await tx.event({ type: 'case.retry_requested', caseId: existing.id, sessionId: existing.sessionId,
+              operationId: existing.idempotencyKey, actorHash: fingerprintActor(req) });
+            return retried;
+          }
           return existing;
         }
+        if (!verifyProof(req.get('X-Servicing-Confirmation'), { scope: 'servicing_case', principalId: req.principal.actor,
+          tenantId: store.tenantId, key: b.idempotencyKey, method: 'POST', path: '/runtime/cases', body: b }, env))
+          throw new OperationsError(403, 'Verified confirmation for the original case request is required.');
         const now = new Date();
         const id = randomUUID();
         const created = await tx.put("case", id, {
@@ -498,6 +496,7 @@ function createOperationsRouter(options = {}) {
           ({
             ownerId,
             details,
+            outboundRequests,
             idempotencyKey,
             requestDigest,
             resolutionNote,
@@ -800,16 +799,8 @@ function createOperationsRouter(options = {}) {
       };
       const payload = JSON.stringify(bundle);
       const digest = createHash("sha256").update(payload).digest("hex");
-      const signingKey = env.AUDIT_SIGNING_KEY_FILE
-        ? createPrivateKey(readFileSync(env.AUDIT_SIGNING_KEY_FILE))
-        : null;
-      if (signingKey && signingKey.asymmetricKeyType !== "rsa")
-        throw new OperationsError(
-          503,
-          "Evidence export signing requires an RSA private key.",
-        );
-      const signature = signingKey
-        ? sign("sha256", Buffer.from(payload), signingKey).toString("base64")
+      const signature = auditSigningKey
+        ? sign("sha256", Buffer.from(payload), auditSigningKey).toString("base64")
         : null;
       res
         .set(
@@ -883,6 +874,7 @@ function createOperationsRouter(options = {}) {
     monitor.start();
   }
   router.store = store;
+  router.connectorCatalog = connectorCatalog;
   router.worker = worker;
   router.close = async () => {
     worker.stop();

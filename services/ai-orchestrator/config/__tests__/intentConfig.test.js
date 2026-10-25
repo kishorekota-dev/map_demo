@@ -67,7 +67,7 @@ describe('intentConfig consistency', () => {
     const schemas = Object.fromEntries(
       bankingTools.getToolDefinitions().map(tool => [tool.name, tool.inputSchema])
     );
-    const withoutAuth = fields => fields.filter(field => field !== 'authToken');
+    const withoutAuth = fields => fields.filter(field => !['authToken', 'userId', 'tenantId', 'idempotencyKey', 'confirmationProof'].includes(field));
 
     expect(intentConfig.INTENT_DATA_REQUIREMENTS.transfer_funds.required)
       .toEqual(withoutAuth(schemas.banking_create_transfer.required));

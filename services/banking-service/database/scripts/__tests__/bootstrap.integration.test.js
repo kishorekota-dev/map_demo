@@ -33,7 +33,7 @@ suite('banking bootstrap on disposable PostgreSQL', () => {
 
   test('serializes concurrent migrations and seeds, preserves seeded balances on repeat, and fully resets owned tables', async () => {
     const migrations = await Promise.all([runMigrations({ database, log }), runMigrations({ database, log })]);
-    expect(migrations.map(result => result.applied).sort((a,b) => a-b)).toEqual([0, 9]);
+    expect(migrations.map(result => result.applied).sort((a,b) => a-b)).toEqual([0, 10]);
     const seeded = await Promise.all([runSeeds({ database }), runSeeds({ database })]);
     expect(seeded.filter(result => result.applied)).toHaveLength(1);
     expect(Number((await query('SELECT COUNT(*) FROM users')).rows[0].count)).toBeGreaterThan(5);
@@ -42,7 +42,7 @@ suite('banking bootstrap on disposable PostgreSQL', () => {
     expect((await query('SELECT balance FROM accounts WHERE account_id = $1', ['660e8400-e29b-41d4-a716-446655449001'])).rows[0].balance).toBe('123.45');
     await resetDatabase({ database, env: { NODE_ENV: 'test', BANKING_ALLOW_DATABASE_RESET: 'true' }, confirmed: true });
     expect((await query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")).rows).toHaveLength(0);
-    expect((await runMigrations({ database, log })).applied).toBe(9);
+    expect((await runMigrations({ database, log })).applied).toBe(10);
   }, 30000);
 
   test('orders V2 before V10 and rolls back failed SQL together with its history', async () => {
@@ -71,7 +71,7 @@ suite('banking bootstrap on disposable PostgreSQL', () => {
   });
 
   test('bootstrap defaults to migrations without demo users and blocks production seed/reset', async () => {
-    await bootstrap({ database, env: { NODE_ENV: 'test' }, log });
+    await bootstrap({ database, env: { NODE_ENV: 'test', JWT_SECRET: require('crypto').randomBytes(32).toString('hex') }, log });
     expect((await query('SELECT 1 FROM users')).rowCount).toBe(0);
     const env = { NODE_ENV: 'production', JWT_SECRET: 'isolated-production-fixture-key-at-least32', BANKING_SEED_DEMO_DATA: 'true' };
     await expect(bootstrap({ database, env, log })).rejects.toThrow('cannot be enabled');
@@ -82,7 +82,7 @@ suite('banking bootstrap on disposable PostgreSQL', () => {
   test('entrypoint never starts the application after a migration failure and undo exits unsuccessfully', async () => {
     await query('CREATE TABLE users (incompatible INTEGER)');
     const connection = new URL(database.connectionString);
-    const environment = { ...process.env, NODE_ENV: 'test', DB_HOST: connection.hostname, DB_PORT: connection.port, DB_USER: decodeURIComponent(connection.username), DB_PASSWORD: decodeURIComponent(connection.password), DB_NAME: name, DB_SSL: 'false', BANKING_DB_READY_TIMEOUT_MS: '1000', BANKING_RUN_MIGRATIONS: 'true', BANKING_SEED_DEMO_DATA: 'false' };
+    const environment = { ...process.env, NODE_ENV: 'test', DB_HOST: connection.hostname, DB_PORT: connection.port, DB_USER: decodeURIComponent(connection.username), DB_PASSWORD: decodeURIComponent(connection.password) || require('crypto').randomBytes(24).toString('hex'), DB_NAME: name, DB_SSL: 'false', BANKING_DB_READY_TIMEOUT_MS: '1000', BANKING_RUN_MIGRATIONS: 'true', BANKING_SEED_DEMO_DATA: 'false' };
     const service = path.resolve(__dirname, '../../..');
     const result = spawnSync('/bin/sh', [path.join(service, 'docker-entrypoint.sh'), process.execPath, '-e', 'process.stdout.write("APPLICATION_STARTED")'], { env: environment, encoding: 'utf8', timeout: 10000 });
     expect(result.status).toBe(1);
@@ -119,7 +119,7 @@ suite('banking bootstrap on disposable PostgreSQL', () => {
     await runMigrations({ database, log });
     const connection = new URL(database.connectionString);
     const password = 'Synthetic-Input-Only42!';
-    const environment = { ...process.env, NODE_ENV: 'production', JWT_SECRET: 'isolated-admin-key-at-least32-characters', DEPLOYMENT_TENANT_ID: 'banking-fixture', BANKING_ADMIN_TENANT_ID: 'banking-fixture', BANKING_ADMIN_EMAIL: 'stdin-operator@example.invalid', DB_HOST: connection.hostname, DB_PORT: connection.port, DB_USER: decodeURIComponent(connection.username), DB_PASSWORD: decodeURIComponent(connection.password), DB_NAME: name, DB_SSL: 'false' };
+    const environment = { ...process.env, NODE_ENV: 'production', JWT_SECRET: 'isolated-admin-key-at-least32-characters', DEPLOYMENT_TENANT_ID: 'banking-fixture', BANKING_ADMIN_TENANT_ID: 'banking-fixture', BANKING_ADMIN_EMAIL: 'stdin-operator@example.invalid', DB_HOST: connection.hostname, DB_PORT: connection.port, DB_USER: decodeURIComponent(connection.username), DB_PASSWORD: decodeURIComponent(connection.password) || require('crypto').randomBytes(24).toString('hex'), DB_NAME: name, DB_SSL: 'false' };
     delete environment.BANKING_ADMIN_PASSWORD;
     const script = path.resolve(__dirname, '../bootstrap-admin.js');
     const result = spawnSync(process.execPath, [script, '--password-stdin'], { env: environment, input: `${password}\n`, encoding: 'utf8', timeout: 10000 });

@@ -30,7 +30,7 @@ function freeze(value) {
 class AdapterRegistry {
   constructor({ httpClient = null, env = process.env } = {}) {
     this.adapters = new Map();
-    this.httpClient = httpClient; // null => GenericHttpAdapter default (axios)
+    this.httpClient = httpClient; // null => bounded native HTTP transport
     this.env = env;
     this.idempotencyStore = new IdempotencyStore();
   }
@@ -60,8 +60,7 @@ class AdapterRegistry {
       executor: new GenericHttpAdapter(adapter, options),
     });
     logger.info("Generic backend adapter registered", {
-      adapterId: adapter.id,
-      tools: adapter.tools.map((t) => t.namespacedName),
+      toolCount: adapter.tools.length,
     });
     return sanitizeAdapter(adapter);
   }

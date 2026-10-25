@@ -1,12 +1,17 @@
 const winston = require('winston');
+const { operationalLog } = require('./operationalLog');
+const messages = require('./logMessages');
+const privacyFormat = winston.format(info => operationalLog(info, { service: 'poc-ai-orchestrator', messages }));
+
 const path = require('path');
 const config = require('../../config');
 
 // Define log format
 const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
+  privacyFormat(),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.json()
 );
 
@@ -61,11 +66,8 @@ logger.requestMiddleware = (req, res, next) => {
     const duration = Date.now() - start;
     logger.info('HTTP Request', {
       method: req.method,
-      url: req.url,
-      status: res.statusCode,
-      duration: `${duration}ms`,
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
+      statusCode: res.statusCode,
+      duration
     });
   });
   

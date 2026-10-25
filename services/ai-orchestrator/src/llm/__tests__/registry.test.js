@@ -54,14 +54,16 @@ describe('bounded server-owned model provider plugins', () => {
       headers: { 'x-goog-api-key': 'gemini-secret' }, data: { systemInstruction: { parts: [{ text: 'Return a JSON object.' }] },
         contents: [{ role: 'user', parts: [{ text: 'Synthetic input' }] }], generationConfig: { maxOutputTokens: 48, responseMimeType: 'application/json' } } });
   });
-  test('Vertex uses ADC only for its own plugin, and model listing is the configured allowlist', async () => {
+  test('Vertex uses only an explicit environment credential and model listing is the configured allowlist', async () => {
+    const credential = require('crypto').randomBytes(32).toString('hex');
     const transport = { request: jest.fn(async () => ({ data: { candidates: [{ content: { parts: [{ text: 'READY' }] }, finishReason: 'STOP' }] } })) };
-    const googleAuth = { getAccessToken: jest.fn(async () => 'adc-access') };
-    const client = new ProviderRegistry({ providers: [{ id: 'vertex', type: 'vertex_gemini', enabled: true, project: 'enterprise-project', location: 'us-central1', allowedModels: ['gemini-test'] }] }, { http: transport, googleAuth, env: {} });
+    const googleAuth = { getAccessToken: jest.fn() };
+    const client = new ProviderRegistry({ providers: [{ id: 'vertex', type: 'vertex_gemini', enabled: true, credentialRef: 'VERTEX_TOKEN', project: 'enterprise-project', location: 'us-central1', allowedModels: ['gemini-test'] }] }, { http: transport, googleAuth, env: { VERTEX_TOKEN: credential } });
     expect(await client.models('vertex')).toMatchObject({ source: 'configured-allowlist', models: [{ id: 'gemini-test' }] });
     expect(googleAuth.getAccessToken).not.toHaveBeenCalled();
     await client.generate('vertex', { ...input, model: 'gemini-test', format: 'text' });
-    expect(transport.request.mock.calls[0][0]).toMatchObject({ url: 'https://us-central1-aiplatform.googleapis.com/v1/projects/enterprise-project/locations/us-central1/publishers/google/models/gemini-test:generateContent', headers: { Authorization: 'Bearer adc-access' } });
+    expect(transport.request.mock.calls[0][0].url).toBe('https://us-central1-aiplatform.googleapis.com/v1/projects/enterprise-project/locations/us-central1/publishers/google/models/gemini-test:generateContent');
+    expect(transport.request.mock.calls[0][0].headers.Authorization === `Bearer ${credential}`).toBe(true);
     await expect(client.generate('vertex', input)).rejects.toMatchObject({ code: 'LLM_MODEL_NOT_ALLOWED' });
   });
   test('disabled providers, missing explicit credentials, unsafe registries and malformed model output fail closed', async () => {
@@ -70,8 +72,7 @@ describe('bounded server-owned model provider plugins', () => {
     const disabled = registry({ type: 'ollama', enabled: false }, {});
     await expect(disabled.client.generate('test-provider', input)).rejects.toMatchObject({ code: 'LLM_PROVIDER_UNAVAILABLE' });
     expect(disabled.transport.request).not.toHaveBeenCalled();
-    const cloud = registry({ type: 'openai' }, {}, { OPENAI_API_KEY: 'ambient-must-not-be-used' });
-    await expect(cloud.client.generate('test-provider', input)).rejects.toMatchObject({ code: 'LLM_CREDENTIAL_MISSING' });
+    expect(() => registry({ type: 'openai' }, {}, { OPENAI_API_KEY: require('crypto').randomBytes(32).toString('hex') })).toThrow('explicit credential');
     const invalid = registry({ type: 'ollama' }, { message: { content: 'not JSON' } });
     await expect(invalid.client.generate('test-provider', input)).rejects.toMatchObject({ code: 'LLM_INVALID_JSON' });
     invalid.transport.request.mockResolvedValue({ data: { message: { content: '{"ok":true}', tool_calls: [{ function: 'transfer' }] } } });

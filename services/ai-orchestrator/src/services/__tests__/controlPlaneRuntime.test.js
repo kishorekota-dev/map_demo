@@ -1,10 +1,12 @@
 jest.mock('axios');
 jest.mock('../../utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
-jest.mock('../../models', () => ({ Session: { findOne: jest.fn() }, WorkflowExecution: {}, HumanFeedback: { findOne: jest.fn(), create: jest.fn() } }));
+jest.mock('../../models', () => ({ Session: { findOne: jest.fn() }, WorkflowExecution: { create: jest.fn() }, HumanFeedback: { findOne: jest.fn(), create: jest.fn() } }));
 jest.mock('../../workflows/bankingChatWorkflow', () => jest.fn());
 jest.mock('../poc-slm-data-extractor', () => ({ extractAndValidate: jest.fn() }));
 
 const axios = require('axios');
+const { randomBytes } = require('crypto');
+const { confirmationContext } = require('../actionConfirmation');
 const intentMapper = require('../intentMapper');
 const WorkflowService = require('../workflowService');
 const { ControlPlaneRuntime, classifyPublishedIntent, validateSnapshot, resolvePublishedRoute } = require('../controlPlaneRuntime');
@@ -35,8 +37,10 @@ function makeService() {
 
 describe('published control-plane runtime', () => {
   const originalEnabled = process.env.CONTROL_PLANE_ENABLED;
-  beforeEach(() => { process.env.CONTROL_PLANE_ENABLED = 'true'; jest.clearAllMocks(); });
+  const originalToken = process.env.SERVICING_SERVICE_TOKEN;
+  beforeEach(() => { process.env.CONTROL_PLANE_ENABLED = 'true'; process.env.SERVICING_SERVICE_TOKEN = randomBytes(32).toString('hex'); jest.clearAllMocks(); });
   afterAll(() => {
+    if (originalToken === undefined) delete process.env.SERVICING_SERVICE_TOKEN; else process.env.SERVICING_SERVICE_TOKEN = originalToken;
     if (originalEnabled === undefined) delete process.env.CONTROL_PLANE_ENABLED;
     else process.env.CONTROL_PLANE_ENABLED = originalEnabled;
   });
@@ -94,11 +98,33 @@ describe('published control-plane runtime', () => {
     snapshot.config.journeys.find(entry => entry.id === 'accounts').fulfillment = 'human';
     await manager.createSession('u', 'human', 'help', { channel: 'digital', tenantId: 'default-enterprise' });
     expect(await service.processMessage({ sessionId: 'human', userId: 'u', question: 'check balance', authToken: 'token' }))
-      .toMatchObject({ type: 'human_escalation', metadata: { queue: 'general_servicing', version: 1 } });
+      .toMatchObject({ type: 'confirmation_required', metadata: { queue: 'general_servicing', version: 1 } });
+    expect(service.integrations.createCase).not.toHaveBeenCalled();
     expect(sessions.get('human').intent).toBe('balance_inquiry');
     expect(service.processConfiguredMessage).not.toHaveBeenCalled();
   });
 
+  test('human case creation requires the exact pending confirmation and a channel change renews it', async () => {
+    const { service, manager, sessions } = makeService();
+    const route = { version: 7, channel: 'digital', intent: 'help', action: 'human', queue: 'general_servicing' };
+    await manager.createSession('u', 'confirmed-handoff', 'help', { tenantId: 'default-enterprise', channel: 'digital', interactionId: 'original', runtimeContext: route });
+    const pending = await service.routeToHuman({ sessionId: 'confirmed-handoff', userId: 'u', metadata: {} }, route, 'journey_requires_human');
+    expect(pending.type).toBe('confirmation_required'); expect(service.integrations.createCase).not.toHaveBeenCalled();
+    const feedback = { context: pending.details };
+    sessions.get('confirmed-handoff').metadata.channel = 'ivr'; sessions.get('confirmed-handoff').metadata.runtimeContext = { ...route, channel: 'ivr' };
+    expect(await service.processConfirmation('confirmed-handoff', true, feedback, 'access')).toMatchObject({ type: 'confirmation_required' });
+    expect(service.integrations.createCase).not.toHaveBeenCalled();
+    const renewed = HumanFeedback.create.mock.calls.at(-1)[0];
+    expect(await service.processConfirmation('confirmed-handoff', true, { context: renewed.context }, 'access')).toMatchObject({ type: 'human_escalation', caseId: 'case-test' });
+    expect(service.integrations.createCase).toHaveBeenCalledTimes(1); expect(service.integrations.createCase).toHaveBeenCalledWith(expect.objectContaining({ confirmationGranted: true, channel: 'ivr' }), 'journey_requires_human');
+  });
+  test('old source channel cannot dispatch after a coordinated migration', async () => {
+    const { service, manager } = makeService();
+    await manager.createSession('u', 'moved-channel', 'help', { channel: 'ava', tenantId: 'default-enterprise' });
+    await expect(service.processMessage({ sessionId: 'moved-channel', userId: 'u', expectedChannel: 'ivr', question: 'help' })).rejects.toMatchObject({ status: 409, code: 'CHANNEL_CHANGED' });
+    await expect(service.processHumanFeedback({ sessionId: 'moved-channel', expectedChannel: 'ivr' })).rejects.toMatchObject({ status: 409, code: 'CHANNEL_CHANGED' });
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled(); expect(service.processConfiguredFeedback).not.toHaveBeenCalled();
+  });
   test('separate concurrent workflows retain their own prompts and data requirements', async () => {
     const a = defaultConfig().intents;
     const b = structuredClone(a);
@@ -211,10 +237,10 @@ describe('published control-plane runtime', () => {
     const service = new WorkflowService(adapter, {});
     service.integrations.event = jest.fn(async () => ({ id: 'event-1' }));
     service.integrations.usage = jest.fn(async () => ({ id: 'usage-1' }));
-    const parameters = { interactionId: 'one-request', tenantId: 'tenant', authToken: 'access', amount: 20,
+    const parameters = { userId: 'u', interactionId: 'one-request', tenantId: 'tenant', authToken: 'access', amount: 20,
       runtimeContext: { version: 7, channel: 'ava', intent: 'transfer_funds', confirmationRequired: true, confirmationVerified: true } };
-    await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session');
-    expect(await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session')).toMatchObject({ replayed: true });
+    const first = await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session');
+    expect(await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session')).toEqual(first);
     expect(adapter.executeTool).toHaveBeenCalledTimes(1);
     expect(service.integrations.usage).toHaveBeenCalledTimes(1);
     expect(service.integrations.usage).toHaveBeenCalledWith(expect.objectContaining({ interactionId: 'one-request', version: 7, units: 1, metric: 'calls', provider: 'mcp' }), 'access');
@@ -241,8 +267,11 @@ describe('published control-plane runtime', () => {
     manager.updateSession.mockRejectedValue(new Error('terminal session write unavailable'));
     service.integrations.event = jest.fn(async () => ({ telemetryUnavailable: true }));
     service.integrations.usage = jest.fn(async () => ({ telemetryUnavailable: true }));
+    const session = sessions.get('terminal-failure');
+    const boundState = { ...session, tenantId: session.metadata.tenantId, channel: session.metadata.channel, interactionId: session.metadata.interactionId, runtimeContext: session.metadata.runtimeContext };
+    const feedback = { context: { confirmation: confirmationContext(boundState, ['banking_create_transfer']) } };
     const confirm = () => intentMapper.withPublishedIntents(snapshot.config.intents,
-      () => service.processConfirmation('terminal-failure', true, {}, 'access'), snapshot.config.prompts);
+      () => service.processConfirmation('terminal-failure', true, feedback, 'access'), snapshot.config.prompts);
     expect(await confirm()).toMatchObject({ type: 'complete', response: 'Your transfer of USD 20.00 was submitted successfully.', telemetryUnavailable: true });
     expect(await confirm()).toMatchObject({ type: 'complete', telemetryUnavailable: true });
     expect(adapter.executeTool).toHaveBeenCalledTimes(1);

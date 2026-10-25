@@ -1,4 +1,8 @@
 const winston = require('winston');
+const { operationalLog } = require('./operationalLog');
+const messages = require('./logMessages');
+const privacyFormat = winston.format(info => operationalLog(info, { service: 'poc-mcp-service', messages }));
+
 const path = require('path');
 const fs = require('fs');
 
@@ -10,8 +14,9 @@ if (!fs.existsSync(logsDir)) {
 
 // Define log format
 const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
+  privacyFormat(),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.json()
 );
 
@@ -50,7 +55,17 @@ const logger = winston.createLogger({
 
 // Stream for Morgan
 logger.stream = {
-  write: (message) => logger.info(message.trim())
+  write: () => logger.info('HTTP Request')
+};
+
+
+// HTTP metadata is enumerated; URLs, client addresses and headers are omitted.
+logger.requestMiddleware = (req, res, next) => {
+  const started = Date.now();
+  res.on('finish', () => logger.info('HTTP Request', {
+    method: req.method, statusCode: res.statusCode, duration: Date.now() - started
+  }));
+  next();
 };
 
 module.exports = logger;

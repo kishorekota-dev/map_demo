@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 const { isQualityDelegation } = require('./tokenScope');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || '';
 
 /**
  * JWT Authentication Middleware

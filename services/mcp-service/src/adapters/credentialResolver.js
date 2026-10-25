@@ -20,6 +20,20 @@ function requiredEnv(env, name) {
     throw new AdapterAuthError("Invalid adapter credential value");
   return value;
 }
+function credentialEnvironmentNames(adapter) {
+  const auth = adapter.auth || { type: "none" };
+  return ["envVar", "envVarUsername", "envVarPassword", "envVarClientId", "envVarClientSecret"]
+    .filter((field) => auth[field]).map((field) => auth[field]);
+}
+function validateCredentialConfiguration(adapter, env = process.env) {
+  for (const name of credentialEnvironmentNames(adapter)) requiredEnv(env, name);
+}
+function credentialValues(adapter, env, headers) {
+  return [
+    ...credentialEnvironmentNames(adapter).map((name) => env[name]),
+    ...Object.values(headers).flatMap((value) => [value, value.replace(/^(Bearer|Basic) /i, "")]),
+  ];
+}
 const tokenCache = new Map();
 async function resolveOAuthToken(auth, env, httpClient) {
   validateEndpoint(auth.tokenUrl, env);
@@ -116,5 +130,7 @@ async function resolveAuthHeaders(
 module.exports = {
   AdapterAuthError,
   resolveAuthHeaders,
+  validateCredentialConfiguration,
+  credentialValues,
   _tokenCache: tokenCache,
 };

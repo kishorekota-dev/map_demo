@@ -326,17 +326,30 @@ A document contains:
  status:"draft"|"published"|"archived"}
 ```
 
-Content is bounded to 50,000 characters. `source` is an HTTP(S) URL or plain
-reference label. Allowed roles use lowercase signed role names; `"*"` allows all
+Content must contain at least 20 characters after trimming and is bounded to
+50,000 characters. Manual saves, imports and connector sync use the same preflight:
+IDs must be unique within a batch; title, content and source cannot contain email,
+card-like or Social Security number patterns. Unicode compatibility normalization
+is applied before pattern checks. `source` is an HTTP(S) URL without embedded
+credentials or a plain reference label, and cannot be `"unknown"`. These patterns
+flag obvious sensitive content and can reject public contact details; they are not
+a comprehensive privacy classifier. Rejection writes nothing. Allowed roles use
+lowercase signed role names; `"*"` allows all
 authenticated principals in the deployment. Publishing or archiving requires
 administrator permission. Editor draft saves preserve the previous live release.
-Each save creates a revision. Archiving removes the document from retrieval while
-retaining its history.
+Each save creates a positive internal `version`; callers do not need to supply one.
+An optional caller label is validated but cannot choose or overwrite this internal
+revision. Archiving removes the document from retrieval while retaining its history.
 
 Retrieval filters tenant, published status, role permission and expiry **before**
 lexical ranking. PostgreSQL uses indexed full-text search; development uses token
 overlap. Results contain only permitted document content, source, version and
-relevance score. No matching evidence returns an empty list with `grounded:false`;
+relevance score. Retrieval also validates stored answer sources, including a
+positive internal version and matching stored/document identifiers. Unsafe or
+incomplete historical records are omitted; operators must correct and republish
+them. A candidate page can contain fewer than the requested number of valid results.
+Existing published content remains available while a valid draft is edited.
+No matching evidence returns an empty list with `grounded:false`;
 the endpoint never fabricates an answer or citation. Documents are authored or
 imported as text; this module does not fetch arbitrary source URLs.
 

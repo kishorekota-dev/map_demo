@@ -1,6 +1,6 @@
 const request = require('supertest');
 
-jest.mock('../../utils/logger', () => ({
+jest.mock('../../utils/logger', () => ({ requestMiddleware: (_req, _res, next) => next(),
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),

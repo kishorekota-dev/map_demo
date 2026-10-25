@@ -30,7 +30,7 @@ module.exports = {
     port: parseInt(process.env.DB_PORT) || 5432,
     database: process.env.DB_NAME || 'poc_banking',
     user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
+    password: process.env.DB_PASSWORD || '',
     max: parseInt(process.env.DB_POOL_MAX) || 10,
     min: parseInt(process.env.DB_POOL_MIN) || 2,
     idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000,
@@ -41,7 +41,7 @@ module.exports = {
   flyway: {
     url: process.env.DATABASE_URL || `jdbc:postgresql://${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 5432}/${process.env.DB_NAME || 'poc_banking'}`,
     user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
+    password: process.env.DB_PASSWORD || '',
     locations: ['filesystem:migrations'],
     schemas: ['public'],
     table: 'flyway_schema_history',

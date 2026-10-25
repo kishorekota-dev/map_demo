@@ -16,7 +16,7 @@ SDK implementation summaries, deployment-status snapshots, and review reports ar
 
 `POST /api/nlu/intents` uses deterministic banking patterns first. When no banking result meets the configured threshold, enabled Dialogflow is advisory, followed by the local matcher and a canonical `general_inquiry` fallback. Canonical names are snake_case, such as `balance_inquiry` and `transfer_funds`; dotted names in older examples are raw/provider vocabulary, not the public primary intent contract.
 
-`POST /api/nlu/analyze` combines the Dialogflow service wrapper with banking analysis and exposes a canonical primary intent. The wrapper can return mock results when disabled or unavailable at initialization; an actual provider call can fail. Do not equate mock output with live provider validation. The `/intents` and `/analyze` handlers have different response details/error behavior; use the endpoint required by the caller.
+`POST /api/nlu/analyze` combines the Dialogflow service wrapper with banking analysis and exposes a canonical primary intent. Disabled Dialogflow supplies demo responses only outside production. Explicitly enabled providers must initialize with valid server environment credentials or service startup fails; live API failures never become mock results. In production, `/analyze` and `/dialogflow` return 503 when their provider is disabled/unavailable. `/intents` continues deterministic local matching when the optional provider fails. Do not equate demo output with live provider validation.
 
 Intent cache keys include user, session, and normalized text. The service's context map/cache remain in memory and are not a tenant-owned durable conversation store. It has no authority to perform banking operations.
 
@@ -50,7 +50,7 @@ The active configuration is [src/config/config.js](src/config/config.js), not th
 | `INTENT_CONFIDENCE_THRESHOLD` | Primary threshold; falls back to `CONFIDENCE_THRESHOLD`, default 0.6 |
 | `DIALOGFLOW_ENABLED` | Explicit `true` enables the optional wrapper's live client initialization |
 | `DIALOGFLOW_PROJECT_ID` | Required project when initializing that client |
-| `DIALOGFLOW_KEY_FILENAME` | Explicit server credential file; falls back to `GOOGLE_APPLICATION_CREDENTIALS` |
+| `DIALOGFLOW_CREDENTIALS_JSON` | Server environment JSON with `type:"service_account"`, `client_email`, and a valid RSA `private_key`; required when enabled |
 | `DIALOGFLOW_LANGUAGE_CODE` | Default `en-US` |
 | `INTERNAL_SERVICE_AUTH_REQUIRED` | Explicit internal-service gate; production enables it regardless |
 | `SERVICING_SERVICE_TOKEN` | Header credential for internal callers; never a customer/provider credential |
@@ -62,3 +62,5 @@ npm test -w services/nlu-service -- --runInBand
 ```
 
 Use Node 22. Keep NLU internal and enable the service-token gate for production. No separate `nlp-service` runs in this monorepo. New application LLMs—including the separate Mac Studio/Qwen target—belong in the orchestrator's [provider registry](../../docs/guides/llm-providers.md), not in this compatibility service's historical SDK demos.
+
+Credential-file paths and implicit Application Default Credentials are no longer accepted by the active wrapper. Migrate file/ambient identity deployments to explicit server environment injection before enabling the provider. Credentials are not accepted in HTTP bodies; SDK options select only the service-account email/private key and never a caller-controlled token endpoint. Provider results redact these configured credential values before returning them. Provider status `configured` describes initialization, not a live connection or qualified deployment. The enhanced SDK demonstration is disabled in production.

@@ -113,6 +113,26 @@ Connect to the chat backend's `/socket.io` with `auth:{token:accessToken}`. This
 
 Use the gateway's enterprise identity exchange or domain login flow to obtain verified access tokens. Development token helpers under `/auth` are not an enterprise identity provider and are gated by deployment configuration. JWT roles and tenant identity come from the server; session ownership is checked independently.
 
+Credential-backed `/auth/token` now returns the verified bank-issued access token
+and its signed identity/roles rather than minting a role-free replacement token.
+`/auth/validate` returns validated top-level roles and expiry without echoing
+caller profile/session data. Development customer token issuance cannot be enabled
+in production; the development refresh route returns 403 there. Bank/IdP access
+tokens must refresh through their owning identity service. `JWT_SECRET` is required
+in the environment (at least 32 bytes at startup); there is no built-in signing key.
+Socket credentials belong in the Socket.IO auth payload or authorization header,
+never a query string.
+`/auth/logout` acknowledges client sign-out and explicitly returns
+`tokenRevoked:false`; actual revocation belongs to the configured identity service.
+
+The final log formatter accepts fixed event messages, operational enums and
+numeric/boolean measurements only. Request URLs/headers, IPs, identities,
+transcripts, tool payloads and arbitrary error messages/stacks are excluded in
+every environment, including debug mode. New operational event messages must be
+added explicitly to `services/logMessages.js`; unknown text is logged as
+`Operational event`. This restriction applies to log output, not the owned,
+access-controlled conversation store.
+
 `CHAT_PERSISTENCE_ENABLED=true` enables PostgreSQL chat storage through the current database service. With `DATABASE_MANAGE_SCHEMA=false` (the production default), startup authenticates and verifies model tables/columns without DDL. Development defaults to non-altering sync followed by verification. Schemas are in [migrations](migrations/), including `chat_sessions`, `chat_messages`, and the handoff grant table. Session/cache/socket state also exists in process; do not infer cross-worker socket routing guarantees from persistent messages alone.
 
 Handoff grants use PostgreSQL by default, a five-minute lifetime, hashed storage, and atomic one-time consumption. They bind customer, tenant, session, and target channel; a phone number/session ID alone is not authorization. `HANDOFF_STORAGE=memory` is an explicit non-production test/development mode. See [handoff recovery semantics](SESSION-RESUME-FLOW.md).
@@ -135,3 +155,8 @@ The supported deployment entry points are the root [local Compose](../../docker/
 The customer chat retains its account-scoped session and offers an explicit **Resume interrupted request** action when the orchestrator context reports recovery or chat has an undelivered recovered response. Owner-checked `POST /api/chat/recover` sends the current JWT to `POST /api/orchestrator/session/:id/recover`, with no replacement message, intent or release. Ordinary message processing durably marks delivery pending before AI dispatch and clears that marker only after chat state and transcript persistence. Recovery maps the original result and persists pending feedback before delivering its prompt. No financial retry is inferred from transport loss. If the orchestrator explicitly confirms that the original session does not exist, chat clears the delivery marker and displays an outcome-check message without submitting the action; unreachable, forbidden, or unrecognized responses retain recovery state. Completed prompts are replayed only while their original feedback remains pending and unexpired. See [durable recovery](../ai-orchestrator/WHY-CHECKPOINTER-IS-REQUIRED.md).
 
 Delegated quality-job credentials cannot authenticate REST/socket customer sessions or refresh into chat access tokens. Direct confirmation remains the SQL-feedback/effect-ledger path; graph recovery does not regenerate a lost post-confirmation response. If the original prompt has already advanced, recovery rejects it and clears stale chat confirmation context; check transaction history or the provider outcome before another action. Uncertain external outcomes require operator reconciliation rather than graph replay.
+
+
+### Continue across channels
+
+The existing handoff endpoints now require a matching `targetChannel` on redemption, preserve one owned conversation, and reject active/queued live chat or interrupted workflows. Digital and AVA use the normal customer workspace. IVR input requires the existing server servicing credential forwarded by the signed durable voice connector; customer sockets and direct browser IVR message posts cannot submit voice turns. Pending confirmations remain pending and are checked against the destination channel before an action can proceed. See [channel switching](../../docs/guides/channel-switching.md) for customer flows, API fields, grant handling, and local validation limits.

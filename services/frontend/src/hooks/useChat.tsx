@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import apiService from '@/services/api';
+import apiService, { type ChannelHandoff, type ConversationChannel } from '@/services/api';
 import type {
   ApiError,
   ChatMessage as ChatMessageType,
@@ -63,6 +63,9 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [initializing, setInitializing] = useState(true);
   const [sending, setSending] = useState(false);
+  const [channel, setChannel] = useState<ConversationChannel>('digital');
+  const [switchingChannel, setSwitchingChannel] = useState(false);
+  const [handoff, setHandoff] = useState<ChannelHandoff | null>(null);
   const [recoveryRequired, setRecoveryRequired] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [intent, setIntent] = useState<IntentAnalysis | undefined>();
@@ -86,6 +89,8 @@ export function useChat() {
         setSessionId(activeSessionId);
         setMessages(normalized);
         setIntent([...normalized].reverse().find((message) => message.intent)?.intent);
+        const currentChannel = await apiService.getConversationChannel(activeSessionId);
+        if (active) setChannel(currentChannel);
         const context = await apiService.getRecoveryContext(activeSessionId);
         if (active) setRecoveryRequired(context.recoveryRequired);
       } catch (loadError) {
@@ -103,7 +108,7 @@ export function useChat() {
 
   const sendMessage = useCallback(async (text: string): Promise<boolean> => {
     const content = text.trim();
-    if (!content || sending || recovering || recoveryRequired) return false;
+    if (!content || sending || recovering || recoveryRequired || switchingChannel || channel === 'ivr') return false;
 
     const optimisticId = `user_${Date.now()}`;
     const userMessage: ChatMessageType = {
@@ -119,7 +124,7 @@ export function useChat() {
     setMessages((current) => [...current, userMessage]);
 
     try {
-      const response = await apiService.sendMessage(content);
+      const response = await apiService.sendMessage(content, { channel });
       const activeSessionId = response.conversation.sessionId || apiService.getSessionId();
       const botMessage: ChatMessageType = {
         id: response.conversation.messageId,
@@ -154,14 +159,14 @@ export function useChat() {
       setError(getErrorMessage(sendError));
       return false;
     } finally {
-      try { setRecoveryRequired((await apiService.getRecoveryContext()).recoveryRequired); }
+      try { setRecoveryRequired((await apiService.getRecoveryContext()).recoveryRequired); setChannel(await apiService.getConversationChannel()); }
       catch (contextError) { setError(getErrorMessage(contextError)); }
       setSending(false);
     }
-  }, [sending, recovering, recoveryRequired]);
+  }, [sending, recovering, recoveryRequired, switchingChannel, channel]);
 
   const startNewConversation = useCallback(async (): Promise<void> => {
-    if (sending || recovering || recoveryRequired) return;
+    if (sending || recovering || recoveryRequired || switchingChannel) return;
 
     setInitializing(true);
     setError(null);
@@ -170,12 +175,14 @@ export function useChat() {
       setSessionId(newSessionId);
       setMessages([]);
       setIntent(undefined);
+      setChannel('digital');
+      setHandoff(null);
     } catch (sessionError) {
       setError(getErrorMessage(sessionError));
     } finally {
       setInitializing(false);
     }
-  }, [sending, recovering, recoveryRequired]);
+  }, [sending, recovering, recoveryRequired, switchingChannel]);
 
   const recoverConversation = useCallback(async (): Promise<void> => {
     if (sending || recovering || !recoveryRequired) return;
@@ -197,6 +204,56 @@ export function useChat() {
     finally { setRecovering(false); }
   }, [sending, recovering, recoveryRequired, sessionId]);
 
+  useEffect(() => {
+    if (!handoff) return;
+    const timeout = setTimeout(() => setHandoff(null), Math.max(0, Date.parse(handoff.expiresAt) - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [handoff]);
+
+  const refreshConversation = useCallback(async (): Promise<void> => {
+    if (sending || recovering || switchingChannel) return;
+    setInitializing(true); setError(null);
+    try {
+      const id = apiService.getSessionId();
+      const history = await apiService.getChatHistory(id, 0, 50);
+      const normalized = (history.messages || []).map((message, index) => normalizeMessage(message, id, index));
+      setSessionId(id); setMessages(normalized);
+      setIntent([...normalized].reverse().find(message => message.intent)?.intent);
+      setChannel(await apiService.getConversationChannel(id));
+      setRecoveryRequired((await apiService.getRecoveryContext(id)).recoveryRequired);
+    } catch (refreshError) { setError(getErrorMessage(refreshError)); }
+    finally { setInitializing(false); }
+  }, [sending, recovering, switchingChannel]);
+
+  const switchChannel = useCallback(async (targetChannel: ConversationChannel): Promise<void> => {
+    if (sending || recovering || recoveryRequired || switchingChannel) return;
+    setSwitchingChannel(true); setError(null); setHandoff(null);
+    try {
+      const transfer = await apiService.createChannelHandoff(targetChannel);
+      if (targetChannel === 'ivr') setHandoff(transfer);
+      else {
+        const result = await apiService.resumeChannelHandoff(transfer.grant, targetChannel);
+        setSessionId(result.sessionId); setChannel(result.channel);
+      }
+    } catch (switchError) { setError(getErrorMessage(switchError)); }
+    finally { setSwitchingChannel(false); }
+  }, [sending, recovering, recoveryRequired, switchingChannel]);
+
+  const resumeChannel = useCallback(async (grant: string, targetChannel: 'digital' | 'ava'): Promise<boolean> => {
+    if (sending || recovering || switchingChannel) return false;
+    setSwitchingChannel(true); setError(null); setHandoff(null);
+    try {
+      const result = await apiService.resumeChannelHandoff(grant.trim(), targetChannel);
+      const history = await apiService.getChatHistory(result.sessionId, 0, 50);
+      const normalized = (history.messages || []).map((message, index) => normalizeMessage(message, result.sessionId, index));
+      setSessionId(result.sessionId); setChannel(result.channel); setMessages(normalized);
+      setIntent([...normalized].reverse().find(message => message.intent)?.intent);
+      setRecoveryRequired((await apiService.getRecoveryContext(result.sessionId)).recoveryRequired);
+      return true;
+    } catch (resumeError) { setError(getErrorMessage(resumeError)); return false; }
+    finally { setSwitchingChannel(false); }
+  }, [sending, recovering, switchingChannel]);
+
   const analyze = useCallback(async (text: string) => {
     try {
       return await apiService.analyzeMessage(text);
@@ -207,6 +264,7 @@ export function useChat() {
 
   return {
     sessionId,
+    channel, switchingChannel, handoff, switchChannel, resumeChannel, refreshConversation,
     messages,
     initializing,
     sending,

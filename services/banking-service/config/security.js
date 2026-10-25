@@ -1,6 +1,6 @@
-const DEVELOPMENT_SECRET = 'development-banking-secret-change-me';
+const LEGACY_SECRET = 'development-banking-secret-change-me';
 const PLACEHOLDER_SECRETS = new Set([
-  DEVELOPMENT_SECRET, 'your-secret-key-change-in-production', 'fallback-secret-change-me',
+  LEGACY_SECRET, 'your-secret-key-change-in-production', 'fallback-secret-change-me',
   'your-super-secret-jwt-key-change-in-production', 'dev-jwt-secret-change-in-production',
   'change-me', 'secret', 'test-secret',
 ]);
@@ -10,7 +10,8 @@ function getJwtSecret(env = process.env) {
   if (env.NODE_ENV === 'production' && (!secret || secret.length < 32 || PLACEHOLDER_SECRETS.has(secret))) {
     throw new Error('Production banking requires an explicit non-placeholder JWT_SECRET of at least 32 characters.');
   }
-  return secret || DEVELOPMENT_SECRET;
+  if (!secret) throw new Error('Banking requires an explicit JWT_SECRET in every environment.');
+  return secret;
 }
 
 module.exports = { getJwtSecret };

@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: poc_banking
       POSTGRES_USER: poc_user
-      POSTGRES_PASSWORD: poc_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}
       POSTGRES_MULTIPLE_DATABASES: poc_banking,poc_chat,ai_orchestrator
     ports:
       - "5432:5432"
@@ -45,9 +45,10 @@ services:
       BANKING_SEED_DEMO_DATA: "true"
       DB_NAME: poc_banking
       DB_USER: poc_user
-      DB_PASSWORD: poc_password
-      DATABASE_URL: postgresql://poc_user:poc_password@postgres:5432/poc_banking
-      JWT_SECRET: dev-jwt-secret-change-in-production
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}
+      DATABASE_URL: postgresql://poc_user:${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}@postgres:5432/poc_banking
+      JWT_SECRET: ${JWT_SECRET:?Supply JWT_SECRET through the environment}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3006
       NLU_SERVICE_URL: http://nlu-service:3003
       NLP_SERVICE_URL: http://nlu-service:3003
@@ -73,7 +74,7 @@ services:
     environment:
       NODE_ENV: development
       NLU_SERVICE_PORT: 3003
-      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
       INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       CORS_ORIGIN: http://localhost:3000,http://localhost:3006
       BANKING_SERVICE_URL: http://banking-service:3005
@@ -81,11 +82,9 @@ services:
       MCP_SERVICE_URL: http://mcp-service:3004
       DIALOGFLOW_ENABLED: ${DIALOGFLOW_ENABLED:-false}
       DIALOGFLOW_PROJECT_ID: ${DIALOGFLOW_PROJECT_ID:-}
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/dialogflow-key.json
+      DIALOGFLOW_CREDENTIALS_JSON: ${DIALOGFLOW_CREDENTIALS_JSON:-}
     ports:
       - "3003:3003"
-    volumes:
-      - ../services/nlu-service/credentials:/app/credentials:ro
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
@@ -100,7 +99,7 @@ services:
     environment:
       NODE_ENV: development
       MCP_SERVICE_PORT: 3004
-      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
       INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
@@ -127,7 +126,7 @@ services:
       DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
       CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
       CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
-      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
       OPERATIONS_URL: http://api-gateway:3001/api/operations
       WORKFLOW_DURABLE_EXECUTION: "true"
       CHECKPOINT_ENABLED: "${CHECKPOINT_ENABLED:-true}"
@@ -140,7 +139,7 @@ services:
       LLM_OLLAMA_BASE_URL: ${LLM_OLLAMA_BASE_URL:-http://mac-studio.local:11434}
       LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:-}
       LLM_GEMINI_API_KEY: ${LLM_GEMINI_API_KEY:-}
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      LLM_VERTEX_ACCESS_TOKEN: ${LLM_VERTEX_ACCESS_TOKEN:-}
       RECOGNITION_PROVIDER_URL: ${RECOGNITION_PROVIDER_URL:-}
       RECOGNITION_PROVIDER_TOKEN: ${RECOGNITION_PROVIDER_TOKEN:-}
       CONTROL_PLANE_ENVIRONMENT: ${CONTROL_PLANE_ENVIRONMENT:-development}
@@ -150,8 +149,8 @@ services:
       DB_PORT: 5432
       DB_NAME: ai_orchestrator
       DB_USER: poc_user
-      DB_PASSWORD: poc_password
-      JWT_SECRET: dev-jwt-secret-change-in-production
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}
+      JWT_SECRET: ${JWT_SECRET:?Supply JWT_SECRET through the environment}
       OPENAI_ENABLED: "${OPENAI_ENABLED:-false}"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
@@ -186,18 +185,18 @@ services:
       DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
       CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
       CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
-      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
       HANDOFF_STORAGE: postgres
       HANDOFF_DATABASE_URL: ${HANDOFF_DATABASE_URL:-}
       HANDOFF_SCHEMA_AUTO_MIGRATE: "${HANDOFF_SCHEMA_AUTO_MIGRATE:-true}"
       NODE_ENV: development
       PORT: 3006
-      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_SECRET: ${JWT_SECRET:?Supply JWT_SECRET through the environment}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: poc_chat
       DB_USER: poc_user
-      DB_PASSWORD: poc_password
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}
       DB_SSL: "false"
       CHAT_PERSISTENCE_ENABLED: "true"
       API_GATEWAY_URL: http://api-gateway:3001
@@ -241,17 +240,17 @@ services:
       DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
       CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
       CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
-      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
-      OPERATIONS_DATABASE_URL: ${OPERATIONS_DATABASE_URL:-postgresql://poc_user:poc_password@postgres:5432/poc_banking}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply SERVICING_SERVICE_TOKEN through the environment}
+      OPERATIONS_DATABASE_URL: ${OPERATIONS_DATABASE_URL:-postgresql://poc_user:${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}@postgres:5432/poc_banking}
       OPERATIONS_MANAGE_SCHEMA: "${OPERATIONS_MANAGE_SCHEMA:-true}"
       CONTROL_PLANE_MANAGE_SCHEMA: "${CONTROL_PLANE_MANAGE_SCHEMA:-true}"
-      AUDIT_SIGNING_KEY_FILE: ${AUDIT_SIGNING_KEY_FILE:-}
+      AUDIT_SIGNING_KEY: ${AUDIT_SIGNING_KEY:-}
       AUDIT_ACTOR_HASH_KEY: ${AUDIT_ACTOR_HASH_KEY:-}
       OPERATIONS_RETENTION_DAYS: ${OPERATIONS_RETENTION_DAYS:-90}
       FULFILLMENT_WORKER_ENABLED: "true"
       CONNECTOR_ALLOWED_HOSTS: ${CONNECTOR_ALLOWED_HOSTS:-}
       CONNECTOR_PRIVATE_HOSTS: ${CONNECTOR_PRIVATE_HOSTS:-}
-      CONNECTOR_SECRET_ROOT: ${CONNECTOR_SECRET_ROOT:-}
+      CONNECTORS_CONFIG_PATH: ${CONNECTORS_CONFIG_PATH:-}
       CASE_CONNECTOR_ID: ${CASE_CONNECTOR_ID:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
@@ -261,10 +260,10 @@ services:
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       OIDC_CLIENT_SECRET_REF: ${OIDC_CLIENT_SECRET_REF:-}
-      CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:-postgresql://poc_user:poc_password@postgres:5432/poc_banking}
+      CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:-postgresql://poc_user:${POSTGRES_PASSWORD:?Supply POSTGRES_PASSWORD through the environment}@postgres:5432/poc_banking}
       NODE_ENV: development
       PORT: 3001
-      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_SECRET: ${JWT_SECRET:?Supply JWT_SECRET through the environment}
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
@@ -310,8 +309,8 @@ services:
       BANKING_SERVICE_URL: http://banking-service:3005
       NLU_SERVICE_URL: http://nlu-service:3003
       MCP_SERVICE_URL: http://mcp-service:3004
-      JWT_SECRET: dev-jwt-secret-change-in-production
-      SESSION_SECRET: dev-session-secret-change-in-production
+      JWT_SECRET: ${JWT_SECRET:?Supply JWT_SECRET through the environment}
+      SESSION_SECRET: ${SESSION_SECRET:?Supply SESSION_SECRET through the environment}
       CORS_ORIGIN: http://localhost:8081,http://localhost:3000
     ports:
       - "8081:8081"

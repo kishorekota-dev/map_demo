@@ -18,7 +18,7 @@ module.exports = {
 
   // Security configuration
   security: {
-    jwtSecret: process.env.JWT_SECRET || 'fallback-secret-change-me',
+    jwtSecret: process.env.JWT_SECRET || '',
     jwtExpiry: process.env.JWT_EXPIRY || '24h',
     corsOrigins: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']
   },

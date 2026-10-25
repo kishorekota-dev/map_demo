@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
 const config = require('../config');
@@ -29,6 +28,10 @@ const PORT = config.server.port;
 async function initializeServices() {
   try {
     logger.info('Initializing AI Orchestrator services...');
+
+    // Validate configured providers before starting dependencies or serving traffic.
+    // Registry construction never performs discovery, authentication or inference.
+    require('./llm/registry').getRegistry();
 
     // Initialize database
     await initializeDatabase();
@@ -107,17 +110,6 @@ function configureMiddleware() {
   // Body parsing
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-  // Request logging
-  if (config.server.env === 'development') {
-    app.use(morgan('dev'));
-  } else {
-    app.use(morgan('combined', {
-      stream: {
-        write: (message) => logger.info(message.trim())
-      }
-    }));
-  }
 
   // Custom request logger
   app.use(logger.requestMiddleware);

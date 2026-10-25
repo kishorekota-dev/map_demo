@@ -91,8 +91,12 @@ function signWebhook(
   secret,
   eventId,
   body,
+  publicUrl,
   timestamp = String(Math.floor(Date.now() / 1000)),
 ) {
+  const target = new URL(publicUrl);
+  if (target.protocol !== 'https:' || target.username || target.password || target.search || target.hash)
+    throw new Error('An exact HTTPS public webhook URL is required.');
   const raw = JSON.stringify(body);
   return {
     raw,
@@ -101,7 +105,7 @@ function signWebhook(
       "X-Servicing-Timestamp": timestamp,
       "X-Servicing-Event-Id": eventId,
       "X-Servicing-Signature": createHmac("sha256", secret)
-        .update(`${timestamp}.${eventId}.${raw}`)
+        .update(`${timestamp}.${eventId}.${target.href}.${raw}`)
         .digest("hex"),
     },
   };

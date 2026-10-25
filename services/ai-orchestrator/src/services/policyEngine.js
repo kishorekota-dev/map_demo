@@ -114,13 +114,13 @@ class PolicyEngine {
   }
 
   evaluateToolExecution({ intent, tools = [], state = {} }) {
-    if (!this.isEnabled()) {
+    const requiresConfirmation = intentMapper.needsConfirmation(intent) || this.hasSensitiveTool(tools);
+    if (!this.isEnabled() && !requiresConfirmation) {
       return this.allow('pre_tool');
     }
 
     const collectedData = state.collectedData || {};
     const amount = this.parseAmount(collectedData.amount);
-    const requiresConfirmation = intentMapper.needsConfirmation(intent) || this.hasSensitiveTool(tools);
 
     if (Number.isFinite(amount) && amount > this.config.transferHardBlockAmount) {
       return this.block(
@@ -277,17 +277,7 @@ class PolicyEngine {
   }
 
   hasSensitiveTool(tools) {
-    const sensitiveTools = new Set([
-      'banking_create_transfer',
-      'banking_block_card',
-      'banking_unblock_card',
-      'banking_replace_card',
-      'banking_create_dispute',
-      'banking_update_dispute',
-      'banking_withdraw_dispute'
-    ]);
-
-    return tools.some(tool => sensitiveTools.has(tool));
+    return tools.some(tool => /^banking_/.test(tool) && !/^banking_get_/.test(tool));
   }
 
   parseAmount(value) {

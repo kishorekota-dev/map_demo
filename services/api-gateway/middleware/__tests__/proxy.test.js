@@ -114,6 +114,27 @@ describe('service proxy', () => {
     } finally { if (previous === undefined) delete process.env.SERVICING_SERVICE_TOKEN; else process.env.SERVICING_SERVICE_TOKEN = previous; }
   });
 
+  test('after-send banking reset returns an uncertain outcome and the owning status lookup without retrying', async () => {
+    let received = 0;
+    const resetting = http.createServer((req) => {
+      req.resume();
+      req.on('end', () => { received += 1; req.socket.destroy(); });
+    });
+    await new Promise(resolve => resetting.listen(0, '127.0.0.1', resolve));
+    try {
+      serviceRegistry.register('banking', `http://127.0.0.1:${resetting.address().port}`, { healthCheckPath: '/health' });
+      const app = express(); app.use(express.json());
+      app.use((req, _res, next) => { req.startTime = Date.now(); next(); });
+      app.use('/api/banking', createServiceProxy({ serviceName: 'banking', pathRewrite: { '^/api/banking': '/api' } }));
+      const result = await request(app).post('/api/banking/v1/transfers').set('Idempotency-Key', 'reset-operation').send({ amount: 1 }).expect(502);
+      expect(result.body).toMatchObject({ outcome: 'uncertain', reconciliationReference: 'reset-operation', reconcilePath: '/api/banking/v1/mutation-status/reset-operation' });
+      expect(received).toBe(1);
+    } finally {
+      serviceRegistry.register('banking', downstreamUrl, { healthCheckPath: '/health' });
+      await new Promise(resolve => resetting.close(resolve));
+    }
+  });
+
 });
 
 // The HTTP proxy must overwrite, rather than trust, caller service credentials.

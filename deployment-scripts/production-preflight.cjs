@@ -81,7 +81,7 @@ function validateProduction(env, options = {}) {
     try { check(new URL(env.OIDC_REDIRECT_URI).pathname === '/api/identity/callback', 'OIDC_REDIRECT_URI', 'Register the exact /api/identity/callback endpoint.'); } catch { /* Above. */ }
     if (env.OIDC_CLIENT_SECRET_REF) {
       check(env.OIDC_CLIENT_SECRET_REF === 'env:OIDC_CLIENT_SECRET' && Boolean(env.OIDC_CLIENT_SECRET), 'OIDC_CLIENT_SECRET_REF',
-        'For this deployment template use env:OIDC_CLIENT_SECRET and supply its secret, or configure an explicitly mounted secret in a reviewed override.');
+        'Use env:OIDC_CLIENT_SECRET and inject its value through the server environment. Credential files are unsupported.');
     }
     warnings.push('OIDC discovery, callback registration, local identity mappings and provider acceptance require a live deployment check.');
   }
@@ -132,11 +132,14 @@ function validateProduction(env, options = {}) {
         }
       } catch { check(false, 'LLM_REGISTRY', 'The model registry violates the runtime provider schema; check endpoints, credential references, provider types and model restrictions.'); }
     }
-    if (options.compose) check(Boolean(env.CONNECTOR_SECRET_HOST_DIR), 'CONNECTOR_SECRET_HOST_DIR', 'Provide a readable secret directory for the production Compose mount; it may be empty.');
-    if (env.CONNECTOR_SECRET_HOST_DIR) {
-      try { check(path.isAbsolute(env.CONNECTOR_SECRET_HOST_DIR) && fs.statSync(env.CONNECTOR_SECRET_HOST_DIR).isDirectory(), 'CONNECTOR_SECRET_HOST_DIR', 'Connector secret mount must be an absolute host directory.'); }
-      catch { check(false, 'CONNECTOR_SECRET_HOST_DIR', 'Connector secret host directory is unavailable.'); }
+    if (env.CONNECTORS_CONFIG_PATH) {
+      try {
+        require('../services/api-gateway/operations/connectorCatalog').loadConnectorCatalog({ ...env, NODE_ENV: 'production' });
+        check(true, 'CONNECTOR_CATALOG', 'Server-owned connector declarations and environment references are valid.');
+      } catch { check(false, 'CONNECTOR_CATALOG', 'Check CONNECTORS_CONFIG_PATH, endpoint allowlists and referenced credential environment variables.'); }
     }
+    check(!env.AUDIT_SIGNING_KEY_FILE && !env.CONNECTOR_SECRET_HOST_DIR && !env.CONNECTOR_SECRET_ROOT,
+      'ENVIRONMENT_CREDENTIALS', 'Inject signing/connector credentials through named environment variables; legacy credential file settings are unsupported.');
   }
   warnings.push('This is static configuration validation. It does not verify live databases, migrations, backups, TLS termination, provider contracts, model quality or production capacity.');
   return { ok: failures.length === 0, scope: 'production configuration preflight; no network or model calls', checks, failures, warnings: [...new Set(warnings)] };

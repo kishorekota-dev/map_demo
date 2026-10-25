@@ -1,5 +1,3 @@
-const { readFileSync, realpathSync } = require("fs");
-const { resolve, sep } = require("path");
 const { lookup } = require("dns").promises;
 const { isIP } = require("net");
 const https = require("https");
@@ -17,19 +15,9 @@ function resolveSecret(ref, env = process.env) {
       );
     return value;
   }
-  if (ref.startsWith("file:") && env.CONNECTOR_SECRET_ROOT) {
-    const root = realpathSync(env.CONNECTOR_SECRET_ROOT);
-    const target = realpathSync(resolve(root, ref.slice(5)));
-    if (!target.startsWith(root + sep))
-      throw new OperationsError(
-        400,
-        "Secret file must be inside CONNECTOR_SECRET_ROOT.",
-      );
-    return readFileSync(target, "utf8").trim();
-  }
   throw new OperationsError(
     400,
-    "Use an env:CONNECTOR_SECRET_NAME or configured file: secret reference.",
+    "Use an env:CONNECTOR_SECRET_NAME reference.",
   );
 }
 function privateAddress(ip) {
@@ -229,6 +217,14 @@ async function requestConnector(connection, path, options = {}) {
         timeout: remaining,
       },
       (res) => {
+        // An error status is definitive under the provider contract. Mutation
+        // rejection payloads are unnecessary and may be malformed or unbounded.
+        if (res.statusCode >= 400 && res.statusCode < 600
+          && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method)) {
+          resolvePromise({ status: res.statusCode, data: {} });
+          res.destroy();
+          return;
+        }
         let data = "";
         let bytes = 0;
         res.on("data", (chunk) => {
@@ -242,6 +238,7 @@ async function requestConnector(connection, path, options = {}) {
           try {
             value = data ? JSON.parse(data) : {};
           } catch {
+            if (res.statusCode >= 400 && res.statusCode < 600) return resolvePromise({ status: res.statusCode, data: {} });
             return reject(
               Object.assign(new Error("Connector returned invalid JSON"), {
                 dispatched: true,

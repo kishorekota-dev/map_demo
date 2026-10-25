@@ -3,6 +3,7 @@ import { ChatMessage as ChatMessageComponent } from '@molecules/ChatMessage/Chat
 import { IntentDisplay } from '@molecules/IntentDisplay/IntentDisplay';
 import { LoadingSpinner } from '@atoms/LoadingSpinner/LoadingSpinner';
 import type { ChatMessage as ChatMessageType, IntentAnalysis } from '@/types';
+import type { ChannelHandoff, ConversationChannel } from '@/services/api';
 import './ChatContainer.css';
 
 const SUGGESTED_PROMPTS = [
@@ -13,6 +14,12 @@ const SUGGESTED_PROMPTS = [
 ];
 
 export interface ChatContainerProps {
+  channel?: ConversationChannel;
+  switchingChannel?: boolean;
+  handoff?: ChannelHandoff | null;
+  onSwitchChannel?: (target: ConversationChannel) => Promise<void>;
+  onResumeChannel?: (grant: string, target: 'digital' | 'ava') => Promise<boolean>;
+  onRefreshConversation?: () => Promise<void>;
   messages: ChatMessageType[];
   onSend: (text: string) => Promise<boolean>;
   onNewConversation: () => Promise<void>;
@@ -29,6 +36,7 @@ export interface ChatContainerProps {
 }
 
 export function ChatContainer({
+  channel = 'digital', switchingChannel = false, handoff = null, onSwitchChannel, onResumeChannel, onRefreshConversation,
   messages,
   onSend,
   onNewConversation,
@@ -71,7 +79,7 @@ export function ChatContainer({
               type="button"
               className="secondary-action"
               onClick={() => void onNewConversation()}
-              disabled={initializing || sending || recoveryRequired || recovering}
+              disabled={initializing || sending || recoveryRequired || recovering || switchingChannel}
             >
               <span aria-hidden="true">＋</span>
               New conversation
@@ -124,7 +132,7 @@ export function ChatContainer({
                     type="button"
                     key={prompt}
                     onClick={() => void onSend(prompt)}
-                    disabled={sending || recoveryRequired || recovering}
+                    disabled={sending || recoveryRequired || recovering || switchingChannel || channel === 'ivr'}
                   >
                     <span>{prompt}</span>
                     <span aria-hidden="true">→</span>
@@ -146,7 +154,7 @@ export function ChatContainer({
         </div>
 
         <div className="chat-panel__composer">
-          <ChatInput onSend={onSend} disabled={initializing || sending || recoveryRequired || recovering} />
+          <ChatInput onSend={onSend} disabled={initializing || sending || recoveryRequired || recovering || switchingChannel || channel === 'ivr'} />
           <p className="composer-disclaimer">
             Never share a password, PIN, or one-time security code in chat.
           </p>
@@ -165,6 +173,10 @@ export function ChatContainer({
               <dd>{recoveryRequired ? 'Recovery required' : 'Active'}</dd>
             </div>
             <div>
+              <dt>Channel</dt>
+              <dd>{channel === 'ivr' ? 'IVR' : channel === 'ava' ? 'AVA' : 'Digital'}</dd>
+            </div>
+            <div>
               <dt>Messages</dt>
               <dd>{messages.length}</dd>
             </div>
@@ -174,6 +186,9 @@ export function ChatContainer({
             </div>
           </dl>
         </div>
+        {onSwitchChannel && <ChannelSwitcher channel={channel} busy={initializing || sending || recovering || switchingChannel}
+          blocked={recoveryRequired} handoff={handoff} onSwitch={onSwitchChannel}
+          onResume={onResumeChannel} onRefresh={onRefreshConversation} />}
         <IntentDisplay currentIntent={intent} />
         <div className="privacy-note">
           <span aria-hidden="true">◇</span>
@@ -185,6 +200,50 @@ export function ChatContainer({
       </aside>
     </div>
   );
+}
+
+function ChannelSwitcher({ channel, busy, blocked, handoff, onSwitch, onResume, onRefresh }: {
+  channel: ConversationChannel; busy: boolean; blocked: boolean; handoff: ChannelHandoff | null;
+  onSwitch: (target: ConversationChannel) => Promise<void>;
+  onResume?: (grant: string, target: 'digital' | 'ava') => Promise<boolean>;
+  onRefresh?: () => Promise<void>;
+}) {
+  const [grant, setGrant] = useState('');
+  const [destination, setDestination] = useState<'digital' | 'ava'>('digital');
+  return <section className="conversation-card channel-switcher" aria-label="Continue in another channel">
+    <h2>Continue your conversation</h2>
+    <p>Your conversation and request details follow you. Review any pending action again when asked.</p>
+    <div className="channel-switcher__actions">
+      {(['digital', 'ava'] as const).map(target => <button key={target} type="button" className="secondary-action"
+        disabled={busy || blocked || channel === target} onClick={() => void onSwitch(target)}>
+        Continue in {target === 'ava' ? 'AVA' : 'Digital'}
+      </button>)}
+      <button type="button" className="secondary-action" disabled={busy || blocked || channel === 'ivr'}
+        onClick={() => void onSwitch('ivr')}>Prepare IVR transfer</button>
+      {onRefresh && <button type="button" className="secondary-action" disabled={busy}
+        onClick={() => void onRefresh()}>Refresh conversation</button>}
+    </div>
+    {channel === 'ivr' && <p role="status">This conversation is in IVR. Continue in Digital or AVA to send messages here.</p>}
+    {handoff && <div role="status" className="channel-transfer">
+      <strong>IVR transfer ready</strong>
+      <p>Use this one-use transfer grant with your organization’s authenticated voice service before {new Date(handoff.expiresAt).toLocaleTimeString()}. It expires after five minutes. Refresh after the voice service connects.</p>
+      <label htmlFor="ivr-transfer-grant">IVR transfer grant</label>
+      <textarea id="ivr-transfer-grant" value={handoff.grant} readOnly autoComplete="off" spellCheck={false} />
+      <p>This prepares a transfer. Your configured voice service starts the call.</p>
+    </div>}
+    {onResume && <details>
+      <summary>Resume a transfer from IVR</summary>
+      <label htmlFor="channel-return-grant">One-use return grant</label>
+      <input id="channel-return-grant" type="password" autoComplete="off" value={grant} maxLength={43}
+        onChange={event => setGrant(event.target.value)} />
+      <label htmlFor="channel-return-target">Destination</label>
+      <select id="channel-return-target" value={destination} onChange={event => setDestination(event.target.value as 'digital' | 'ava')}>
+        <option value="digital">Digital</option><option value="ava">AVA</option>
+      </select>
+      <button type="button" className="secondary-action" disabled={busy || !/^[A-Za-z0-9_-]{43}$/.test(grant)}
+        onClick={() => { const pending = grant; setGrant(''); void onResume(pending, destination); }}>Resume transferred conversation</button>
+    </details>}
+  </section>;
 }
 
 function ChatInput({

@@ -287,7 +287,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {boolean} True if confirmation required
    */
   needsConfirmation(intent) {
-    return this.getIntentConfig(intent)?.behavior.needsConfirmation === true;
+    return this.getBaseIntent(intent) === 'service_request' || this.getIntentConfig(intent)?.behavior.needsConfirmation === true;
   }
 
   /**

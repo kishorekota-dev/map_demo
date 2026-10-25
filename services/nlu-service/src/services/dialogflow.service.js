@@ -5,6 +5,7 @@
 
 const logger = require('../utils/logger');
 const config = require('../config/config');
+const { clientOptions, unavailableError, safeProviderResult } = require('./dialogflow-credentials');
 
 class DialogFlowService {
   constructor() {
@@ -17,8 +18,9 @@ class DialogFlowService {
         this.initializeDialogFlow();
         logger.info('DialogFlow service initialized');
       } catch (error) {
-        logger.error('Failed to initialize DialogFlow', { error: error.message });
-        this.enabled = false;
+        logger.error('Failed to initialize DialogFlow');
+        // An explicitly enabled provider must never silently become a mock.
+        throw error;
       }
     } else {
       logger.info('DialogFlow service disabled - using mock responses');
@@ -26,35 +28,22 @@ class DialogFlowService {
   }
 
   initializeDialogFlow() {
-    if (!config.dialogflow.projectId) {
-      throw new Error('DialogFlow project ID not configured');
-    }
-
+    const options = clientOptions(config.dialogflow);
+    this.credentialValues = [options.credentials.private_key, options.credentials.client_email, process.env.DIALOGFLOW_CREDENTIALS_JSON];
     try {
       // Initialize DialogFlow Sessions Client
       const { SessionsClient } = require('@google-cloud/dialogflow');
       
-      const clientConfig = {
-        projectId: config.dialogflow.projectId
-      };
-      
-      // Add credentials if key file is provided
-      if (config.dialogflow.keyFilename) {
-        clientConfig.keyFilename = config.dialogflow.keyFilename;
-      }
-      
-      this.sessionsClient = new SessionsClient(clientConfig);
+      this.sessionsClient = new SessionsClient(options);
       
       logger.debug('DialogFlow client initialized', {
         projectId: config.dialogflow.projectId,
         languageCode: config.dialogflow.languageCode,
-        hasKeyFile: !!config.dialogflow.keyFilename
+        hasCredentials: true
       });
     } catch (error) {
-      logger.warn('DialogFlow SDK not available, using mock mode', {
-        error: error.message
-      });
-      // Don't throw - fall back to mock mode
+      logger.error('Failed to initialize DialogFlow');
+      throw unavailableError();
     }
   }
 
@@ -75,6 +64,7 @@ class DialogFlowService {
       if (this.sessionsClient && this.enabled) {
         return await this.detectIntentReal(message, sessionId, lang);
       } else {
+        if (config.env === 'production') throw unavailableError();
         // Fall back to mock mode
         return await this.detectIntentMock(message, sessionId, lang);
       }
@@ -116,7 +106,7 @@ class DialogFlowService {
         sessionId
       });
 
-      return this.parseDialogFlowResponse(response.queryResult);
+      return this.parseDialogFlowResponse(safeProviderResult(response.queryResult, this.credentialValues));
 
     } catch (error) {
       logger.error('Real DialogFlow API call failed', {
@@ -124,9 +114,7 @@ class DialogFlowService {
         sessionId
       });
       
-      // Fall back to mock if real API fails
-      logger.warn('Falling back to mock DialogFlow response');
-      return await this.detectIntentMock(message, sessionId, languageCode);
+      throw unavailableError();
     }
   }
 
@@ -134,6 +122,7 @@ class DialogFlowService {
    * Mock DialogFlow detection (for testing/demo without API credentials)
    */
   async detectIntentMock(message, sessionId, languageCode) {
+    if (config.env === 'production') throw unavailableError();
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -320,7 +309,7 @@ class DialogFlowService {
       enabled: this.enabled,
       projectId: config.dialogflow.projectId,
       languageCode: config.dialogflow.languageCode,
-      status: this.enabled ? 'connected' : 'disabled'
+      status: this.enabled ? 'configured' : 'disabled'
     };
   }
 

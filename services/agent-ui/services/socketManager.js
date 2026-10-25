@@ -2,6 +2,7 @@ const EventEmitter = require('events');
 const socketIo = require('socket.io');
 const logger = require('./logger');
 const { validateAgentToken } = require('./authClient');
+const { intent } = require('./queuePrivacy');
 
 class SocketManager extends EventEmitter {
     constructor(server) {
@@ -12,6 +13,7 @@ class SocketManager extends EventEmitter {
         this.agentSockets = new Map();
         this.roomManager = new Map();
         this.messageQueue = new Map();
+        this.sessionAssignments = new Map();
         
         this.setupSocketServer();
         
@@ -71,7 +73,7 @@ class SocketManager extends EventEmitter {
 
                 // Register agent
                 const canonicalAgentId = validation.userId || agentId;
-                await this.registerAgent(socket, canonicalAgentId, agentInfo || {}, token);
+                await this.registerAgent(socket, canonicalAgentId, agentInfo || {}, validation);
                 
                 socket.emit('authenticated', {
                     agentId: canonicalAgentId,
@@ -97,7 +99,7 @@ class SocketManager extends EventEmitter {
         // Agent status updates
         socket.on('updateStatus', async (statusData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -129,7 +131,7 @@ class SocketManager extends EventEmitter {
         // Chat message handling
         socket.on('sendMessage', async (messageData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -159,21 +161,24 @@ class SocketManager extends EventEmitter {
         // Chat session management
         socket.on('acceptChat', async (chatData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
                 }
 
-                await this.acceptChatAssignment(agent.agentId, chatData);
+                const accepted = await this.acceptChatAssignment(agent.agentId, chatData);
+                if (!this.getAuthenticatedAgent(socket)) throw new Error('Agent authentication expired');
                 
                 // Join chat room
                 socket.join(`chat_${chatData.sessionId}`);
                 
+                this.updateSessionAssignment(chatData.sessionId, agent.agentId);
                 agent.activeChats.add(chatData.sessionId);
 
                 socket.emit('chatAccepted', {
-                    ...chatData,
+                    sessionId: accepted.sessionId, customerId: accepted.customerId, customerName: accepted.customerName,
+                    customerData: accepted.customerData, intent: accepted.intent || null,
                     timestamp: new Date().toISOString()
                 });
 
@@ -192,7 +197,7 @@ class SocketManager extends EventEmitter {
 
         socket.on('rejectChat', async (chatData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -221,7 +226,7 @@ class SocketManager extends EventEmitter {
 
         socket.on('endChat', async (chatData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -231,7 +236,7 @@ class SocketManager extends EventEmitter {
                 
                 // Leave chat room
                 socket.leave(`chat_${chatData.sessionId}`);
-                agent.activeChats.delete(chatData.sessionId);
+                this.updateSessionAssignment(chatData.sessionId, null);
                 
                 socket.emit('chatEnded', {
                     sessionId: chatData.sessionId,
@@ -254,13 +259,14 @@ class SocketManager extends EventEmitter {
 
         socket.on('transferChat', async (transferData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
                 }
 
                 await this.transferChatSession(agent.agentId, transferData);
+                this.updateSessionAssignment(transferData.sessionId, transferData.toAgentId);
                 
                 socket.emit('chatTransferred', {
                     sessionId: transferData.sessionId,
@@ -283,13 +289,14 @@ class SocketManager extends EventEmitter {
 
         socket.on('escalateChat', async (chatData) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
                 }
+                this.assertAssignedAgent(agent.agentId, chatData?.sessionId);
                 await this.runIntegration('escalateChat', { agentId: agent.agentId, chatData });
-                agent.activeChats.delete(chatData.sessionId);
+                this.updateSessionAssignment(chatData.sessionId, null);
                 socket.leave(`chat_${chatData.sessionId}`);
                 socket.emit('chatEnded', {
                     sessionId: chatData.sessionId,
@@ -304,7 +311,7 @@ class SocketManager extends EventEmitter {
         // Queue management
         socket.on('getQueueStatus', async () => {
             try {
-                if (!this.connectedAgents.has(socket.id)) {
+                if (!this.getAuthenticatedAgent(socket)) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
                 }
@@ -323,7 +330,7 @@ class SocketManager extends EventEmitter {
         // Agent management
         socket.on('getAgentList', async () => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -344,7 +351,7 @@ class SocketManager extends EventEmitter {
         // Chat history requests
         socket.on('getChatHistory', async (historyRequest) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -366,13 +373,14 @@ class SocketManager extends EventEmitter {
         // Customer info requests
         socket.on('getCustomerInfo', async (customerRequest) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
                 }
 
-                const customerInfo = await this.getCustomerInfo(customerRequest.customerId);
+                if (!this.isAssigned(agent, customerRequest?.sessionId)) throw new Error('Assigned session required');
+                const customerInfo = await this.getCustomerInfo(agent.agentId, customerRequest);
                 socket.emit('customerInfo', {
                     customerId: customerRequest.customerId,
                     info: customerInfo
@@ -390,7 +398,7 @@ class SocketManager extends EventEmitter {
 
         socket.on('updatePreferences', async (preferences) => {
             try {
-                const agent = this.connectedAgents.get(socket.id);
+                const agent = this.getAuthenticatedAgent(socket);
                 if (!agent) {
                     socket.emit('error', { message: 'Agent not authenticated' });
                     return;
@@ -408,12 +416,11 @@ class SocketManager extends EventEmitter {
 
         // Typing indicators
         socket.on('typing', (typingData) => {
-            const agent = this.connectedAgents.get(socket.id);
-            if (agent && typingData.sessionId) {
+            const agent = this.getAuthenticatedAgent(socket);
+            if (agent && this.isAssigned(agent, typingData?.sessionId)) {
                 this.broadcastToChatRoom(`chat_${typingData.sessionId}`, 'agentTyping', {
                     agentId: agent.agentId,
-                    agentName: agent.name,
-                    isTyping: typingData.isTyping
+                    isTyping: typingData.isTyping === true
                 }, socket.id);
             }
         });
@@ -432,18 +439,71 @@ class SocketManager extends EventEmitter {
         });
     }
 
+    getAuthenticatedAgent(socket) {
+        const agent = this.connectedAgents.get(socket.id);
+        if (!agent) return null;
+        if (!Number.isFinite(agent.expiresAt) || agent.expiresAt <= Date.now()) {
+            this.handleAgentDisconnection(socket, 'token_expired');
+            socket.disconnect?.(true);
+            return null;
+        }
+        return agent;
+    }
+
+    isAssigned(agent, sessionId) {
+        return typeof sessionId === 'string' && agent.activeChats.has(sessionId)
+            && this.sessionAssignments.get(sessionId) === agent.agentId;
+    }
+
+    assertAssignedAgent(agentId, sessionId) {
+        const agent = this.authenticatedAgent(agentId);
+        if (!this.isAssigned(agent, sessionId)) throw new Error('Assigned session required');
+        return agent;
+    }
+
+    authenticatedAgent(agentId) {
+        const socketId = this.agentSockets.get(agentId);
+        const socket = socketId && this.io.sockets.sockets.get(socketId);
+        const agent = socket && this.getAuthenticatedAgent(socket);
+        if (!agent) throw new Error('Agent authentication required');
+        return agent;
+    }
+
+    updateSessionAssignment(sessionId, agentId) {
+        if (typeof sessionId !== 'string' || !sessionId) return;
+        if (typeof agentId === 'string' && agentId) this.sessionAssignments.set(sessionId, agentId);
+        else this.sessionAssignments.delete(sessionId);
+        for (const agent of this.connectedAgents.values()) {
+            if (agent.agentId === agentId && Number.isFinite(agent.expiresAt) && agent.expiresAt > Date.now()) {
+                agent.activeChats.add(sessionId);
+                this.io.sockets.sockets.get(agent.socketId)?.join(`chat_${sessionId}`);
+            }
+            if (agent.agentId !== agentId && agent.activeChats.has(sessionId)) {
+                agent.activeChats.delete(sessionId);
+                this.io.sockets.sockets.get(agent.socketId)?.leave(`chat_${sessionId}`);
+            }
+        }
+    }
+
     /**
      * Register agent
      */
-    async registerAgent(socket, agentId, agentInfo, token) {
+    async registerAgent(socket, agentId, agentInfo, validation) {
+        const previousSocketId = this.agentSockets.get(agentId);
+        if (previousSocketId && previousSocketId !== socket.id) {
+            const previous = this.io.sockets.sockets.get(previousSocketId);
+            if (previous) { this.handleAgentDisconnection(previous, 'identity_replaced'); previous.disconnect(true); }
+        }
+        if (this.connectedAgents.has(socket.id)) this.handleAgentDisconnection(socket, 'reauthenticated');
         const agent = {
             agentId,
             socketId: socket.id,
             name: agentInfo.name || agentId,
             email: agentInfo.email || '',
             department: agentInfo.department || 'customer-service',
-            role: agentInfo.role || 'agent',
-            token,
+            role: 'agent',
+            roles: validation.roles,
+            expiresAt: validation.expiresAt,
             status: 'available',
             connectedAt: new Date(),
             lastActivity: new Date(),
@@ -453,6 +513,8 @@ class SocketManager extends EventEmitter {
 
         this.connectedAgents.set(socket.id, agent);
         this.agentSockets.set(agentId, socket.id);
+        agent.expiryTimer = setTimeout(() => { this.handleAgentDisconnection(socket, 'token_expired'); socket.emit('authError', { message: 'Agent access token expired' }); socket.disconnect(true); }, Math.max(1, Math.min(2147483647, agent.expiresAt - Date.now())));
+        agent.expiryTimer.unref?.();
 
         // Join agent rooms
         socket.join('agents');
@@ -492,8 +554,11 @@ class SocketManager extends EventEmitter {
             });
 
             // Clean up agent data
+            clearTimeout(agent.expiryTimer);
+            for (const sessionId of agent.activeChats) socket.leave(`chat_${sessionId}`);
+            socket.leave('agents');
             this.connectedAgents.delete(socket.id);
-            this.agentSockets.delete(agent.agentId);
+            if (this.agentSockets.get(agent.agentId) === socket.id) this.agentSockets.delete(agent.agentId);
 
             // Handle active chats
             if (agent.activeChats.size > 0) {
@@ -531,17 +596,16 @@ class SocketManager extends EventEmitter {
             const assignment = {
                 queueId: chatSession.queueId,
                 sessionId: chatSession.sessionId,
-                customerId: chatSession.customerId,
-                customerName: chatSession.customerName,
+                intent: intent(chatSession.intent),
                 priority: chatSession.priority,
-                escalationReason: chatSession.escalationReason,
-                customerData: chatSession.customerData,
+
                 estimatedWaitTime: chatSession.estimatedWaitTime,
-                requirements: chatSession.requirements,
+
                 assignedAt: new Date().toISOString(),
                 autoAccept: false // Require manual acceptance
             };
 
+            if (!this.getAuthenticatedAgent(socket)) throw new Error('Agent authentication required');
             socket.emit('chatAssignment', assignment);
 
             logger.socket('chat_assignment_sent', socketId, {
@@ -569,16 +633,18 @@ class SocketManager extends EventEmitter {
         try {
             const roomName = `chat_${sessionId}`;
             
-            this.io.to(roomName).emit('messageReceived', {
-                sessionId,
-                messageId: message.messageId,
-                content: message.content,
-                sender: message.sender,
-                senderName: message.senderName,
-                timestamp: message.timestamp,
-                type: message.type,
-                metadata: message.metadata
-            });
+            for (const [socketId, candidate] of this.connectedAgents) {
+                const socket = this.io.sockets.sockets.get(socketId);
+                const agent = socket && this.getAuthenticatedAgent(socket);
+                if (!agent || !this.isAssigned(agent, sessionId)) {
+                    if (candidate.activeChats.has(sessionId)) { candidate.activeChats.delete(sessionId); socket?.leave(roomName); }
+                    continue;
+                }
+                socket.emit('messageReceived', {
+                    sessionId, messageId: message.messageId || message.id, content: message.content,
+                    sender: message.sender, timestamp: message.timestamp, type: message.type
+                });
+            }
 
             logger.socket('message_sent_to_room', roomName, {
                 sessionId,
@@ -623,10 +689,13 @@ class SocketManager extends EventEmitter {
      */
     broadcastToAgents(event, data, excludeSocketId = null) {
         try {
-            if (excludeSocketId) {
-                this.io.to('agents').except(excludeSocketId).emit(event, data);
-            } else {
-                this.io.to('agents').emit(event, data);
+            if (event !== 'queueStatus') {
+                data = { sessionId: data?.sessionId, intent: intent(data?.intent), agentId: data?.agentId,
+                    status: ['available', 'busy', 'away', 'offline'].includes(data?.status) ? data.status : undefined };
+            }
+            for (const socketId of this.connectedAgents.keys()) {
+                const socket = this.io.sockets.sockets.get(socketId);
+                if (socket && socketId !== excludeSocketId && this.getAuthenticatedAgent(socket)) socket.emit(event, data);
             }
 
             logger.debug('Broadcast to agents', {
@@ -647,10 +716,11 @@ class SocketManager extends EventEmitter {
      */
     broadcastToChatRoom(roomName, event, data, excludeSocketId = null) {
         try {
-            if (excludeSocketId) {
-                this.io.to(roomName).except(excludeSocketId).emit(event, data);
-            } else {
-                this.io.to(roomName).emit(event, data);
+            const sessionId = typeof roomName === 'string' && roomName.startsWith('chat_') ? roomName.slice(5) : null;
+            for (const socketId of this.connectedAgents.keys()) {
+                const socket = this.io.sockets.sockets.get(socketId);
+                const agent = socket && this.getAuthenticatedAgent(socket);
+                if (agent && socketId !== excludeSocketId && this.isAssigned(agent, sessionId)) socket.emit(event, data);
             }
         } catch (error) {
             logger.error('Error broadcasting to chat room', {
@@ -726,6 +796,7 @@ class SocketManager extends EventEmitter {
     }
 
     async handleChatMessage(agentId, messageData) {
+        this.assertAssignedAgent(agentId, messageData?.sessionId);
         return this.runIntegration('chatMessage', { agentId, messageData });
     }
 
@@ -738,10 +809,12 @@ class SocketManager extends EventEmitter {
     }
 
     async endChatSession(agentId, chatData) {
+        this.assertAssignedAgent(agentId, chatData?.sessionId);
         return this.runIntegration('endChat', { agentId, chatData });
     }
 
     async transferChatSession(agentId, transferData) {
+        this.assertAssignedAgent(agentId, transferData?.sessionId);
         return this.runIntegration('transferChat', { agentId, transferData });
     }
 
@@ -754,11 +827,20 @@ class SocketManager extends EventEmitter {
     }
 
     async getChatHistory(agentId, historyRequest) {
-        return this.runIntegration('getChatHistory', { agentId, historyRequest });
+        this.authenticatedAgent(agentId);
+        const result = await this.runIntegration('getChatHistory', { agentId, historyRequest: { ...historyRequest, agentId } });
+        this.authenticatedAgent(agentId);
+        if (!historyRequest?.sessionId) return { messages: [], chats: (Array.isArray(result?.chats) ? result.chats : []).map(chat => ({ sessionId: chat.sessionId, intent: intent(chat.intent), status: ['active', 'completed', 'resolved', 'transferred', 'ended'].includes(chat.status) ? chat.status : 'unknown', startTime: chat.startTime })) };
+        // The owning chat backend verifies the persisted assignee under its
+        // session lock, including ended sessions that have not been reassigned.
+        return result;
     }
 
-    async getCustomerInfo(customerId) {
-        return this.runIntegration('getCustomerInfo', { customerId });
+    async getCustomerInfo(agentId, customerRequest) {
+        this.assertAssignedAgent(agentId, customerRequest?.sessionId);
+        const result = await this.runIntegration('getCustomerInfo', { ...customerRequest, agentId });
+        this.assertAssignedAgent(agentId, customerRequest?.sessionId);
+        return result;
     }
 
     async runIntegration(event, payload) {
@@ -818,6 +900,7 @@ class SocketManager extends EventEmitter {
             this.connectedAgents.clear();
             this.agentSockets.clear();
             this.roomManager.clear();
+            this.sessionAssignments.clear();
             this.messageQueue.clear();
 
             logger.info('SocketManager cleanup completed');

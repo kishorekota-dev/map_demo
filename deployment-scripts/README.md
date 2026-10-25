@@ -22,7 +22,7 @@ Do not shell-source the generated file. The repository's `scripts/run-with-env.s
 
 ## Production preflight
 
-Start from [`.env.production.example`](../.env.production.example), complete it in a protected location and provide real absolute paths for public runtime JSON, the server model registry and connector secrets. For deterministic servicing, the [empty provider registry](../config/product/llm-providers.production.example.json) deliberately configures no models.
+Start from [`.env.production.example`](../.env.production.example), complete it in a protected location and provide real absolute paths for public runtime JSON and the server model registry. Optional connector declarations use `CONNECTORS_CONFIG_PATH`; mount that declaration and inject its named credential environment variables explicitly. Credential-file mounts are unsupported. For deterministic servicing, the [empty provider registry](../config/product/llm-providers.production.example.json) deliberately configures no models.
 
 ```bash
 npm run production:preflight -- --env /absolute/path/deployment.env

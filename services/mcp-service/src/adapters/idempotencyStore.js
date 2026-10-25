@@ -24,13 +24,14 @@ class IdempotencyStore {
     const entry = this.entries.get(
       this._key(adapterId, toolName, idempotencyKey),
     );
-    return entry?.result ? { ...copy(entry.result), replayed: true } : null;
+    return entry?.result ? copy(entry.result) : null;
   }
   put(adapterId, toolName, idempotencyKey, result) {
     if (!idempotencyKey) return;
     const key = this._key(adapterId, toolName, idempotencyKey);
     const old = this.entries.get(key);
     this._prune();
+    if (result.outcome === "failed" && !old) return;
     if (!old && this.entries.size >= this.maxEntries)
       throw Object.assign(
         new Error("Pilot idempotency cache is full; no call was dispatched"),
@@ -38,7 +39,7 @@ class IdempotencyStore {
       );
     this.entries.set(key, {
       fingerprint: old?.fingerprint,
-      result: copy(result),
+      ...(result.outcome === "failed" ? {} : { result: copy(result) }),
       expiresAt: Date.now() + this.ttlMs,
     });
   }
@@ -53,12 +54,10 @@ class IdempotencyStore {
           new Error("Idempotency key is already bound to different arguments"),
           { status: 409 },
         );
-      return {
-        ...copy(previous.pending ? await previous.pending : previous.result),
-        replayed: true,
-      };
+      if (previous.pending || previous.result)
+        return copy(previous.pending ? await previous.pending : previous.result);
     }
-    if (this.entries.size >= this.maxEntries)
+    if (!previous && this.entries.size >= this.maxEntries)
       throw Object.assign(
         new Error("Pilot idempotency cache is full; no call was dispatched"),
         { status: 503 },
@@ -69,13 +68,16 @@ class IdempotencyStore {
         (result) => {
           this.entries.set(key, {
             fingerprint,
-            result: copy(result),
+            ...(result.outcome === "failed" ? {} : { result: copy(result) }),
             expiresAt: Date.now() + this.ttlMs,
           });
           return result;
         },
         (error) => {
-          this.entries.delete(key);
+          this.entries.set(key, {
+            fingerprint,
+            expiresAt: Date.now() + this.ttlMs,
+          });
           throw error;
         },
       );

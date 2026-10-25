@@ -5,6 +5,7 @@ const { recognize } = require('./recognition');
 const { fingerprint, ensureStudio, environmentRelease, validateSuite, enforceGates, pageParameters, listPage } = require('./studio-model');
 const { validateRolloutPolicy } = require('./rollout');
 const { semanticDiff } = require('./diff');
+const { validateKnowledgeDocument, validateKnowledgeBatch } = require('../operations/knowledgeValidation');
 
 function configuredModelProfiles(config, intentId) {
   const intent = config.intents.find((entry) => entry.id === intentId);
@@ -51,15 +52,15 @@ function runSuite(definition, config, version) {
 
 function validateDocument(document, principal) {
   if (!object(document) || !identifier(document.id) || !text(document.title, 200) || !text(document.content, 50000) || !text(document.source, 1000) || !Array.isArray(document.allowedRoles) || !document.allowedRoles.length || document.allowedRoles.length > 30 || document.allowedRoles.some((role) => typeof role !== 'string' || (role !== '*' && !/^[a-z][a-z0-9_]{0,63}$/.test(role))) || !['draft', 'published', 'archived'].includes(document.status) || (document.expiresAt !== null && document.expiresAt !== undefined && (typeof document.expiresAt !== 'string' || !Number.isFinite(Date.parse(document.expiresAt))))) throw new ControlPlaneError(400, 'Invalid knowledge document. Provide id, title, content, source, allowedRoles, status and a valid optional expiry.');
-  const source = document.source.trim();
-  if ([...source].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new ControlPlaneError(400, 'Source references cannot contain control characters.');
-  if (/^[a-z][a-z0-9+.-]*:/i.test(source) && !/^https?:\/\//i.test(source)) throw new ControlPlaneError(400, 'Source links must use HTTP or HTTPS. A plain reference label is also supported.');
+  const validation = validateKnowledgeDocument(document);
+  if (!validation.valid) throw new ControlPlaneError(400, 'Knowledge document validation failed.', { errors: validation.errors });
   if (document.status !== 'draft' && !principal.permissions.canPublish) throw new ControlPlaneError(403, 'Publishing or withdrawing knowledge requires administrator permission.');
 }
 async function saveDocument(records, document, actor) {
   const previous = await records.get('knowledge', document.id);
   const now = new Date().toISOString();
   const record = { id: document.id, title: document.title.trim(), content: document.content, source: document.source.trim(), allowedRoles: [...new Set(document.allowedRoles)], expiresAt: document.expiresAt || null, status: document.status, version: (previous?.version || 0) + 1, publishedVersion: document.status === 'published' ? (previous?.version || 0) + 1 : previous?.publishedVersion || null, createdAt: previous?.createdAt || now, updatedAt: now, updatedBy: actor };
+  if (!validateKnowledgeDocument(record, { requireVersion: true }).valid) throw new ControlPlaneError(400, 'Knowledge document needs a valid internal version before it can be saved.');
   await records.put('knowledge', document.id, record);
   await records.put('knowledge_versions', `${document.id}:${record.version}`, { ...record, documentId: document.id });
   if (document.status !== 'draft') await records.put('knowledge_published', document.id, record);
@@ -177,7 +178,7 @@ function attachStudioRoutes({ router, store, route, authorize }) {
     const documents = req.body.documents;
     if (!Array.isArray(documents) || !documents.length || documents.length > 50) throw new ControlPlaneError(400, 'Import 1–50 knowledge documents at a time.');
     documents.forEach((document) => validateDocument(document, req.controlPlane));
-    if (new Set(documents.map((document) => document.id)).size !== documents.length) throw new ControlPlaneError(400, 'Import document IDs must be unique.');
+    if (!validateKnowledgeBatch(documents).valid) throw new ControlPlaneError(400, 'Import document IDs must be unique.');
     res.json(await mutate(req, 'studio.knowledge.imported', async (next, records) => {
       for (const document of documents) await saveDocument(records, document, req.controlPlane.actor);
     }, { count: documents.length }));

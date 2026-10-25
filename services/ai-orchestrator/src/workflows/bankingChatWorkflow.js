@@ -649,9 +649,11 @@ class BankingChatWorkflow {
 
     try {
       const question = state.policyDecision?.question || this.buildConfirmationQuestion(state);
+      const tools = state.pendingTools?.length ? state.pendingTools : this.getToolsForState(state);
       const details = {
         ...state.collectedData,
-        tools: state.pendingTools?.length ? state.pendingTools : this.getToolsForState(state),
+        tools,
+        confirmation: require('../services/actionConfirmation').confirmationContext(state, tools),
         policy: state.policyDecision?.audit || null
       };
 

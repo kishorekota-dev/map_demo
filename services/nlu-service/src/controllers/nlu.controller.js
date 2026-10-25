@@ -114,10 +114,9 @@ class NLUController {
       
     } catch (error) {
       logger.error('Error in analyzeUserInput', { error: error.message, stack: error.stack });
-      res.status(500).json({
+      res.status(error.code === 'DIALOGFLOW_UNAVAILABLE' ? 503 : 500).json({
         success: false,
-        error: 'Failed to analyze user input',
-        message: error.message
+        error: 'Failed to analyze user input'
       });
     }
   }
@@ -278,9 +277,9 @@ class NLUController {
       });
     } catch (error) {
       logger.error('Error in useDialogFlow', { error: error.message });
-      res.status(400).json({
+      res.status(error.code === 'DIALOGFLOW_UNAVAILABLE' ? 503 : 500).json({
         success: false,
-        error: error.message
+        error: 'Dialogflow provider is unavailable.'
       });
     }
   }

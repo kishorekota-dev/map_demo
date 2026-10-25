@@ -11,6 +11,12 @@ jest.mock('../services/logger', () => ({
 const QueueService = require('../services/queueService');
 
 describe('QueueService assignment lifecycle', () => {
+    test('rejects malformed session identity before queue storage or notification', async () => {
+        const service = new QueueService(); await service.ready;
+        const listener = jest.fn(); service.on('chatQueued', listener);
+        for (const sessionId of [null, {}, 'bad session', 'x'.repeat(201)]) await expect(service.addToQueue({ sessionId })).rejects.toThrow('Invalid chat session identity');
+        expect(service.chatQueue.size).toBe(0); expect(listener).not.toHaveBeenCalled(); await service.cleanup();
+    });
     test('keeps a notified chat queued until explicit acceptance', async () => {
         const service = new QueueService();
         await service.ready;

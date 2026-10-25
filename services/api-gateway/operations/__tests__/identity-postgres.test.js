@@ -1,7 +1,7 @@
 const express = require("express");
 const request = require("supertest");
 const jwt = require("jsonwebtoken");
-const { generateKeyPairSync, randomUUID, createHash } = require("crypto");
+const { generateKeyPairSync, randomUUID, randomBytes, createHash } = require("crypto");
 const { OperationsStore } = require("../store");
 const { createIdentityRouter } = require("../../identity");
 const databaseUrl =
@@ -21,6 +21,8 @@ const databaseUrl =
     env = {
       NODE_ENV: "test",
       JWT_SECRET: "local-signing-test-only",
+      OIDC_CLIENT_SECRET_REF: "env:OIDC_CLIENT_SECRET",
+      OIDC_CLIENT_SECRET: randomBytes(32).toString("hex"),
       OIDC_ISSUER: "https://id.example.com",
       OIDC_CLIENT_ID: "servicing",
       OIDC_AUTHORIZATION_ENDPOINT: "https://id.example.com/authorize",
@@ -106,6 +108,8 @@ const databaseUrl =
         .digest("base64url"),
     ).toBe(redirect.searchParams.get("code_challenge"));
     expect(tokenExchange.get("redirect_uri")).toBe(env.OIDC_REDIRECT_URI);
+    expect(tokenExchange.get("client_secret") === env.OIDC_CLIENT_SECRET).toBe(true);
+    expect(JSON.stringify(response.body).includes(env.OIDC_CLIENT_SECRET)).toBe(false);
     const sessionCookie = response.headers["set-cookie"]
       .find((v) => v.startsWith("servicing_enterprise_session="))
       .split(";")[0];
@@ -203,4 +207,12 @@ const databaseUrl =
       ),
     ).toBe(true);
   });
+});
+
+test("OIDC credential references and explicitly enabled identity fail startup on invalid settings", () => {
+  const options = { store: {}, env: { AUTH_PROVIDER: "oidc" } };
+  expect(() => createIdentityRouter(options)).toThrow("Complete the server-owned OIDC configuration");
+  for (const ref of ["file:oidc", "env:UNRELATED_SECRET", "env:OIDC_CLIENT_SECRET"]) {
+    expect(() => createIdentityRouter({ store: {}, env: { OIDC_CLIENT_SECRET_REF: ref } })).toThrow("environment value");
+  }
 });

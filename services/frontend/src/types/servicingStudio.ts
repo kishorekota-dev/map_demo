@@ -7,12 +7,14 @@ export interface Connection {
   name: string;
   kind: "case" | "voice" | "knowledge";
   baseUrl: string;
-  credentialRef: string;
-  webhookSecretRef: string;
+  credentialRef: string | null;
+  webhookSecretRef: string | null;
+  webhookPublicUrl?: string | null;
   enabled: boolean;
   timeoutMs: number;
   lastTest?: { ok: boolean; checkedAt: string; message: string };
 }
+export type ConnectionDefinition = Pick<Connection, "id" | "name" | "kind" | "baseUrl" | "credentialRef" | "webhookSecretRef" | "webhookPublicUrl">;
 export interface OperationsStatus {
   storage: string;
   workersEnabled: boolean;

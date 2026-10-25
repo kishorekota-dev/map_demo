@@ -14,6 +14,8 @@
 
 const axios = require('axios');
 const logger = require('../utils/logger');
+const { AsyncLocalStorage } = require('async_hooks');
+const { issueProof, verifyProof, toolArguments, KEY } = require('./mutationProof');
 
 class CompleteBankingTools {
   constructor(bankingServiceUrl) {
@@ -21,6 +23,21 @@ class CompleteBankingTools {
       bankingServiceUrl || process.env.BANKING_SERVICE_URL || 'http://localhost:3005'
     );
     this.apiTimeout = parseInt(process.env.API_TIMEOUT) || 30000;
+    const endpoint = new URL(this.bankingServiceUrl);
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('BANKING_SERVICE_URL must be an HTTP(S) endpoint without embedded credentials, query or fragment');
+    this.execution = new AsyncLocalStorage();
+    this.http = {};
+    for (const method of ['get', 'post', 'put', 'patch', 'delete']) this.http[method] = (url, data, options) => {
+      const bounded = { ...(method === 'get' ? data : options), maxRedirects: 0, proxy: false, maxBodyLength: 65536, maxContentLength: 1048576 };
+      if (method === 'get') return axios.get(url, bounded);
+      const execution = this.execution.getStore();
+      if (!execution) throw Object.assign(new Error('Verified mutation context is required'), { status: 403, dispatched: false });
+      const { parameters } = execution;
+      bounded.headers = { ...bounded.headers, 'Idempotency-Key': parameters.idempotencyKey,
+        'X-Servicing-Confirmation': issueProof({ scope: 'banking_http', principalId: parameters.userId, tenantId: parameters.tenantId,
+          key: parameters.idempotencyKey, method: method.toUpperCase(), path: new URL(url).pathname, body: data || {} }) };
+      return axios[method](url, data, bounded);
+    };
     
     logger.info('Complete Banking Tools initialized', { bankingServiceUrl: this.bankingServiceUrl });
   }
@@ -53,7 +70,14 @@ class CompleteBankingTools {
       ...this.getCardTools(),
       ...this.getFraudTools(),
       ...this.getDisputeTools()
-    ];
+    ].map(tool => /^banking_get_/.test(tool.name) || ['banking_authenticate', 'banking_refresh_token'].includes(tool.name) ? tool : {
+      ...tool, inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
+        userId: { type: 'string', description: 'Verified customer principal supplied by the trusted runtime' },
+        tenantId: { type: 'string', description: 'Verified dedicated deployment tenant' },
+        idempotencyKey: { type: 'string', description: 'Stable caller operation key retained for explicit retries and reconciliation' },
+        confirmationProof: { type: 'string', description: 'Expiring trusted runtime signature of the original confirmed tool arguments' }
+      }, required: [...tool.inputSchema.required, 'userId', 'tenantId', 'idempotencyKey', 'confirmationProof'] }
+    });
   }
 
   /**
@@ -72,22 +96,33 @@ class CompleteBankingTools {
     if (!validation.valid) {
       const message = `Invalid arguments for ${toolName}: ${validation.errors.join('; ')}`;
       logger.warn('Tool argument validation failed', { toolName, errors: validation.errors });
-      throw new Error(message);
+      throw Object.assign(new Error(message), { status: 400, dispatched: false });
+    }
+    if (['banking_authenticate', 'banking_refresh_token'].includes(toolName)) throw Object.assign(new Error('Customer authentication must use the customer sign-in flow'), { status: 403, dispatched: false });
+    if (!/^banking_get_/.test(toolName)) {
+      if (!KEY.test(parameters.idempotencyKey || '')) throw Object.assign(new Error('A caller-supplied idempotencyKey is required'), { status: 400, dispatched: false });
+      if (!verifyProof(parameters.confirmationProof, { scope: 'banking_tool', principalId: parameters.userId, tenantId: parameters.tenantId,
+        key: parameters.idempotencyKey, method: 'CALL', path: toolName, body: toolArguments(parameters) })) throw Object.assign(new Error('Verified confirmation of the original tool arguments is required'), { status: 403, dispatched: false });
     }
 
     logger.info('Executing tool', { toolName, parameters: Object.keys(parameters) });
 
     try {
-      const result = await this[`_execute_${toolName}`](parameters);
+      const result = await this.execution.run({ parameters }, () => this[`_execute_${toolName}`](parameters));
+      if (result?.outcome === 'uncertain') return { success: false, outcome: 'uncertain', status: 202,
+        reconciliationReference: parameters.idempotencyKey, reconcilePath: result.reconcilePath };
+      if (result?.success === false) throw Object.assign(new Error('Banking request was rejected'), { status: 502, outcome: 'failed' });
       logger.info('Tool executed successfully', { toolName });
       return { success: true, data: result };
     } catch (error) {
       logger.error('Tool execution failed', {
         toolName,
-        error: error.message,
-        response: error.response?.data
+        code: error.code || 'BANKING_UNAVAILABLE'
       });
-      throw error;
+      const status = error.status || error.response?.status;
+      const notSent = error.dispatched === false || ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_INVALID_URL', 'ERR_INVALID_CHAR'].includes(error.code);
+      throw Object.assign(new Error('Banking tool did not complete'), { status, dispatched: notSent ? false : undefined,
+        outcome: notSent || (status >= 400 && status <= 599) ? 'failed' : 'uncertain', code: 'BANKING_TOOL_UNAVAILABLE' });
     }
   }
 
@@ -97,6 +132,7 @@ class CompleteBankingTools {
    * minimum. Deterministic and dependency-free.
    */
   validateParameters(tool, parameters) {
+    if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return { valid: false, errors: ['parameters must be an object'] };
     const schema = tool.inputSchema || {};
     const props = schema.properties || {};
     const required = schema.required || [];
@@ -113,7 +149,7 @@ class CompleteBankingTools {
       if (value === undefined || value === null) continue;
 
       if (rule.type === 'number') {
-        if (typeof value !== 'number' || Number.isNaN(value)) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
           errors.push(`"${field}" must be a number`);
           continue;
         }
@@ -124,6 +160,8 @@ class CompleteBankingTools {
         if (typeof value !== 'boolean') errors.push(`"${field}" must be a boolean`);
       } else if (rule.type === 'string') {
         if (typeof value !== 'string') errors.push(`"${field}" must be a string`);
+        else if (value.length > (field === 'authToken' ? 16384 : 4000)) errors.push(`"${field}" exceeds its length limit`);
+        else if (/Id$/.test(field) && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(value)) errors.push(`"${field}" must be a bounded identifier`);
       }
 
       if (Array.isArray(rule.enum) && value !== undefined && !rule.enum.includes(value)) {
@@ -185,7 +223,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_authenticate(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/auth/login`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/auth/login`, {
       username: params.username,
       password: params.password
     }, { timeout: this.apiTimeout });
@@ -193,7 +231,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_refresh_token(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/auth/refresh`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/auth/refresh`, {
       refreshToken: params.refreshToken
     }, { timeout: this.apiTimeout });
     return response.data;
@@ -259,7 +297,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_accounts(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/accounts`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/accounts`, {
       params: {
         status: params.status,
         limit: params.limit,
@@ -272,7 +310,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_account(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/accounts/${params.accountId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/accounts/${params.accountId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -280,7 +318,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_balance(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/accounts/${params.accountId}/balance`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/accounts/${params.accountId}/balance`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -288,7 +326,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_account_statement(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/accounts/${params.accountId}/statement`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/accounts/${params.accountId}/statement`, {
       params: {
         startDate: params.startDate,
         endDate: params.endDate
@@ -336,7 +374,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_transactions(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/transactions`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/transactions`, {
       params: {
         page: params.page,
         limit: params.limit,
@@ -352,7 +390,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_transaction(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/transactions/${params.transactionId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/transactions/${params.transactionId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -410,7 +448,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_create_transfer(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/transfers`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/transfers`, {
       fromAccountId: params.fromAccountId,
       toAccountId: params.toAccountId,
       amount: params.amount,
@@ -425,7 +463,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_transfers(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/transfers`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/transfers`, {
       params: {
         page: params.page,
         limit: params.limit,
@@ -438,7 +476,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_transfer(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/transfers/${params.transferId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/transfers/${params.transferId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -532,7 +570,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_cards(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/cards`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/cards`, {
       params: {
         status: params.status,
         limit: params.limit
@@ -544,7 +582,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_card(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/cards/${params.cardId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/cards/${params.cardId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -552,7 +590,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_block_card(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/block`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/cards/${params.cardId}/block`, {
       reason: params.reason,
       notes: params.notes
     }, {
@@ -563,7 +601,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_unblock_card(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/unblock`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/cards/${params.cardId}/unblock`, {
       notes: params.notes
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -573,7 +611,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_activate_card(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/activate`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/cards/${params.cardId}/activate`, {
       activationCode: params.activationCode
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -583,7 +621,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_replace_card(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/cards/${params.cardId}/replace`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/cards/${params.cardId}/replace`, {
       reason: params.reason,
       replacementAddress: params.replacementAddress
     }, {
@@ -691,7 +729,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_create_fraud_alert(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/fraud/alerts`, {
       transactionId: params.transactionId,
       accountId: params.accountId,
       cardId: params.cardId,
@@ -709,7 +747,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_fraud_alerts(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/fraud/alerts`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/fraud/alerts`, {
       params: {
         status: params.status,
         severity: params.severity,
@@ -722,7 +760,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_fraud_alert(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -730,7 +768,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_verify_transaction(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/verify`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/verify`, {
       isLegitimate: params.isLegitimate,
       notes: params.notes
     }, {
@@ -741,7 +779,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_confirm_fraud(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/confirm`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/confirm`, {
       notes: params.notes
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -751,7 +789,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_mark_false_positive(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/false-positive`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/fraud/alerts/${params.alertId}/false-positive`, {
       notes: params.notes
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -857,7 +895,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_create_dispute(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/disputes`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/disputes`, {
       transactionId: params.transactionId,
       disputeType: params.disputeType,
       amountDisputed: params.amountDisputed,
@@ -872,7 +910,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_disputes(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/disputes`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/disputes`, {
       params: {
         status: params.status,
         limit: params.limit
@@ -884,7 +922,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_get_dispute(params) {
-    const response = await axios.get(`${this.bankingServiceUrl}/disputes/${params.disputeId}`, {
+    const response = await this.http.get(`${this.bankingServiceUrl}/disputes/${params.disputeId}`, {
       headers: { Authorization: `Bearer ${params.authToken}` },
       timeout: this.apiTimeout
     });
@@ -892,7 +930,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_add_dispute_evidence(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/disputes/${params.disputeId}/evidence`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/disputes/${params.disputeId}/evidence`, {
       evidenceType: params.evidenceType,
       description: params.description,
       fileUrl: params.fileUrl
@@ -904,7 +942,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_withdraw_dispute(params) {
-    const response = await axios.post(`${this.bankingServiceUrl}/disputes/${params.disputeId}/withdraw`, {
+    const response = await this.http.post(`${this.bankingServiceUrl}/disputes/${params.disputeId}/withdraw`, {
       reason: params.reason
     }, {
       headers: { Authorization: `Bearer ${params.authToken}` },
@@ -914,7 +952,7 @@ class CompleteBankingTools {
   }
 
   async _execute_banking_update_dispute(params) {
-    const response = await axios.put(`${this.bankingServiceUrl}/disputes/${params.disputeId}`, {
+    const response = await this.http.put(`${this.bankingServiceUrl}/disputes/${params.disputeId}`, {
       description: params.description,
       reason: params.reason,
       amountDisputed: params.amountDisputed

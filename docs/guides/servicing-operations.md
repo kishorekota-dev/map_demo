@@ -17,19 +17,36 @@ are contracts; they do not imply that a commercial provider is connected.
 | `CONNECTOR_ALLOWED_HOSTS` | Exact connector hostname allowlist, comma-separated; no wildcards |
 | `CONNECTOR_PRIVATE_HOSTS` | Additional exact hostname allowlist for intentional RFC1918/ULA enterprise destinations; host must also be in `CONNECTOR_ALLOWED_HOSTS`; loopback/link-local metadata remain blocked |
 | `CONNECTOR_ALLOW_LOCAL` | Explicit development-only HTTP/loopback exception; has no effect in production |
-| `CONNECTOR_SECRET_ROOT` | Directory of read-only secret-manager-mounted files |
+| `CONNECTORS_CONFIG_PATH` | Protected startup JSON declaring immutable connector endpoints, kinds and environment credential references |
 | `CASE_CONNECTOR_ID` | Explicit enabled case connector; otherwise exactly one enabled case connector must exist |
 | `SLA_ESCALATION_QUEUE` | Supervisor destination for overdue work, default `supervisor` |
 | `OPERATIONS_RETENTION_DAYS` | Console default, 90 days; deletion remains an explicit administrator operation |
 | `AUDIT_ACTOR_HASH_KEY` | Stable HMAC key for operational actor pseudonyms; defaults to JWT key, so configure separately before production |
-| `AUDIT_SIGNING_KEY_FILE` | Mounted RSA private key used to sign operational evidence exports |
+| `AUDIT_SIGNING_KEY` | Environment-injected RSA private key used to sign operational evidence exports |
 
-Connections contain secret **references**, not credentials:
-`env:CONNECTOR_SECRET_CASE` or `file:case-provider/token`. Files resolve beneath
-`CONNECTOR_SECRET_ROOT`, including symlink checks. Secrets resolve on every call,
-so rotation does not require resaving a connector. Environment variables must be
-injected into the gateway process/container explicitly; mounted files are
-recommended for enterprise secret stores.
+Declare integrations in `CONNECTORS_CONFIG_PATH` before startup, using the
+[fictional schema example](../../services/api-gateway/operations/connectors.example.json).
+The optional file has a `connectors` array with unique `id`, `name`, `kind`,
+`baseUrl` and optional `credentialRef`, `webhookSecretRef`, `webhookPublicUrl`.
+Credentials are named environment references such as `env:CONNECTOR_SECRET_CASE`;
+literal credentials and credential-file references are rejected. Referenced
+variables must exist at startup and are resolved again on each call for rotation.
+Invalid files, endpoints and missing referenced variables fail startup.
+
+The console and `GET /connections/catalog` expose declared metadata. A publisher
+can enable a declared integration and adjust its display name and timeout.
+`PUT /connections/:id` cannot register an undeclared backend or replace endpoint,
+kind or credential bindings. No declarations means no configured integration can
+execute. Existing database records must match a startup declaration before tests,
+sync, fulfillment or webhooks can run. Dispatched work pins its binding digest;
+reconciliation cannot silently use a replacement provider.
+
+Mount the declaration file read-only and inject its path and referenced variables
+into the gateway explicitly with a deployment override. The default Compose files
+do not invent provider-specific mounts or pass arbitrary host variables. Legacy
+`CONNECTOR_SECRET_ROOT`, `CONNECTOR_SECRET_HOST_DIR` and
+`AUDIT_SIGNING_KEY_FILE` settings are unsupported. Inject an optional RSA signing
+key through `AUDIT_SIGNING_KEY`; invalid signing configuration fails startup.
 
 Production connectors require HTTPS. The transport validates DNS results and
 pins the chosen address to the socket, verifies TLS normally, follows no
@@ -41,7 +58,9 @@ use a customer-provided URL as an adapter target.
 
 The gateway authenticates with `Authorization: Bearer <resolved credential>`.
 Providers must implement stable idempotency, authoritative reconciliation and
-side-effect-free validation rejection.
+side-effect-free definitive HTTP 4xx/5xx rejection. A provider that can commit
+and then return an HTTP error does not satisfy this contract and needs a qualified
+adapter before use.
 
 | Request | Contract |
 | --- | --- |
@@ -62,11 +81,25 @@ queue values are ignored. Details accept only declared, bounded scalar fields;
 credentials are forbidden. Case details belong in the access-controlled case
 record, never in operational telemetry.
 
-Workers claim jobs under PostgreSQL locks. Failures before dispatch can retry
-with bounded backoff. Timeouts/disconnects after dispatch, malformed successful
+Creating a new case requires a short-lived `X-Servicing-Confirmation` proof from
+the authenticated runtime, bound to the original customer, tenant, key and exact
+request body. Caller flags alone do not establish confirmation. Idempotency keys
+are bounded to 128 characters. The runtime signs only after checking the saved
+confirmation request; the gateway verifies it before enqueueing.
+
+Workers claim jobs under PostgreSQL locks. Mutations are never automatically
+retried, including failures before dispatch. Timeouts/disconnects after dispatch, malformed successful
 responses and expired worker leases become `reconciliation_required`. They are
-not automatically retried. HTTP 400/401/403/404/422 are treated as side-effect-free
-rejections under this adapter contract; providers must honor that rule.
+not automatically retried. HTTP 4xx/5xx and known pre-dispatch failures are
+definitive failures. An explicit repeat of the original case request with the same
+key, exact effective inputs and fresh confirmation can requeue that failure.
+Changed arguments conflict, and uncertain work still requires reconciliation. The resolved intent is part of the case identity, including when two intents share a journey.
+
+At first dispatch, the worker persists the actual provider method, path, operation key, and body separately for case creation and escalation. Explicit retries reuse these exact arguments. SLA routing changes create a separate escalation; they never change the body under an existing create key. These original requests contain governed customer details, remain in access-controlled case records, and are excluded from viewer listings and analytics metadata. Previously dispatched legacy cases lacking original request records cannot be automatically retried; operators must resolve them manually against provider evidence. Historical case digests without intent cannot authorize a new intent replay.
+
+A signed provider callback establishing an external case in progress takes precedence over a later failed or lost create response. Escalation requires its own operation outcome; an existing case reference alone does not prove that a queue update succeeded.
+Case records remain lifecycle records; retaining a failed case does not cache or
+automatically repeat a provider invocation.
 
 Overdue cases move to the supervisor queue and emit evidence. Existing provider
 cases receive a durable escalation operation. An escalation rejection does not
@@ -87,20 +120,22 @@ It binds loopback and stores fixture cases in memory; it is **not** a production
 case management backend.
 
 ```bash
-CONNECTOR_SECRET_REFERENCE=local-contract-secret \
-  node services/api-gateway/operations/reference-adapter/server.js
+node services/api-gateway/operations/reference-adapter/server.js
 ```
 
-For local development set gateway `CONNECTOR_ALLOW_LOCAL=true` and the same
-`CONNECTOR_SECRET_REFERENCE`. Save a case connector with base URL
+Supply `CONNECTOR_SECRET_REFERENCE` through the server environment before running
+the fixture; never paste its value into a command, configuration declaration or
+the console. For local development set gateway `CONNECTOR_ALLOW_LOCAL=true` and
+inject the same environment variable. Declare a case connector with base URL
 `http://127.0.0.1:3099` and credential reference
-`env:CONNECTOR_SECRET_REFERENCE`; run **Test connection**. The test really calls
+`env:CONNECTOR_SECRET_REFERENCE`, plus the exact public webhook URL when callbacks
+are used. Enable that declared entry; run **Test connection**. The test really calls
 `/health` and does not create a provider case.
 
 ## Signed callbacks and voice ingress
 
 POST exact JSON bytes to `/api/operations/webhooks/:connectionId`. Configure the
-connection's `webhookSecretRef`. Headers:
+startup declaration's `webhookSecretRef` and exact HTTPS `webhookPublicUrl`. Headers:
 
 ```text
 X-Servicing-Timestamp: <Unix seconds>
@@ -108,8 +143,13 @@ X-Servicing-Event-Id: <stable provider event identifier>
 X-Servicing-Signature: <hex HMAC-SHA256>
 ```
 
-The HMAC input is `timestamp + "." + eventId + "." + rawRequestBody` with no
-extra newline. Events must be within five minutes. Retries use the same event ID
+The URL-bound signature input is
+`timestamp + "." + eventId + "." + webhookPublicUrl + "." + rawRequestBody`
+with no extra newline. This supersedes the previous body-only signature; providers
+must update their signer before enabling the integration. The actual request path
+must match the configured public path, with no query string. The gateway uses the
+server-declared URL, never untrusted forwarded host/protocol headers.
+Events must be within five minutes. Retries use the same event ID
 and body, with a fresh timestamp/signature if needed. Receipts are persisted
 before processing; completed receipts return the original response, and unknown
 in-flight outcomes return 409 instead of re-executing. Retained receipts leave
@@ -355,5 +395,9 @@ import: required fields, bounded content, safe provenance, duplicate identifiers
 and obvious sensitive-text patterns. Rejection imports nothing. Internal revision
 numbers remain control-plane-owned; caller-supplied versions are optional. Pattern
 matching needs human review and is not a comprehensive privacy classifier. Manual
-authoring and all publication/retrieval ACL/version controls retain their existing
-contracts.
+studio saves/imports now apply the same validation to title, content and source,
+including the 20-character content minimum. Sensitive patterns are checked after
+Unicode compatibility normalization. Answer retrieval revalidates stored content,
+provenance and its positive server-assigned version, omitting unsafe historical
+records until corrected and republished. Publication/retrieval role controls and
+the previous published release during a draft edit remain enforced.

@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
+const { intent } = require('../services/queuePrivacy');
+const ownAgent = (req, res, next) => req.agentAuth?.type === 'service' || req.agentAuth?.userId === req.params.agentId
+    ? next() : res.status(403).json({ success: false, error: 'Agent access denied' });
+const historyView = chat => ({ sessionId: chat.sessionId, intent: intent(chat.intent),
+    status: ['active', 'completed', 'resolved', 'transferred', 'ended'].includes(chat.status) ? chat.status : 'unknown', startTime: chat.startTime });
 
 /**
  * Agent management routes
@@ -50,7 +55,7 @@ router.get('/', (req, res) => {
 });
 
 // Get agent by ID
-router.get('/:agentId', (req, res) => {
+router.get('/:agentId', ownAgent, (req, res) => {
     try {
         const { agentId } = req.params;
         const agentService = req.app.get('agentService');
@@ -74,7 +79,7 @@ router.get('/:agentId', (req, res) => {
                 status: agent.status,
                 isOnline: agent.isOnline,
                 currentChats: Array.from(agent.currentChats),
-                chatHistory: agent.chatHistory.slice(0, 10), // Last 10 chats
+                chatHistory: agent.chatHistory.slice(0, 10).map(historyView),
                 performance: agent.performance,
                 capabilities: agent.capabilities,
                 skillLevel: agent.skillLevel,
@@ -102,6 +107,7 @@ router.post('/register', async (req, res) => {
         const agentService = req.app.get('agentService');
         const agentData = {
             ...req.body,
+            ...(req.agentAuth?.type === 'agent' ? { agentId: req.agentAuth.userId, role: 'agent' } : {}),
             ipAddress: req.ip,
             userAgent: req.get('User-Agent')
         };
@@ -138,7 +144,7 @@ router.post('/register', async (req, res) => {
 });
 
 // Update agent status
-router.patch('/:agentId/status', async (req, res) => {
+router.patch('/:agentId/status', ownAgent, async (req, res) => {
     try {
         const { agentId } = req.params;
         const { status, reason } = req.body;
@@ -208,7 +214,7 @@ router.get('/available/for-assignment', (req, res) => {
 });
 
 // Assign chat to agent
-router.post('/:agentId/assign-chat', async (req, res) => {
+router.post('/:agentId/assign-chat', ownAgent, async (req, res) => {
     try {
         const { agentId } = req.params;
         const chatSession = req.body;
@@ -240,7 +246,7 @@ router.post('/:agentId/assign-chat', async (req, res) => {
 });
 
 // Remove chat from agent
-router.delete('/:agentId/chats/:sessionId', async (req, res) => {
+router.delete('/:agentId/chats/:sessionId', ownAgent, async (req, res) => {
     try {
         const { agentId, sessionId } = req.params;
         const { resolution } = req.query;
@@ -270,7 +276,7 @@ router.delete('/:agentId/chats/:sessionId', async (req, res) => {
 });
 
 // Get agent performance stats
-router.get('/:agentId/performance', (req, res) => {
+router.get('/:agentId/performance', ownAgent, (req, res) => {
     try {
         const { agentId } = req.params;
         const agentService = req.app.get('agentService');
@@ -288,7 +294,7 @@ router.get('/:agentId/performance', (req, res) => {
             currentChats: agent.currentChats.size,
             maxChats: agent.preferences.maxConcurrentChats,
             utilizationRate: agent.currentChats.size / agent.preferences.maxConcurrentChats,
-            recentChatHistory: agent.chatHistory.slice(0, 20),
+            recentChatHistory: agent.chatHistory.slice(0, 20).map(historyView),
             lastActivity: agent.lastActivity,
             onlineTime: agent.registeredAt ? Date.now() - agent.registeredAt.getTime() : 0
         };
@@ -312,7 +318,7 @@ router.get('/:agentId/performance', (req, res) => {
 });
 
 // Update agent activity
-router.post('/:agentId/activity', (req, res) => {
+router.post('/:agentId/activity', ownAgent, (req, res) => {
     try {
         const { agentId } = req.params;
         const { activity } = req.body;

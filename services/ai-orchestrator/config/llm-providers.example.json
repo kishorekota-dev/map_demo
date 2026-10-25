@@ -28,6 +28,7 @@
     {
       "id": "vertex-gemini",
       "type": "vertex_gemini",
+      "credentialRef": "env:LLM_VERTEX_ACCESS_TOKEN",
       "enabled": false,
       "project": "replace-with-google-cloud-project",
       "location": "us-central1"

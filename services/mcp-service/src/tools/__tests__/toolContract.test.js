@@ -69,7 +69,7 @@ describe('MCP argument validation', () => {
 
   test('accepts a valid payload', () => {
     const r = tools.validateParameters(tool, {
-      authToken: 't', fromAccountId: 'a', toAccountId: 'b', amount: 100
+      authToken: 't', fromAccountId: 'a', toAccountId: 'b', amount: 100, userId: 'u', tenantId: 't', idempotencyKey: 'original', confirmationProof: 'schema-only-placeholder'
     });
     expect(r).toEqual({ valid: true, errors: [] });
   });

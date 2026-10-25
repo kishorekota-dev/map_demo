@@ -273,23 +273,20 @@ async function setupServiceIntegrations() {
     socketManager.on('getChatHistory', async ({ agentId, historyRequest }) => {
         if (historyRequest?.sessionId) {
             await ensureChatBackend(agentId);
-            return chatClientService.getSessionHistory(historyRequest.sessionId, historyRequest);
+            return chatClientService.getSessionHistory(historyRequest.sessionId, { ...historyRequest, agentId });
         }
         return {
             messages: [],
             chats: agentService.getAgent(agentId)?.chatHistory || []
         };
     });
-    socketManager.on('getCustomerInfo', ({ customerId }) => {
-        const queueEntry = Array.from(queueService.chatQueue.values())
-            .find(entry => entry.customerId === customerId);
-        const recentChat = agentService.getAllAgents()
-            .flatMap(agent => agent.chatHistory)
-            .find(chat => chat.customerId === customerId);
+    socketManager.on('getCustomerInfo', ({ agentId, sessionId, customerId }) => {
+        const ownedChat = agentService.getAgent(agentId)?.chatHistory.find(chat => chat.sessionId === sessionId && chat.customerId === customerId);
+        if (!ownedChat || !agentService.getAgent(agentId)?.currentChats.has(sessionId)) throw new Error('Assigned session required');
         return {
             customerId,
-            name: queueEntry?.customerName || recentChat?.customerName || 'Customer',
-            accountType: queueEntry?.customerData?.accountType || 'standard'
+            name: ownedChat.customerName || 'Customer',
+            accountType: ownedChat.customerData?.accountType || null
         };
     });
     socketManager.on('updatePreferences', ({ agentId, preferences }) => (
@@ -301,11 +298,13 @@ async function setupServiceIntegrations() {
     });
 
     chatClientService.on('agentAssigned', (data) => {
-        socketManager.broadcastToAgents('agentAssigned', data);
+        socketManager.updateSessionAssignment(data.sessionId, data.agentId);
+        socketManager.broadcastToAgents('agentAssigned', { sessionId: data.sessionId, agentId: data.agentId });
     });
 
     chatClientService.on('sessionEnded', (data) => {
-        socketManager.broadcastToAgents('sessionEnded', data);
+        socketManager.updateSessionAssignment(data.sessionId, null);
+        socketManager.broadcastToAgents('sessionEnded', { sessionId: data.sessionId });
     });
 
     chatClientService.on('escalationRequest', async data => {

@@ -31,8 +31,7 @@ const createServiceProxy = (options) => {
     serviceName,
     pathRewrite = {},
     changeOrigin = true,
-    timeout = parseInt(process.env.PROXY_TIMEOUT) || 30000,
-    retryAttempts = parseInt(process.env.PROXY_RETRY_ATTEMPTS) || 3
+    timeout = parseInt(process.env.PROXY_TIMEOUT) || 30000
   } = options;
 
   return createProxyMiddleware({
@@ -153,40 +152,26 @@ const createServiceProxy = (options) => {
       // Circuit breaker logic
       circuitBreaker.recordFailure(serviceName);
 
-      // Determine appropriate error response
-      let statusCode = 502; // Bad Gateway
-      let errorMessage = 'Service temporarily unavailable';
-
-      if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
-        statusCode = 503; // Service Unavailable
-        errorMessage = 'Service is currently down';
-      } else if (err.code === 'ETIMEDOUT') {
-        statusCode = 504; // Gateway Timeout
-        errorMessage = 'Service request timed out';
-      }
+      const { statusCode, ...result } = require('./error').serviceErrorHandler(err, serviceName, req);
 
       // Check if response hasn't been sent yet
       if (!res.headersSent) {
         res.status(statusCode).json({
-          error: 'Gateway Error',
-          message: errorMessage,
-          service: serviceName,
+          ...result,
           requestId,
-          timestamp: new Date().toISOString(),
-          code: err.code || 'PROXY_ERROR'
+          timestamp: new Date().toISOString()
         });
       }
     },
 
     // Retry logic
     retry: {
-      retries: retryAttempts,
+      retries: 0,
       retryDelay: parseInt(process.env.PROXY_RETRY_DELAY) || 1000,
-      retryCondition: (err) => {
-        // Only pre-connection failures are eligible. A timeout may occur after
-        // model generation or a financial action has already been dispatched.
-        return err.code === 'ECONNREFUSED' || 
-               err.code === 'ENOTFOUND';
+      retryCondition: () => {
+        // Retries are disabled. Preserve the legacy option shape for callers;
+        // every business retry must be an explicit request with the same key.
+        return false;
       }
     }
   });

@@ -148,7 +148,7 @@ class EnhancedMCPClient {
         duration: Date.now() - startTime
       });
       
-      throw new Error(`Tool execution failed on all transports: ${error.message}`);
+      throw Object.assign(new Error('Tool execution did not complete'), { status: error.status, outcome: error.outcome, dispatched: error.dispatched, code: error.code });
     }
   }
 

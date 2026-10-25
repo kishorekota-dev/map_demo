@@ -10,11 +10,11 @@ and gateway on host loopback for a separately configured TLS ingress.
 | Gateway prefix | Owner and purpose | Authentication |
 | --- | --- | --- |
 | `/api/banking/v1/auth` | Banking login, refresh, logout and user identity | Login/refresh have their own validation; protected operations require access JWTs |
-| `/api/banking/v1` | Banking accounts, transfers, cards, transactions, fraud and disputes | Signed user access JWT plus domain ownership/authorization |
+| `/api/banking/v1` | Banking accounts, transfers, cards, transactions, fraud and disputes | Signed user access JWT plus domain ownership; business mutations additionally require caller idempotency key and exact-request confirmation proof |
 | `/api/chat`, `/api/sessions` | Customer messages, owned sessions, explicit interrupted-request recovery and one-time channel handoffs | Signed customer JWT; session ownership enforced |
 | `/api/orchestrator` | Governed workflows, feedback, session context and financial exception reconciliation | Signed tenant JWT; extra operator scopes for context/reconciliation |
-| `/api/orchestrator/llm/evaluate` | Internal bounded synthetic model probe, without tools | Short-lived run-scoped delegation JWT plus service credential; ordinary customer/editor tokens cannot invoke it |
-| `/api/orchestrator/llm` | Sanitized server model registry, model discovery and fixed synthetic tests | Operator viewing roles; editor/admin for tests |
+| `/api/orchestrator/llm/evaluate` | Internal bounded synthetic model probe outside production, without tools | Short-lived run-scoped delegation JWT plus service credential; disabled in production |
+| `/api/orchestrator/llm` | Sanitized server model registry, model discovery and fixed synthetic tests | Operator viewing roles; editor/admin for tests; synthetic test endpoint disabled in production |
 | `/api/control-plane` | Drafts, simulation, publish/rollback, work, suites, knowledge, environments and approvals | Signed deployment tenant; operation-specific control-plane role |
 | `/api/quality` | Synthetic model probes, persisted results, comparison and exact-fingerprint release policy | Signed operator read; editor/admin run; admin policy |
 | `/api/operations` | Connections, executed cases, callbacks, identity mappings, evidence, retention and measured costs | Operation-specific signed roles; runtime writes also require internal service identity |
@@ -44,6 +44,8 @@ frontend runtime JSON or a query string.
   [banking quick reference](../../services/banking-service/API-QUICK-REFERENCE.md).
 - [Chat/session API](../../services/chat-backend/README.md) and
   [orchestrator API](../../services/ai-orchestrator/README.md).
+- [Channel switching](../guides/channel-switching.md): destination-bound one-use
+  grants, required `targetChannel` on resume, and signed durable `voice.handoff`.
 - [Provider callback/fulfillment/identity contracts](../guides/servicing-operations.md)
   and [usage/cost API](../../services/api-gateway/operations/USAGE.md).
 
@@ -61,6 +63,14 @@ current revision and return 409 on stale state. Package application additionally
 requires the reviewed package digest and base-draft fingerprint. Banking tools,
 cases, callbacks and handoffs each have their own idempotency/ownership contract;
 a request ID by itself does not make a financial mutation safe to retry.
+
+Business mutations require caller `Idempotency-Key` and trusted
+`X-Servicing-Confirmation` headers. Banking commits the business effect and replay
+result in one PostgreSQL transaction. A lost commit acknowledgement exposes the
+authenticated `/api/banking/v1/mutation-status/:key` lookup. Fulfillment pins its
+original provider request and requires explicit retry or authoritative
+reconciliation; the gateway does not automatically retry mutations. See
+[requirements and upgrade scope](../guides/requirements-compliance.md).
 
 `/health` and `/health/live` are gateway liveness. `/health/ready` returns 200 or
 503 after required storage/Redis/downstream checks and exposes only probe state.

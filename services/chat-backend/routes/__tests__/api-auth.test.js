@@ -10,7 +10,10 @@ jest.mock('../../services/logger', () => ({
 }));
 
 const apiRoutes = require('../api');
-const JWT_SECRET = 'dev-jwt-secret-change-me-in-production-2024';
+const JWT_SECRET = require('crypto').randomBytes(32).toString('hex');
+const previousSecret = process.env.JWT_SECRET;
+beforeAll(() => { process.env.JWT_SECRET = JWT_SECRET; });
+afterAll(() => { if (previousSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previousSecret; });
 
 const createApp = (session, serviceOverrides = {}) => {
   const app = express();
@@ -273,3 +276,14 @@ describe('chat REST authorization', () => {
     expect(response.status).toBe(503);
     expect(session.state.workflowRecoveryRequired).toBe(true);
   });
+
+ test('public errors do not expose upstream diagnostics or credentials', async () => {
+    const privateDiagnostic = require('crypto').randomBytes(32).toString('base64url');
+    const token = jwt.sign({ userId: 'user-a' }, JWT_SECRET);
+    const app = createApp({ sessionId: 's1', userId: 'user-a' }, { chatService: { getConversationHistory: jest.fn(async () => { throw new Error(privateDiagnostic); }) } });
+    const response = await request(app).get('/api/sessions/s1/history').set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Failed to retrieve history');
+    expect('details' in response.body).toBe(false);
+    expect(JSON.stringify(response.body).includes(privateDiagnostic)).toBe(false);
+ });

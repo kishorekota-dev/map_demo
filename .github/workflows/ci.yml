@@ -35,11 +35,14 @@ jobs:
         working-directory: services/${{ matrix.service }}
         run: npm ci --workspaces=false --no-audit --no-fund
       - name: Install sibling dependencies used by contract tests
-        if: matrix.service == 'ai-orchestrator' || matrix.service == 'api-gateway'
+        if: matrix.service == 'ai-orchestrator' || matrix.service == 'api-gateway' || matrix.service == 'chat-backend'
         run: |
           if [ "${{ matrix.service }}" = "ai-orchestrator" ]; then
             npm ci --prefix services/mcp-service --workspaces=false --no-audit --no-fund
+          elif [ "${{ matrix.service }}" = "api-gateway" ]; then
+            npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
           else
+            npm ci --prefix services/api-gateway --workspaces=false --no-audit --no-fund
             npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
           fi
       - name: Audit production dependencies

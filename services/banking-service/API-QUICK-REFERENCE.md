@@ -5,12 +5,19 @@ Default direct base: `http://localhost:3005/api/v1`. Run the service using the
 The table below lists actual non-commented route registrations, grouped by their
 mount in [server.js](server.js). Resource identifiers are validated by the server.
 
+Business mutations in accounts, transactions, transfers, cards, fraud and disputes
+require the customer's access token, caller `Idempotency-Key` and trusted
+`X-Servicing-Confirmation` for the original request. Apply migration V10 first.
+Login/refresh retains its existing authentication protocol. Reconcile an uncertain
+mutation through the authenticated status endpoint before retrying.
+
 | Module | Method | Path beneath `/api/v1` |
 | --- | --- | --- |
 | [auth](routes/auth.js) | `POST` | `/auth/login` |
 | [auth](routes/auth.js) | `POST` | `/auth/refresh` |
 | [auth](routes/auth.js) | `POST` | `/auth/logout` |
 | [auth](routes/auth.js) | `GET` | `/auth/me` |
+| Mutation outcome guard | `GET` | `/mutation-status/:key` |
 | [accounts](routes/accounts.js) | `GET` | `/accounts` |
 | [accounts](routes/accounts.js) | `GET` | `/accounts/:accountId` |
 | [accounts](routes/accounts.js) | `POST` | `/accounts` |

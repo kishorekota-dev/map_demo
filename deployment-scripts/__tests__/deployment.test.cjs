@@ -28,7 +28,6 @@ function fixture(directory) {
   if (directory) {
     env.FRONTEND_RUNTIME_CONFIG_FILE = path.join(directory, 'runtime.json');
     env.LLM_PROVIDERS_HOST_FILE = path.join(directory, 'registry.json');
-    env.CONNECTOR_SECRET_HOST_DIR = directory;
     fs.writeFileSync(env.FRONTEND_RUNTIME_CONFIG_FILE, JSON.stringify({ tenantId: env.DEPLOYMENT_TENANT_ID,
       apiBaseUrl: 'https://assistant.test/api', authBaseUrl: 'https://assistant.test/api/banking/v1',
       chatRequestTimeoutMs: 420000, features: { allowTokenAuth: false } }));
@@ -146,9 +145,10 @@ test('preflight uses canonical model registry validation and permits an optional
   try {
     const env = fixture(directory);
     fs.writeFileSync(env.LLM_PROVIDERS_HOST_FILE, JSON.stringify({ providers: [{ id: 'local', type: 'ollama', enabled: true,
-      baseUrl: 'http://private-model:11434', baseUrlRef: 'OPTIONAL_ENDPOINT' }] }));
+      baseUrl: 'https://private-model:11434', baseUrlRef: 'OPTIONAL_ENDPOINT' }] }));
     assert.equal(validateProduction(env, { compose: true }).ok, true);
     for (const entry of [
+      { id: 'local', type: 'ollama', enabled: true, baseUrl: 'http://private-model:11434' },
       { id: 'local', type: 'ollama', enabled: true, baseUrl: 'https://name:private-value@host' },
       { id: 'local', type: 'ollama', enabled: true, arbitrarySecret: 'private-value' },
       { id: 'vertex', type: 'vertex_gemini', enabled: true, project: 'bad project', location: 'us-central1' }
@@ -164,6 +164,26 @@ test('preflight uses canonical model registry validation and permits an optional
 test('preflight accounts for NLU plus workflow inside the outer gateway deadline', () => {
   const env = fixture(); env.NLU_REQUEST_TIMEOUT_MS = '120000'; env.AGENT_RESPONSE_TIMEOUT = '400000'; env.SERVICING_REQUEST_TIMEOUT_MS = '410000';
   assert.ok(validateProduction(env, { checkFiles: false }).failures.some(item => item.code === 'TIMEOUT_ORDER'));
+});
+
+test('preflight validates declared connectors and rejects legacy credential files without disclosing values', () => {
+  const directory = temporary();
+  try {
+    const env = fixture(directory);
+    env.CONNECTORS_CONFIG_PATH = path.join(directory, 'connectors.json');
+    env.CONNECTOR_ALLOWED_HOSTS = 'api.example.com';
+    env.CONNECTOR_SECRET_REFERENCE = secret();
+    const definition = { id: 'reference', name: 'Reference fixture', kind: 'case', baseUrl: 'https://api.example.com', credentialRef: 'env:CONNECTOR_SECRET_REFERENCE' };
+    fs.writeFileSync(env.CONNECTORS_CONFIG_PATH, JSON.stringify({ connectors: [definition] }));
+    assert.equal(validateProduction(env, { compose: true }).ok, true);
+    delete env.CONNECTOR_SECRET_REFERENCE;
+    const missing = validateProduction(env, { compose: true });
+    assert.ok(missing.failures.some(item => item.code === 'CONNECTOR_CATALOG'));
+    env.AUDIT_SIGNING_KEY_FILE = path.join(directory, 'unsupported');
+    const legacy = validateProduction(env, { compose: true });
+    assert.ok(legacy.failures.some(item => item.code === 'ENVIRONMENT_CREDENTIALS'));
+    assert.equal(JSON.stringify(legacy).includes(env.POSTGRES_PASSWORD), false);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('migration commits under an advisory lock and rolls back failures with redacted output', async () => {

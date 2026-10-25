@@ -1,5 +1,8 @@
 const winston = require('winston');
 const path = require('path');
+const { operationalLog } = require('./operationalLog');
+const messages = require('./logMessages');
+const privacyFormat = winston.format(info => operationalLog(info, { service: 'poc-agent-ui', messages }));
 
 // Create logs directory if it doesn't exist
 const fs = require('fs');
@@ -10,8 +13,9 @@ if (!fs.existsSync(logDir)) {
 
 // Custom format for logging
 const customFormat = winston.format.combine(
-    winston.format.timestamp(),
     winston.format.errors({ stack: true }),
+    privacyFormat(),
+    winston.format.timestamp(),
     winston.format.json(),
     winston.format.printf(({ timestamp, level, message, service, ...meta }) => {
         const logObj = {
@@ -27,8 +31,9 @@ const customFormat = winston.format.combine(
 
 // Development format (more readable)
 const devFormat = winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
+    privacyFormat(),
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.colorize(),
     winston.format.printf(({ timestamp, level, message, service, ...meta }) => {
         const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';

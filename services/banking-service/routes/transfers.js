@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+router.use(require('../middleware/durableMutation').durableMutation);
 const transferController = require('../controllers/transfers');
 const { validators, businessValidators } = require('../middleware/validation');
 const { verifyAccountOwnership, verifyTransferOwnership } = require('../middleware/auth');

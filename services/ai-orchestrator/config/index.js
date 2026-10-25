@@ -62,9 +62,9 @@ module.exports = {
     port: parseInt(process.env.DB_PORT) || 5432,
     database: process.env.DB_NAME || 'ai_orchestrator',
     username: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
+    password: process.env.DB_PASSWORD || '',
     dialect: 'postgres',
-    logging: process.env.NODE_ENV === 'development' ? console.log : false,
+    logging: false, // ORM SQL can contain customer data; use operational metrics instead.
     pool: {
       max: parseInt(process.env.DB_POOL_MAX) || 20,
       min: parseInt(process.env.DB_POOL_MIN) || 5,
@@ -166,9 +166,9 @@ module.exports = {
 
   // Security Configuration
   security: {
-    jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+    jwtSecret: process.env.JWT_SECRET || '',
     jwtExpiry: process.env.JWT_EXPIRY || '24h',
-    apiKey: process.env.API_KEY || 'dev-api-key'
+    apiKey: process.env.API_KEY || ''
   },
 
   // CORS Configuration

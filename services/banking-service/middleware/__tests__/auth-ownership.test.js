@@ -8,6 +8,13 @@ jest.mock('../../database/repositories', () => ({
   DisputeRepository: { findById: jest.fn() }
 }));
 
+const originalJwtSecret = process.env.JWT_SECRET;
+process.env.JWT_SECRET = require('crypto').randomBytes(32).toString('hex');
+afterAll(() => {
+  if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+  else process.env.JWT_SECRET = originalJwtSecret;
+});
+
 const repositories = require('../../database/repositories');
 const { verifyCardOwnership, verifyTransactionOwnership } = require('../auth');
 

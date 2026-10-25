@@ -27,11 +27,13 @@ Registry fields are `id`, `type`, `enabled`, optional `baseUrl`, `baseUrlRef`, `
 
 * Ollama and compatible providers use no credential unless explicitly configured. Ambient `OPENAI_API_KEY` and customer JWTs are never forwarded.
 * OpenAI and Gemini Developer API require an explicit credential reference. Gemini uses an API-key header, not a query-string secret.
-* Vertex uses the referenced bearer token, or `google-auth-library` Application Default Credentials with the cloud-platform scope. ADC availability is verified on an actual call; discovery's configured flag is not proof of valid Google credentials. [Google ADC documentation](https://cloud.google.com/docs/authentication/application-default-credentials).
+* Vertex requires an explicit environment credential reference containing a bearer access token. The operator owns token refresh. Implicit ADC, credential files and ambient cloud credentials are not read by this plugin.
+
+Startup validates the registry before initializing services or accepting requests. Enabled cloud providers require an explicit `credentialRef`, and every enabled credential reference must resolve to a bounded nonempty environment value without whitespace/control characters. Disabled provider placeholders may remain unconfigured. Construction never contacts a provider. Literal credential fields and unknown root fields are rejected. Provider response payloads containing the known configured credential value are rejected before generation or discovery can return data.
 
 Models can be restricted by `allowedModels`; omitted means the provider's model identifiers are allowed. An empty list allows no models. `supportsTemperature:false` omits the temperature parameter for model families that reject it; it does not retry with different parameters or providers. Use separate provider registrations when model families need different server capabilities.
 
-Cloud adapters require HTTPS. URLs with userinfo, query strings, or fragments are rejected. HTTP is available for server-configured Ollama/compatible endpoints. Redirects, inherited HTTP proxy behavior, and automatic provider retries are disabled. Administrators control network reachability and endpoint identity through the server registry and deployment network.
+Every enabled production provider requires HTTPS, including Ollama/compatible endpoints. Development/test retains local HTTP and the existing default ports. URLs with userinfo, query strings, or fragments are rejected. Redirects, inherited HTTP proxy behavior, and automatic provider retries are disabled. Administrators control network reachability and endpoint identity through the server registry and deployment network.
 
 ## Published profiles
 
@@ -76,7 +78,7 @@ Generation consumes published intent system/user prompts. Extraction consumes th
 | `ollama` | Native `/api/chat`, nonstreaming, JSON format when requested | `prompt_eval_count`, `eval_count` |
 | `openai` | `/responses`, `store:false`, text/JSON output | `input_tokens`, `output_tokens`, `total_tokens` |
 | `openai_compatible` | `/chat/completions`, nonstreaming, JSON object mode | `prompt_tokens`, `completion_tokens`, `total_tokens` |
-| `vertex_gemini` | Project/location `generateContent`, ADC or explicit bearer | `usageMetadata` token fields |
+| `vertex_gemini` | Project/location `generateContent`, explicit bearer environment reference | `usageMetadata` token fields |
 | `gemini` | Developer API `generateContent`, explicit API-key header | `usageMetadata` token fields |
 
 The request mappings follow the official [Ollama chat API](https://docs.ollama.com/api/chat), [OpenAI text generation](https://developers.openai.com/api/docs/guides/text), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Vertex inference API](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference), and [Gemini content generation API](https://ai.google.dev/api/generate-content). Compatible servers must implement the stated Chat Completions subset; capability differences surface as explicit errors. This interface does not implement streaming, audio, embeddings, arbitrary tools, or provider-specific reasoning controls.
@@ -89,7 +91,11 @@ Under `/api/orchestrator/llm`:
 
 * `GET /providers` returns sanitized IDs/types, enablement/configuration, model allowlists, and capability flags.
 * `GET /providers/:id/models` reads provider model discovery. Discovery is bounded to the first returned page and 1,000 entries, filtered by the server allowlist. Vertex returns its configured allowlist with `source:configured-allowlist`; it does not claim universal model availability.
-* `POST /test` accepts only `{providerId,model}`. It sends a fixed synthetic connectivity prompt, with at most 32 output tokens and a 60-second deadline, and returns `{ok,providerId,model,latencyMs,text,usage,error?}`. It cannot accept customer text or a custom prompt. Provider failures use sanitized `{code,message}` errors. Tests are limited to 10 per minute per signed user/tenant.
+* `POST /test` returns 403 with `LLM_TEST_DISABLED` in production, regardless of editor/admin role. In development/test it accepts only `{providerId,model}`. It sends a fixed synthetic connectivity prompt, with at most 32 output tokens and a 60-second deadline, and returns `{ok,providerId,model,latencyMs,text,usage,error?}`. It cannot accept customer text or a custom prompt. Provider failures use sanitized `{code,message}` errors. Tests are limited to 10 per minute per signed user/tenant.
+
+`POST /evaluate` likewise returns 403 with `LLM_EVALUATION_DISABLED` in production, even with scoped editor delegation and service identity. Run synthetic inference/evaluation in a separately qualified staging environment; production keeps ordinary governed runtime inference and offline configuration validation. Production cannot acquire new live-model release evidence through this endpoint.
+
+These restrictions intentionally replace the earlier implicit ADC, production local-HTTP and production probe behavior. Migrate deployments to explicit environment token references and an approved HTTPS endpoint; keep Mac Studio development testing on the existing HTTP defaults.
 
 Read routes require a signed control-plane viewing role. Test requires a signed administrator/editor role. All routes also enforce the deployment's access-token/tenant middleware. Tests are explicit operator actions; provider discovery does not pull models, deploy resources, or change provider state.
 

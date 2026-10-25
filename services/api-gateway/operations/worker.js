@@ -1,12 +1,14 @@
 const { randomUUID } = require("crypto");
 const { requestConnector } = require("./connectors");
 const { OperationsError } = require("./store");
+const { loadConnectorCatalog } = require('./connectorCatalog');
 const TERMINAL = ["completed", "failed"];
 class FulfillmentWorker {
   constructor(store, options = {}) {
     this.store = store;
     this.request = options.request || requestConnector;
     this.env = options.env || process.env;
+    this.connectorCatalog = options.connectorCatalog || loadConnectorCatalog(this.env);
     this.busy = false;
   }
   async connection(tx, item) {
@@ -20,7 +22,10 @@ class FulfillmentWorker {
       options[0].kind !== "case"
     )
       return null;
-    return options[0];
+    const connection = this.connectorCatalog.bind(options[0]);
+    if (item.connectorDigest && item.connectorDigest !== connection.definitionDigest)
+      throw new OperationsError(409, 'The original connector binding is required for this operation.');
+    return connection;
   }
   async recoverAndEscalate() {
     await this.store.transaction(async (tx) => {
@@ -102,6 +107,22 @@ class FulfillmentWorker {
           });
           return null;
         }
+        // Pin the actual provider request before dispatch. Mutable SLA routing
+        // must never alter arguments under an existing provider operation key.
+        let outbound = item.outboundRequests?.[job.kind];
+        if (!outbound && (job.attempts > 0 || (item.attempts > 0 && (job.kind === 'create' || item.pendingOperation === job.kind)))) {
+          await tx.query("UPDATE servicing_operations_jobs SET status='uncertain' WHERE tenant_id=$1 AND id=$2", [this.store.tenantId, job.id]);
+          await tx.put('case', item.id, { ...item, status: 'reconciliation_required',
+            lastError: 'The original provider request is unavailable. Manual reconciliation is required.', updatedAt: new Date().toISOString() });
+          await tx.event({ type: 'case.reconciliation_required', caseId: item.id, sessionId: item.sessionId, version: item.version, reason: 'original_request_unavailable' });
+          return null;
+        }
+        if (!outbound) {
+          const key = job.kind === 'escalate' ? `${item.idempotencyKey}:escalation` : item.idempotencyKey;
+          outbound = { method: 'POST', path: job.kind === 'escalate' ? `/cases/${encodeURIComponent(item.externalId)}/escalations` : '/cases', key,
+            body: { operationId: key, caseId: item.id, sessionId: item.sessionId, channel: item.channel, queue: item.queue,
+              summary: item.summary, reference: item.reference, details: item.details || {}, releaseVersion: item.version } };
+        }
         const leaseId = randomUUID();
         await tx.query(
           "UPDATE servicing_operations_jobs SET status='running',attempts=attempts+1,locked_at=NOW(),lease_id=$3 WHERE tenant_id=$1 AND id=$2",
@@ -111,10 +132,12 @@ class FulfillmentWorker {
           ...item,
           status: "in_progress",
           connectorId: connection.id,
+          connectorDigest: connection.definitionDigest,
           attempts: job.attempts + 1,
           updatedAt: new Date().toISOString(),
           lastError: null,
           pendingOperation: job.kind,
+          outboundRequests: { ...item.outboundRequests, [job.kind]: outbound },
         });
         await tx.event({
           type: "case.dispatch_started",
@@ -124,35 +147,15 @@ class FulfillmentWorker {
           connectorId: connection.id,
           operationId: item.idempotencyKey,
         });
-        return { job, item, connection, leaseId };
+        return { job, item, connection, leaseId, outbound };
       });
       if (!work) return false;
       let response;
       let failure;
       try {
-        const operationId =
-          work.job.kind === "escalate"
-            ? `${work.item.idempotencyKey}:escalation`
-            : work.item.idempotencyKey;
-        const path =
-          work.job.kind === "escalate"
-            ? `/cases/${encodeURIComponent(work.item.externalId)}/escalations`
-            : "/cases";
-        response = await this.request(work.connection, path, {
-          env: this.env,
-          method: "POST",
-          headers: { "Idempotency-Key": operationId },
-          body: {
-            operationId,
-            caseId: work.item.id,
-            sessionId: work.item.sessionId,
-            channel: work.item.channel,
-            queue: work.item.queue,
-            summary: work.item.summary,
-            reference: work.item.reference,
-            details: work.item.details || {},
-            releaseVersion: work.item.version,
-          },
+        response = await this.request(work.connection, work.outbound.path, {
+          env: this.env, method: work.outbound.method,
+          headers: { 'Idempotency-Key': work.outbound.key }, body: work.outbound.body,
         });
       } catch (error) {
         failure = error;
@@ -168,8 +171,15 @@ class FulfillmentWorker {
           return;
         const current = await tx.get("case", work.item.id);
         if (!current) return;
-        // A signed callback can complete while the dispatch response is in flight.
-        if (TERMINAL.includes(current.status)) {
+        // Signed provider evidence can establish acceptance before the create
+        // HTTP response arrives. A later rejection/timeout cannot erase it.
+        const acceptedCreate = work.job.kind === 'create' && !work.item.externalId
+          && current.externalId && current.status === 'in_progress';
+        if (TERMINAL.includes(current.status) || acceptedCreate) {
+          if (acceptedCreate) {
+            await tx.put('case', current.id, { ...current, lastError: null, definitiveFailure: false, pendingOperation: null });
+            if (current.slaEscalatedAt && current.queue !== work.outbound.body.queue) await tx.enqueue(current.id, 'escalate');
+          }
           await tx.query(
             "UPDATE servicing_operations_jobs SET status='complete' WHERE tenant_id=$1 AND id=$2",
             [this.store.tenantId, work.job.id],
@@ -179,6 +189,7 @@ class FulfillmentWorker {
         let status = "reconciliation_required",
           jobStatus = "uncertain",
           message = "Provider outcome is unknown. Reconcile before retrying.";
+        let definitiveFailure = false;
         let externalId;
         const success =
           response?.status >= 200 &&
@@ -195,13 +206,15 @@ class FulfillmentWorker {
           externalId = response.data.externalId;
           message = null;
         } else if (failure && failure.dispatched === false) {
-          status = work.job.attempts < 4 ? "queued" : "failed";
-          jobStatus = status === "queued" ? "queued" : "failed";
+          status = "failed";
+          jobStatus = "failed";
           message = "Provider connection failed before dispatch.";
-        } else if ([400, 401, 403, 404, 422].includes(response?.status)) {
+          definitiveFailure = true;
+        } else if (response?.status >= 400 && response.status < 600) {
           status = "failed";
           jobStatus = "failed";
           message = `Provider rejected the request (${response.status}).`;
+          definitiveFailure = true;
         }
         // A rejected queue update must not falsely close the underlying case.
         if (work.job.kind === "escalate" && status === "failed")
@@ -211,6 +224,7 @@ class FulfillmentWorker {
           status,
           ...(externalId ? { externalId } : {}),
           lastError: message,
+          definitiveFailure,
           ...(success ? { pendingOperation: null } : {}),
           updatedAt: new Date().toISOString(),
         });
@@ -218,7 +232,7 @@ class FulfillmentWorker {
           success &&
           work.job.kind === "create" &&
           current.slaEscalatedAt &&
-          current.queue !== work.item.queue
+          current.queue !== work.outbound.body.queue
         )
           await tx.enqueue(current.id, "escalate");
         await tx.query(
@@ -281,6 +295,8 @@ class FulfillmentWorker {
           409,
           "Only an uncertain case can be retried after provider reconciliation.",
         );
+      if (!item.outboundRequests?.[item.pendingOperation === 'escalate' ? 'escalate' : 'create'])
+        throw new OperationsError(409, 'The original provider request is unavailable. Resolve this legacy operation manually.');
       const connection = await this.store.transaction((tx) =>
         this.connection(tx, item),
       );
@@ -366,12 +382,7 @@ class FulfillmentWorker {
     if (!this.timer) {
       this.timer = setInterval(
         () =>
-          this.runOnce().catch((e) =>
-            console.error(
-              "Fulfillment worker unavailable:",
-              e.code || e.status || "worker_error",
-            ),
-          ),
+          this.runOnce().catch(() => console.error("Fulfillment worker unavailable.")),
         2000,
       );
       this.timer.unref();

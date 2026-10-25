@@ -1,41 +1,38 @@
 const logger = require('../utils/logger');
+const messages = {
+  400: 'The request is invalid.', 401: 'Authentication is required.', 403: 'This operation is not permitted.',
+  404: 'The requested resource was not found.', 409: 'The request conflicts with the current resource state.',
+  413: 'The request exceeds its size limit.', 422: 'The request does not meet the input contract.',
+  429: 'Too many requests. Please try again later.'
+};
+const safeStatus = status => Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+const mutation = req => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+const reconciliation = (service, req) => {
+  const key = req.get?.('Idempotency-Key') || req.headers?.['idempotency-key'];
+  if (service !== 'banking' || !mutation(req) || typeof key !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/.test(key)
+    || !/^\/api\/banking\/v1\/(accounts|cards|transfers|transactions|fraud|disputes)(\/|$)/.test(req.originalUrl || '')) return {};
+  return { reconciliationReference: key, reconcilePath: `/api/banking/v1/mutation-status/${encodeURIComponent(key)}` };
+};
 
 /**
  * Global error handler middleware
  */
 const errorHandler = (err, req, res, next) => {
   // Log error
-  logger.error('Error occurred', {
-    error: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method,
-    ip: req.ip,
-    userId: req.userId,
-    requestId: req.id
-  });
+  const statusCode = safeStatus(err.statusCode || err.status);
+  logger.error('Error occurred', { method: req.method, statusCode });
 
   // Determine status code
-  const statusCode = err.statusCode || err.status || 500;
 
   // Prepare error response
   const errorResponse = {
-    error: err.name || 'InternalServerError',
-    message: err.message || 'An unexpected error occurred',
+    error: statusCode >= 500 ? 'ServiceUnavailable' : 'RequestRejected',
+    message: messages[statusCode] || 'A required service is unavailable. Check the owning service before repeating a state-changing request.',
     timestamp: new Date().toISOString(),
-    path: req.path,
-    requestId: req.id
+    outcome: statusCode >= 500 && mutation(req) ? 'uncertain' : 'failed'
   };
 
-  // Add stack trace in development
-  if (process.env.NODE_ENV === 'development') {
-    errorResponse.stack = err.stack;
-  }
-
-  // Add validation errors if present
-  if (err.errors) {
-    errorResponse.errors = err.errors;
-  }
 
   res.status(statusCode).json(errorResponse);
 };
@@ -44,17 +41,13 @@ const errorHandler = (err, req, res, next) => {
  * 404 Not Found handler
  */
 const notFoundHandler = (req, res) => {
-  logger.warn('Route not found', {
-    path: req.path,
-    method: req.method,
-    ip: req.ip
-  });
+  logger.warn('Route not found', { method: req.method, statusCode: 404 });
 
   res.status(404).json({
     error: 'NotFound',
-    message: `Route ${req.method} ${req.path} not found`,
+    message: messages[404],
     timestamp: new Date().toISOString(),
-    path: req.path
+    outcome: 'failed'
   });
 };
 
@@ -71,48 +64,15 @@ const asyncHandler = (fn) => {
  * Service error handler for proxy errors
  */
 const serviceErrorHandler = (error, serviceName, req) => {
-  logger.error('Service communication error', {
-    service: serviceName,
-    error: error.message,
-    path: req.path,
-    method: req.method,
-    code: error.code
-  });
-
-  if (error.code === 'ECONNREFUSED') {
-    return {
-      statusCode: 503,
-      error: 'ServiceUnavailable',
-      message: `The ${serviceName} service is currently unavailable. Please try again later.`,
-      service: serviceName
-    };
-  }
-
-  if (error.code === 'ETIMEDOUT') {
-    return {
-      statusCode: 504,
-      error: 'GatewayTimeout',
-      message: `Request to ${serviceName} service timed out. Please try again.`,
-      service: serviceName
-    };
-  }
-
-  if (error.response) {
-    return {
-      statusCode: error.response.status,
-      error: error.response.data?.error || 'ServiceError',
-      message: error.response.data?.message || 'An error occurred while processing your request',
-      service: serviceName,
-      details: error.response.data
-    };
-  }
-
-  return {
-    statusCode: 500,
-    error: 'ServiceError',
-    message: 'An unexpected error occurred while communicating with the service',
-    service: serviceName
-  };
+  const statusCode = ['ECONNREFUSED', 'ENOTFOUND'].includes(error.code) ? 503
+    : ['ETIMEDOUT', 'ECONNABORTED'].includes(error.code) ? 504
+    : Number.isInteger(error.response?.status) ? safeStatus(error.response.status) : 502;
+  logger.error('Service communication error', { method: req.method, statusCode });
+  const service = ['chat-backend', 'banking', 'mcp', 'nlu', 'nlp', 'ai-orchestrator'].includes(serviceName) ? serviceName : 'upstream';
+  return { statusCode, error: statusCode >= 500 ? 'ServiceUnavailable' : 'RequestRejected',
+    message: messages[statusCode] || 'The upstream response is unavailable. Check the owning service before repeating a state-changing request.',
+    service, outcome: statusCode >= 500 && mutation(req) ? 'uncertain' : 'failed',
+    ...(statusCode >= 500 ? reconciliation(service, req) : {}) };
 };
 
 /**

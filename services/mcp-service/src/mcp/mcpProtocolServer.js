@@ -51,7 +51,7 @@ class MCPProtocolServer extends EventEmitter {
         await this.handleMessage(connection, request);
       } catch (error) {
         logger.error('Error handling MCP message', { connectionId, error: error.message });
-        this.sendError(connection, null, -32700, 'Parse error', error.message);
+        this.sendError(connection, null, -32700, 'Parse error', 'Malformed JSON-RPC request');
       }
     });
 
@@ -114,11 +114,11 @@ class MCPProtocolServer extends EventEmitter {
           break;
 
         default:
-          this.sendError(connection, id, -32601, 'Method not found', `Unknown method: ${method}`);
+          this.sendError(connection, id, -32601, 'Method not found', 'Unsupported method');
       }
     } catch (error) {
       logger.error('Error handling MCP method', { connectionId: connection.id, method, error: error.message });
-      this.sendError(connection, id, -32603, 'Internal error', error.message);
+      this.sendError(connection, id, -32603, 'Internal error', 'MCP operation is unavailable');
     }
   }
 
@@ -202,7 +202,8 @@ class MCPProtocolServer extends EventEmitter {
         content: [
           {
             type: 'text',
-            text: `Error: ${error.message}`
+            text: JSON.stringify({ success: false, outcome: error.outcome || 'failed', status: error.outcome === 'uncertain' ? 202 : error.status || 503,
+              dispatched: error.dispatched, error: 'Banking tool did not complete' })
           }
         ],
         isError: true

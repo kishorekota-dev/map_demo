@@ -3,12 +3,18 @@ const jwt = require("jsonwebtoken");
 const { equal } = require("./auth");
 const { resolveSecret } = require("./connectors");
 const { OperationsError } = require("./store");
+const { loadConnectorCatalog } = require('./connectorCatalog');
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 async function receiveWebhook(req, store, options = {}) {
   const env = options.env || process.env;
   const connection = await store.get("connection", req.params.id);
   if (!connection?.enabled || !connection.webhookSecretRef)
     throw new OperationsError(404, "Webhook is not configured.");
+  const catalog = options.connectorCatalog || loadConnectorCatalog(env);
+  catalog.bind(connection);
+  const publicUrl = new URL(connection.webhookPublicUrl);
+  if (req.originalUrl !== publicUrl.pathname)
+    throw new OperationsError(401, 'Webhook must use its configured public path without query parameters.');
   const timestamp = req.get("X-Servicing-Timestamp");
   const eventId = req.get("X-Servicing-Event-Id");
   const signature = req.get("X-Servicing-Signature");
@@ -23,7 +29,7 @@ async function receiveWebhook(req, store, options = {}) {
     "sha256",
     resolveSecret(connection.webhookSecretRef, env),
   )
-    .update(`${timestamp}.${eventId}.`)
+    .update(`${timestamp}.${eventId}.${connection.webhookPublicUrl}.`)
     .update(req.rawBody)
     .digest("hex");
   if (!equal(signature, expected))
@@ -52,6 +58,7 @@ async function receiveWebhook(req, store, options = {}) {
       );
       if (
         require('../middleware/tokenScope').isQualityDelegation(claims) ||
+        !Number.isFinite(claims.exp) ||
         typeof claims.userId !== "string" ||
         !claims.userId ||
         claims.userId.length > 200 ||
@@ -117,7 +124,10 @@ async function receiveWebhook(req, store, options = {}) {
     await tx.put("webhook", receiptId, {
       ...current,
       status: "completed",
-      response,
+      // A handoff grant is a short-lived customer transfer artifact. Replay
+      // receipts retain the safe outcome, never the redeemable grant itself.
+      response: req.body.type === 'voice.handoff' ? { sessionId: response.sessionId,
+        actions: [{ type: 'handoff_issued', targetChannel: req.body.targetChannel }, { type: 'end' }] } : response,
     });
   });
   return response;
@@ -170,26 +180,27 @@ async function voiceCallback(store, connection, req, principal, options) {
   const body = req.body;
   const env = options.env || process.env;
   if (
-    !["voice.start", "voice.turn", "voice.interrupt", "voice.end"].includes(
+    !["voice.start", "voice.turn", "voice.interrupt", "voice.end", "voice.handoff"].includes(
       body.type,
     ) ||
     !/^[A-Za-z0-9._:-]{1,160}$/.test(body.callId || "")
   )
     throw new OperationsError(400, "Invalid voice event or callId.");
   const callId = hash(`${connection.id}:${body.callId}`);
-  const upstream = async (path, input) => {
+  const upstream = async (path, input, method = "POST") => {
     const response = await (options.fetch || fetch)(
       `${env.CHAT_BACKEND_URL || "http://localhost:3006"}/api${path}`,
       {
-        method: "POST",
+        method,
         headers: {
           Authorization: req.get("Authorization"),
           "Content-Type": "application/json",
+          "X-Servicing-Service-Token": env.SERVICING_SERVICE_TOKEN || "",
           "X-Interaction-ID": hash(
             `${connection.id}:${req.get("X-Servicing-Event-Id")}`,
           ),
         },
-        body: JSON.stringify(input),
+        ...(method === "POST" ? { body: JSON.stringify(input) } : {}),
         signal: AbortSignal.timeout(60000),
       },
     );
@@ -250,7 +261,7 @@ async function voiceCallback(store, connection, req, principal, options) {
     }
     try {
       const created = body.resumeGrant
-        ? await upstream("/sessions/resume", { grant: body.resumeGrant })
+        ? await upstream("/sessions/resume", { grant: body.resumeGrant, targetChannel: "ivr" })
         : await upstream("/sessions", { metadata: { channel: "ivr" } });
       if (
         typeof created.sessionId !== "string" ||
@@ -318,6 +329,26 @@ async function voiceCallback(store, connection, req, principal, options) {
       409,
       "Start an authenticated voice session first, or reconcile an uncertain startup.",
     );
+  if (body.type !== "voice.end") {
+    const current = await upstream(`/sessions/${encodeURIComponent(call.sessionId)}`, undefined, "GET");
+    if (current.session?.metadata?.channel !== "ivr")
+      throw new OperationsError(409, "Conversation has moved to another channel. End this call and resume there.");
+  }
+  if (body.type === "voice.handoff") {
+    if (!["digital", "ava"].includes(body.targetChannel))
+      throw new OperationsError(400, "Voice handoff must target Digital or AVA.");
+    const transfer = await upstream(`/sessions/${encodeURIComponent(call.sessionId)}/handoff`, { targetChannel: body.targetChannel });
+    if (transfer.targetChannel !== body.targetChannel || typeof transfer.grant !== 'string'
+      || !/^[A-Za-z0-9_-]{43}$/.test(transfer.grant) || !Number.isFinite(Date.parse(transfer.expiresAt)))
+      throw new OperationsError(502, "Chat backend returned an invalid handoff artifact.");
+    await store.transaction(async tx => {
+      await tx.put("voice_call", callId, { ...call, status: "handed_off", ended: true, endedAt: new Date().toISOString() });
+      await tx.event({ type: "voice.handoff_issued", sessionId: call.sessionId, channel: "ivr", connectorId: connection.id });
+    });
+    return { sessionId: call.sessionId, actions: [{ type: "stop_playback" },
+      { type: "resume_session", sessionId: call.sessionId, targetChannel: transfer.targetChannel,
+        grant: transfer.grant, expiresAt: transfer.expiresAt }, { type: "end" }] };
+  }
   if (body.type === "voice.interrupt")
     return {
       sessionId: call.sessionId,
