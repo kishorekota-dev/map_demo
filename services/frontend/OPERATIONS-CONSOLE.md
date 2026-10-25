@@ -180,6 +180,18 @@ a new run. Contract simulations and approval gates remain independent. These are
 prompt probes, not full conversation/tool tests or a semantic quality judge.
 See [evaluation guide and limits](../../docs/guides/model-evaluation.md).
 
+## Procedures and guardrails
+
+**Procedures & guardrails** imports SOPs as Markdown or text (paste or upload).
+Parsing turns numbered lists into steps and rules under a guardrails heading into
+enforced guardrails, reports lines it cannot interpret, and suggests guardrails
+from policy-like sentences for the author to accept. Imported procedures are added
+to the draft disabled. Editors bind intents and channels, choose an internal or
+customer audience, edit steps, remove guardrails or edit the procedure as JSON,
+then save, simulate and publish through the normal release gates. Badges show
+new procedures and unpublished changes. See
+[Procedures and guardrails](../../docs/guides/procedures-and-guardrails.md).
+
 ## Knowledge management
 
 **Knowledge** creates and versions documents with source references, role access,

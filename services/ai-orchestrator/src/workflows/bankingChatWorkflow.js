@@ -7,6 +7,7 @@ const { getCheckpointer, graphThreadId } = require('../utils/checkpointer');
 const { AsyncLocalStorage } = require('async_hooks');
 const { randomUUID } = require('crypto');
 const intentMapper = require('../services/intentMapper');
+const procedureRuntime = require('../services/procedureRuntime');
 const slmDataExtractor = require('../services/poc-slm-data-extractor');
 const { formatDeterministicResponse } = require('../services/deterministicResponseFormatter');
 const { isLlmError, modelUnavailable } = require('../llm/errors');
@@ -397,10 +398,17 @@ class BankingChatWorkflow {
         };
       }
 
+      const gated = this.applyProcedureGate(state);
+      if (gated) {
+        await this.sessionManager.updateWorkflowState(state.sessionId, 'policy_procedure', { policy: gated.policyDecision.audit });
+        return { ...gated, pendingTools: tools };
+      }
+
       const policyDecision = this.policyEngine.evaluateToolExecution({
         intent: state.intent,
         tools,
-        state
+        state,
+        forceConfirmation: procedureRuntime.requiresConfirmation(intentMapper.getProcedure(state.intent))
       });
       const policyTrace = policyDecision.audit
         ? [...(state.policyTrace || []), policyDecision.audit]
@@ -512,9 +520,12 @@ class BankingChatWorkflow {
     });
 
     try {
+      const procedure = intentMapper.getProcedure(state.intent);
+      const gated = this.getToolsForState(state).length ? null : this.applyProcedureGate(state);
+      if (gated) return gated;
       if (['service_request', 'knowledge_search'].includes(intentMapper.getBaseIntent(state.intent))) {
         if (!this.genericHandler) throw new Error('Generic servicing handler unavailable');
-        const finalResponse = await this.genericHandler(state);
+        const finalResponse = this.withProcedureGuardrails(procedure, await this.genericHandler(state));
         try { await this.sessionManager.addMessage(state.sessionId, 'assistant', finalResponse.response, { intent: state.intent, citations: finalResponse.citations || [], caseId: finalResponse.caseId }); }
         catch (_error) { finalResponse.telemetryUnavailable = true; }
         return { ...state, finalResponse, currentStep: 'generate_response' };
@@ -538,8 +549,15 @@ class BankingChatWorkflow {
       // tool result. Remote generation is reserved for intents with no tool
       // path, where there is no authoritative banking payload to contradict.
       const governedLlm = intentMapper.getLlmConfig();
+      // A bound procedure instructs the assistant. Otherwise, customer-audience
+      // procedures relevant to the question ground the answer (retrieval).
+      const retrieved = !isToolBacked && !procedure
+        ? procedureRuntime.retrieve(intentMapper.getPublishedProcedures(), state.question, { channel: state.runtimeContext?.channel || state.channel || 'digital' })
+        : [];
       if (!isToolBacked && (governedLlm === undefined ? config.openai.enabled : governedLlm.enabled)) {
-        const systemMessage = new SystemMessage(intentMapper.buildSystemMessage(state.intent));
+        const systemMessage = new SystemMessage([intentMapper.buildSystemMessage(state.intent),
+          ...(procedure ? [procedureRuntime.buildGuidance(procedure)] : []),
+          ...(retrieved.length ? [procedureRuntime.buildGrounding(retrieved)] : [])].join('\n\n'));
         const userMessage = new HumanMessage(intentMapper.buildUserMessage(state.intent, context));
         const messages = [systemMessage];
 
@@ -574,6 +592,11 @@ class BankingChatWorkflow {
         }
       }
 
+      if (!generatedResponse && retrieved.length) {
+        generatedResponse = procedureRuntime.groundedAnswer(intentMapper.getPublishedProcedures(), retrieved);
+        generationSource = 'approved-procedure';
+      }
+
       if (!generatedResponse) {
         generatedResponse = formatDeterministicResponse({
           intent: intentMapper.getBaseIntent(state.intent),
@@ -595,9 +618,13 @@ class BankingChatWorkflow {
       const policyTrace = responsePolicy.audit
         ? [...(state.policyTrace || []), responsePolicy.audit]
         : state.policyTrace || [];
-      const finalResponse = responsePolicy.action === 'block'
-        ? responsePolicy.message
-        : responsePolicy.response;
+      // The bound procedure governs the answer; otherwise every procedure the
+      // answer was grounded in does.
+      const governing = procedure ? [procedure] : procedureRuntime.groundingProcedures(intentMapper.getPublishedProcedures(), retrieved);
+      const guarded = responsePolicy.action === 'block'
+        ? { response: responsePolicy.message, applied: [] }
+        : procedureRuntime.applyGoverningGuardrails(governing, responsePolicy.response);
+      const finalResponse = guarded.response;
 
       let telemetryUnavailable = state.telemetryUnavailable === true || Object.values(state.toolResults || {}).some(result => result?.telemetryUnavailable === true);
       try {
@@ -624,7 +651,10 @@ class BankingChatWorkflow {
           policy: responsePolicy.audit,
           generationSource,
           telemetryUnavailable,
-          evidenceIds: Object.values(state.toolResults || {}).map(result => result?.evidenceId).filter(Boolean)
+          evidenceIds: Object.values(state.toolResults || {}).map(result => result?.evidenceId).filter(Boolean),
+          ...(procedure ? { procedure: procedureRuntime.citation(procedure) } : {}),
+          ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}),
+          ...(retrieved.length ? { citations: procedureRuntime.citations(retrieved), retrieval: retrieved.map(({ text: _text, ...match }) => match) } : {})
         },
         currentStep: 'generate_response'
       };
@@ -732,6 +762,41 @@ class BankingChatWorkflow {
   }
 
   /**
+   * Procedure escalation/block guardrails, evaluated on the collected data
+   * before any tool runs or a response is generated.
+   */
+  applyProcedureGate(state) {
+    const procedure = intentMapper.getProcedure(state.intent);
+    const gate = procedureRuntime.evaluateGate(procedure, state.collectedData);
+    if (!gate) return null;
+    const decision = this.policyEngine.block('pre_tool', gate.code, gate.message, {
+      flags: ['procedure_guardrail'],
+      metadata: { intent: state.intent, ...gate.audit }
+    });
+    return {
+      ...state,
+      policyDecision: decision,
+      policyTrace: [...(state.policyTrace || []), decision.audit],
+      currentStep: 'policy_procedure',
+      finalResponse: {
+        type: 'policy_blocked',
+        stage: decision.stage,
+        code: decision.code,
+        message: decision.message,
+        policy: decision.audit,
+        procedure: { ...procedureRuntime.citation(procedure), guardrailId: gate.audit.guardrailId }
+      }
+    };
+  }
+
+  withProcedureGuardrails(procedure, finalResponse) {
+    if (!procedure || typeof finalResponse?.response !== 'string') return finalResponse;
+    const guarded = procedureRuntime.applyResponseGuardrails(procedure, finalResponse.response);
+    return { ...finalResponse, response: guarded.response, procedure: procedureRuntime.citation(procedure),
+      ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}) };
+  }
+
+  /**
    * Routing: After Intent Analysis
    */
   routeAfterIntent(state) {
@@ -820,7 +885,8 @@ class BankingChatWorkflow {
    * Card listing needs no card id, while block/replace also require a reason.
    */
   getRequiredDataForState(intent, collectedData = {}) {
-    const required = [...intentMapper.getRequiredData(intent)];
+    // An approved procedure can require fields the intent declares as optional.
+    const required = [...intentMapper.getRequiredData(intent), ...procedureRuntime.requiredFields(intentMapper.getProcedure(intent))];
 
     if (intentMapper.getBaseIntent(intent) === 'card_management') {
       const action = String(collectedData.cardAction || '').toLowerCase();

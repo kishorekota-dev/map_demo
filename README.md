@@ -14,7 +14,11 @@ fulfillment and release configuration.
 
 - **Servicing Studio** at `/control-plane`: author every canonical intent and
   prompt, typed custom intents, recognition policy, journeys, channels, queues,
-  knowledge and model profiles across 16 workspaces.
+  knowledge and model profiles across 17 workspaces.
+- **Procedures and guardrails**: import SOP documents into release-governed
+  procedures the assistant follows. Typed guardrails (required details,
+  confirmation, specialist handoff, prohibited wording, required disclosures) are
+  enforced in code, and customer procedures ground answers with citations.
 - **Governed changes**: immutable releases, semantic diffs, exact-content contract
   evaluations, independent approval, environment promotion, canaries and rollback.
   Active confirmation flows retain their pinned configuration.
@@ -118,6 +122,7 @@ another file. Never put credentials in public frontend runtime configuration.
 | Evaluate real model responses and gate releases | [Response quality](docs/guides/model-evaluation.md) |
 | Review current market gaps and differentiation | [Platform assessment](docs/guides/platform-gap-assessment.md) |
 | Edit prompts/intents and govern releases | [Control-plane guide](docs/guides/control-plane.md) |
+| Import SOPs the assistant follows, with enforced guardrails | [Procedures and guardrails](docs/guides/procedures-and-guardrails.md) |
 | Diagnose readiness and install a solution draft | [Platform guide](docs/guides/platform-readiness.md) |
 | Configure voice, cases, knowledge and identity | [Operations runbook](docs/guides/servicing-operations.md) |
 | Bootstrap the first operator safely | [Administrator bootstrap](docs/guides/platform-readiness.md#bootstrap-the-first-administrator) |

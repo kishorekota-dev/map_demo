@@ -91,6 +91,47 @@ export interface ServicingConfig {
     ambiguityAction: "clarify" | "human";
     synonyms: Record<string, string[]>;
   };
+  procedures?: ServicingProcedure[];
+}
+
+export type GuardrailOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in";
+type GuardrailBase = { id: string; message?: string; sourceText?: string };
+export type ProcedureGuardrail = GuardrailBase &
+  (
+    | { type: "require_fields"; fields: string[] }
+    | { type: "require_confirmation" }
+    | {
+        type: "escalate_when";
+        field: string;
+        operator: GuardrailOperator;
+        value: string | number | boolean | Array<string | number>;
+        action: "handoff" | "block";
+      }
+    | { type: "prohibited_phrases"; phrases: string[] }
+    | { type: "required_disclosure"; text: string }
+  );
+
+export interface ServicingProcedure {
+  id: string;
+  title: string;
+  source: string;
+  enabled: boolean;
+  /** internal: instructions and guardrails only. customer: may also ground customer answers. */
+  audience?: "internal" | "customer";
+  intents: string[];
+  channels: ChannelId[];
+  summary?: string;
+  steps: Array<{ id: string; instruction: string }>;
+  body?: string;
+  guardrails?: ProcedureGuardrail[];
+}
+
+export interface ProcedureImport {
+  procedure: ServicingProcedure;
+  suggestions: Array<{ guardrail: ProcedureGuardrail; sourceText: string; note?: string }>;
+  warnings: string[];
+  errors: string[];
+  replaces: boolean;
 }
 
 export interface ControlRelease {
@@ -187,6 +228,14 @@ export interface RoutingDecision {
   modelProfilesTested?: boolean;
   externalProviderExecuted?: boolean;
   scope?: string;
+  procedure?: {
+    id: string;
+    title: string;
+    source: string;
+    steps: number;
+    guardrails: Array<{ id: string; type: ProcedureGuardrail["type"] }>;
+  };
+  requiredFields?: string[];
   recognition?: {
     intent: string | null;
     confidence: number;

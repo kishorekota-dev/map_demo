@@ -35,10 +35,10 @@ function validatePackage(value) {
     || !identifier(value.manifest.id) || !text(value.manifest.name) || !text(value.manifest.description, 2000)
     || typeof value.manifest.version !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.manifest.version)
     || !object(value.configuration) || !Object.keys(value.configuration).length
-    || Object.keys(value.configuration).some(key => !['intents', 'queues', 'journeys', 'channels', 'prompts', 'recognition', 'llm'].includes(key))) {
+    || Object.keys(value.configuration).some(key => !['intents', 'queues', 'journeys', 'channels', 'prompts', 'recognition', 'llm', 'procedures'].includes(key))) {
     fail('A bounded schemaVersion 1 servicing solution package with a valid manifest is required.');
   }
-  for (const key of ['intents', 'queues', 'journeys', 'channels']) {
+  for (const key of ['intents', 'queues', 'journeys', 'channels', 'procedures']) {
     if (value.configuration[key] === undefined) continue;
     const list = value.configuration[key];
     if (!Array.isArray(list) || list.length > 200 || list.some(entry => !object(entry) || !identifier(entry.id))
@@ -51,8 +51,8 @@ function previewPackage(current, input) {
   const configuration = clone(current);
   const conflicts = [];
   for (const [key, value] of Object.entries(solution.configuration)) {
-    if (['intents', 'queues', 'journeys', 'channels'].includes(key)) {
-      const entries = new Map(configuration[key].map(entry => [entry.id, entry]));
+    if (['intents', 'queues', 'journeys', 'channels', 'procedures'].includes(key)) {
+      const entries = new Map((configuration[key] || []).map(entry => [entry.id, entry]));
       for (const entry of value) {
         if (entries.has(entry.id) && fingerprint(entries.get(entry.id)) !== fingerprint(entry)) conflicts.push(`${key}[${entry.id}]`);
         entries.set(entry.id, clone(entry));

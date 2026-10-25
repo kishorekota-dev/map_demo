@@ -49,6 +49,7 @@ function validateSnapshot(snapshot) {
       throw new Error(`Unsafe published intent configuration: ${id}`);
     }
   }
+  require('./procedureRuntime').validateProcedures(snapshot.config);
   return snapshot;
 }
 

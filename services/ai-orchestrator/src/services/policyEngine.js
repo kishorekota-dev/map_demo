@@ -113,8 +113,10 @@ class PolicyEngine {
     });
   }
 
-  evaluateToolExecution({ intent, tools = [], state = {} }) {
-    const requiresConfirmation = intentMapper.needsConfirmation(intent) || this.hasSensitiveTool(tools);
+  evaluateToolExecution({ intent, tools = [], state = {}, forceConfirmation = false }) {
+    // forceConfirmation lets an approved procedure require confirmation for an
+    // action whose intent would not otherwise ask; it can never remove one.
+    const requiresConfirmation = intentMapper.needsConfirmation(intent) || this.hasSensitiveTool(tools) || forceConfirmation === true;
     if (!this.isEnabled() && !requiresConfirmation) {
       return this.allow('pre_tool');
     }

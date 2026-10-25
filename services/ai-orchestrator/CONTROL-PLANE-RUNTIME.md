@@ -87,6 +87,8 @@ Published prompts use asynchronous request-scoped storage, so concurrent session
 * Global `prompts.recognitionSystem` for optional LLM recognition, with mandatory catalog/JSON constraints appended by code.
 * Optional plain-text `prompts.clarificationText`, `handoffText`, `unavailableText`, `dataCollectionText`, and per-intent `confirmationMessage` for their corresponding runtime responses. Confirmation wording is followed by authoritative action details and the required confirmation question.
 
+Published procedures (`config.procedures`) are validated with the snapshot and held in the same request-scoped storage. The procedure bound to the recognized intent and channel adds its required fields to data collection, can force confirmation, evaluates `escalate_when` rules on collected data before any tool or generated response (a `handoff` uses the confirmed specialist handoff; a `block` stops with its message), adds its steps to the system instructions of no-tool generation, and applies prohibited-phrase replacement and required disclosures to the final response. No-tool questions without a bound procedure, and `knowledge_search` requests without approved knowledge, retrieve enabled customer-audience procedures for the channel with deterministic BM25 and cite them; without a model the best procedure is quoted verbatim. See [Procedures and guardrails](../../docs/guides/procedures-and-guardrails.md).
+
 Tool-backed banking answers retain deterministic rendering of authoritative adapter results. Security denials, validation facts, immutable confirmation requirements, and authoritative transaction/reference facts remain code governed. These are deliberate policy boundaries, not unused editable prompts.
 
 ## Concurrency, idempotency, and uncertain outcomes

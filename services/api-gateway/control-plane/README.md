@@ -209,6 +209,7 @@ detailed results. Get a record by ID for details, or page the list with
 | PUT | `/studio/knowledge/:id` | `{revision,document}` |
 | POST | `/studio/knowledge/import` | `{revision,documents}`; 1–50 documents atomically |
 | GET | `/studio/knowledge/:id/versions` | Paginated author/release history |
+| POST | `/studio/procedures/parse` | Editor/admin. `{document:{source,content,title?,id?,intents?,channels?,audience?}}`; returns a disabled draft procedure, suggested guardrails, warnings and blocking errors. Stores nothing. |
 | GET | `/releases`, `/audit`, `/work-items` | Paginated legacy records; release lists omit config bodies |
 | POST | `/simulate` | `{channel,utterance,source?}` or existing `{channel,intent,source?}` |
 | GET | `/runtime/config` | Optional `environment` or pinned `version` query |
@@ -316,6 +317,19 @@ atomically clears the candidate while retaining the stable version. The automati
 decision, evidence counts and policy are appended to deployment/audit history.
 Healthy or insufficient samples do not change the revision. Existing pinned
 conversations remain on their release; withdrawal changes new cohort assignments.
+
+## Procedures and guardrails
+
+`config.procedures` holds the standard operating procedures the assistant follows.
+They are part of the draft and release, so diffs, validation, simulation,
+approvals, promotion, canaries, rollback and solution packages all apply. Each
+procedure binds to intents and channels (at most one enabled procedure per pair),
+lists ordered steps, and carries typed guardrails: `require_fields`,
+`require_confirmation`, `escalate_when`, `prohibited_phrases` and
+`required_disclosure`. Guardrail fields must be collected by every bound intent.
+`/simulate` reports the applied procedure and includes procedure-required fields
+in `requiredFields`. See [Procedures and guardrails](../../../docs/guides/procedures-and-guardrails.md)
+for the schema, import grammar, runtime enforcement and retrieval.
 
 ## Governed knowledge
 

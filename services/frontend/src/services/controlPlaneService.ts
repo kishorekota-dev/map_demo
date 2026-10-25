@@ -3,6 +3,7 @@ import authService from "@/services/authService";
 import type {
   ChannelId,
   ControlPlaneState,
+  ProcedureImport,
   RoutingDecision,
   ServicingConfig,
   WorkStatus,
@@ -136,6 +137,17 @@ const controlPlaneService = {
       utterance,
       source,
     }),
+  /** Parses an SOP into a disabled draft procedure; nothing is saved. */
+  parseProcedure: (document: {
+    source: string;
+    content: string;
+    title?: string;
+    id?: string;
+    intents?: string[];
+    channels?: ChannelId[];
+    audience?: "internal" | "customer";
+  }) =>
+    request<ProcedureImport>("/studio/procedures/parse", "POST", { document }),
   createWorkItem: (input: {
     revision: number;
     journeyId: string;

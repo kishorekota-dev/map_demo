@@ -8,6 +8,29 @@ const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const CARD_PATTERN = /\b(?:\d[ -]?){12,18}\d\b/;
 const SSN_PATTERN = /\b\d{3}-\d{2}-\d{4}\b/;
 
+// Shared with procedure validation: obvious sensitive values in published text.
+function sensitiveTextIssues(value) {
+  const normalized = value.normalize('NFKC');
+  return [
+    ...(EMAIL_PATTERN.test(normalized) ? ['contains an email address'] : []),
+    ...(CARD_PATTERN.test(normalized) ? ['contains a card-like number'] : []),
+    ...(SSN_PATTERN.test(normalized) ? ['contains a Social Security number pattern'] : [])
+  ];
+}
+
+// Shared with procedure validation: a source is a named reference or a safe URL.
+function sourceIssues(value) {
+  const errors = [];
+  const source = value.trim().normalize('NFKC');
+  if ([...source].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) errors.push('source contains control characters');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(source)) {
+    try { const url = new URL(source); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) errors.push('source must be a safe HTTP(S) URL or named reference'); }
+    catch { errors.push('source URL is invalid'); }
+  }
+  if (source.toLowerCase() === 'unknown') errors.push('source must not be "unknown"');
+  return errors;
+}
+
 function validateKnowledgeDocument(doc, { requireVersion = false } = {}) {
   const errors = [];
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { valid: false, errors: ['document must be an object'] };
@@ -18,26 +41,13 @@ function validateKnowledgeDocument(doc, { requireVersion = false } = {}) {
   for (const [field, max] of [['title', 200], ['source', 1000]]) if (typeof doc[field] === 'string' && doc[field].length > max) errors.push(`${field} exceeds its length limit`);
   if (doc.version !== undefined && !((typeof doc.version === 'string' && doc.version.trim() && doc.version.length <= 200) || (Number.isSafeInteger(doc.version) && doc.version > 0))) errors.push('version must be a nonempty label or positive revision when supplied');
   if (requireVersion && (!Number.isSafeInteger(doc.version) || doc.version < 1)) errors.push('answer sources require a positive internal version');
-  if (typeof doc.source === 'string') {
-    const source = doc.source.trim().normalize('NFKC');
-    if ([...source].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) errors.push('source contains control characters');
-    if (/^[a-z][a-z0-9+.-]*:/i.test(source)) {
-      try { const url = new URL(source); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) errors.push('source must be a safe HTTP(S) URL or named reference'); }
-      catch { errors.push('source URL is invalid'); }
-    }
-  }
+  if (typeof doc.source === 'string') errors.push(...sourceIssues(doc.source));
   if (typeof doc.content === 'string') {
     if (doc.content.trim().length < 20) errors.push('content must be at least 20 characters');
     if (doc.content.length > 50000) errors.push('content must be at most 50,000 characters');
   }
   for (const field of ['title', 'content', 'source']) if (typeof doc[field] === 'string') {
-    const normalized = doc[field].normalize('NFKC');
-    if (EMAIL_PATTERN.test(normalized)) errors.push(`${field} contains an email address`);
-    if (CARD_PATTERN.test(normalized)) errors.push(`${field} contains a card-like number`);
-    if (SSN_PATTERN.test(normalized)) errors.push(`${field} contains a Social Security number pattern`);
-  }
-  if (typeof doc.source === 'string' && doc.source.trim().normalize('NFKC').toLowerCase() === 'unknown') {
-    errors.push('source must not be "unknown"');
+    errors.push(...sensitiveTextIssues(doc[field]).map(issue => `${field} ${issue}`));
   }
   return { valid: errors.length === 0, errors };
 }
@@ -56,4 +66,4 @@ function validateKnowledgeBatch(docs, options) {
   return { valid: results.every((r) => r.valid), errors: results.flatMap((r) => r.errors), results };
 }
 
-module.exports = { validateKnowledgeDocument, validateKnowledgeBatch };
+module.exports = { validateKnowledgeDocument, validateKnowledgeBatch, sensitiveTextIssues, sourceIssues };

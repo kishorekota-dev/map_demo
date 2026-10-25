@@ -3,6 +3,7 @@ const { WorkflowExecution, HumanFeedback } = require('../models');
 const logger = require('../utils/logger');
 const slmDataExtractor = require('./poc-slm-data-extractor');
 const intentMapper = require('./intentMapper');
+const procedureRuntime = require('./procedureRuntime');
 const PolicyEngine = require('./policyEngine');
 const { ControlPlaneRuntime, normalizeChannel, resolvePublishedRoute, validateSnapshot } = require('./controlPlaneRuntime');
 const KeyedMutex = require('../utils/keyedMutex');
@@ -154,8 +155,13 @@ class WorkflowService {
     if (route.action === 'human') return this.routeToHuman(input, { ...route, recognition }, route.reason, snapshot.config.prompts.handoffText);
     return intentMapper.withPublishedIntents(snapshot.config.intents, async () => {
       const result = await this.processConfiguredMessage({ ...input, intent, metadata: { ...metadata, runtimeContext: route } });
-      return { ...result, intent, evidenceIds: [...(result.evidenceIds || []), ...(recognitionEvidence.id ? [recognitionEvidence.id] : [])], metadata: { ...(result.metadata || {}), ...route, recognition } };
-    }, snapshot.config.prompts, { recordUsage: this.usageRecorder(input, snapshot, channel) }, snapshot.config.llm);
+      const procedure = intentMapper.getProcedure(intent);
+      // A procedure guardrail that requires a specialist uses the same
+      // confirmed handoff as a human-fulfilled journey.
+      if (result.code === 'procedure_handoff') return this.routeToHuman(input, { ...route, recognition, procedure: result.procedure }, 'procedure_guardrail', result.message);
+      return { ...result, intent, evidenceIds: [...(result.evidenceIds || []), ...(recognitionEvidence.id ? [recognitionEvidence.id] : [])],
+        metadata: { ...(result.metadata || {}), ...route, recognition, ...(procedure ? { procedure: procedureRuntime.citation(procedure) } : {}) } };
+    }, snapshot.config.prompts, { recordUsage: this.usageRecorder(input, snapshot, channel) }, snapshot.config.llm, { procedures: snapshot.config.procedures, channel });
   }
 
   usageRecorder(input, snapshot, channel) {
@@ -230,7 +236,17 @@ class WorkflowService {
   }
 
   async executeGeneric(state) {
-    if (intentMapper.getBaseIntent(state.intent) === 'knowledge_search') return this.integrations.knowledge(state);
+    if (intentMapper.getBaseIntent(state.intent) === 'knowledge_search') {
+      const answer = await this.integrations.knowledge(state);
+      if (answer.citations?.length) return answer;
+      // No approved knowledge matched: fall back to customer-audience procedures.
+      const matches = procedureRuntime.retrieve(intentMapper.getPublishedProcedures(), state.question, { channel: state.runtimeContext?.channel || state.channel || 'digital' });
+      const grounded = matches.length ? procedureRuntime.groundedAnswer(intentMapper.getPublishedProcedures(), matches) : null;
+      if (!grounded) return answer;
+      const guarded = procedureRuntime.applyGoverningGuardrails(procedureRuntime.groundingProcedures(intentMapper.getPublishedProcedures(), matches), grounded);
+      return { ...answer, response: guarded.response, generationSource: 'approved-procedure', citations: procedureRuntime.citations(matches),
+        retrieval: matches.map(({ text: _text, ...match }) => match), ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}) };
+    }
     let servicingCase;
     try { servicingCase = await this.integrations.createCase(state); }
     catch (error) {
@@ -474,7 +490,8 @@ class WorkflowService {
         return this.finalizeWorkflowResult(sessionId, run.id, result, execution);
       });
       return snapshot ? intentMapper.withPublishedIntents(snapshot.config.intents, recover, snapshot.config.prompts,
-        { recordUsage: this.usageRecorder({ sessionId, metadata: session.metadata, authToken }, snapshot, route.channel) }, snapshot.config.llm) : recover();
+        { recordUsage: this.usageRecorder({ sessionId, metadata: session.metadata, authToken }, snapshot, route.channel) }, snapshot.config.llm,
+        { procedures: snapshot.config.procedures, channel: route.channel }) : recover();
     }));
   }
 
@@ -505,8 +522,11 @@ class WorkflowService {
     if (!['automated', 'human'].includes(route.action)) return this.controlPlaneBlock(route.reason, route);
     return intentMapper.withPublishedIntents(snapshot.config.intents, async () => {
       const result = await this.processConfiguredFeedback(input);
+      // Data supplied in this answer can satisfy a procedure escalation condition.
+      if (result.code === 'procedure_handoff') return this.routeToHuman({ ...input, userId: session.userId, metadata: session.metadata }, { ...route, procedure: result.procedure }, 'procedure_guardrail', result.message);
       return { ...result, intent: session.intent, metadata: { ...(result.metadata || {}), ...route } };
-    }, snapshot.config.prompts, { recordUsage: this.usageRecorder({ ...input, metadata: session.metadata }, snapshot, route.channel) }, snapshot.config.llm);
+    }, snapshot.config.prompts, { recordUsage: this.usageRecorder({ ...input, metadata: session.metadata }, snapshot, route.channel) }, snapshot.config.llm,
+    { procedures: snapshot.config.procedures, channel: route.channel });
   }
 
   async processConfiguredFeedback({ sessionId, response, confirmed, authToken = null }) {

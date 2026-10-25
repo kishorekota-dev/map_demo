@@ -30,6 +30,7 @@ import ModelProviderConsole from "@/components/control-plane/ModelProviderConsol
 import PlatformConsole from "@/components/control-plane/PlatformConsole";
 import AgentWorkspace from "@/components/control-plane/AgentWorkspace";
 import QualityConsole from "@/components/control-plane/QualityConsole";
+import ProcedureConsole from "@/components/control-plane/ProcedureConsole";
 
 type Section =
   | "overview"
@@ -38,6 +39,7 @@ type Section =
   | "quality"
   | "channels"
   | "intents"
+  | "procedures"
   | "models"
   | "journeys"
   | "fulfillment"
@@ -67,6 +69,11 @@ const sections: Array<{ id: Section; label: string; detail: string }> = [
   },
   { id: "channels", label: "Channels", detail: "Digital · AVA · IVR" },
   { id: "intents", label: "Intents & prompts", detail: "Conversation design" },
+  {
+    id: "procedures",
+    label: "Procedures & guardrails",
+    detail: "SOPs the assistant follows",
+  },
   {
     id: "models",
     label: "Models & providers",
@@ -1047,6 +1054,15 @@ export default function ControlPlanePage() {
             editable={editable}
             configurationDirty={dirty || rawEdited}
             onApplied={refresh}
+          />
+        )}
+
+        {section === "procedures" && (
+          <ProcedureConsole
+            config={draft}
+            published={state.published.config}
+            onChange={mutateDraft}
+            editable={editable}
           />
         )}
 

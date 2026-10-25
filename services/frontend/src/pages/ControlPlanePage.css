@@ -1585,3 +1585,88 @@
 .cp-platform-check > div { flex: 1 1 220px; min-width: 0; }
 .cp-platform-check p { margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--cp-muted, #6a7d76); }
 .cp-platform-check strong, .cp-platform-check span { overflow-wrap: anywhere; }
+
+/* Procedures & guardrails */
+.cp-procedure > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cp-procedure-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.cp-procedure-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: procedure-step;
+}
+
+/* Counters keep step numbers on flex rows, which drop list markers. */
+.cp-procedure-steps li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  counter-increment: procedure-step;
+}
+
+.cp-procedure-steps li::before {
+  content: counter(procedure-step) ".";
+  min-width: 1.5rem;
+  font-weight: 650;
+  color: #5b6d61;
+}
+
+.cp-procedure-channels legend {
+  margin-bottom: 0.35rem;
+  color: #5b6d61;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.cp-procedure-steps textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+.cp-procedure-guardrails {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cp-procedure-guardrails li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+}
+
+.cp-procedure-guardrails li > span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cp-procedure-preview {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}

@@ -6,6 +6,7 @@ const { fingerprint, ensureStudio, environmentRelease, validateSuite, enforceGat
 const { validateRolloutPolicy } = require('./rollout');
 const { semanticDiff } = require('./diff');
 const { validateKnowledgeDocument, validateKnowledgeBatch } = require('../operations/knowledgeValidation');
+const { parseProcedureDocument, resolveProcedure } = require('./procedures');
 
 function configuredModelProfiles(config, intentId) {
   const intent = config.intents.find((entry) => entry.id === intentId);
@@ -29,7 +30,10 @@ function simulateUtterance(config, input, version, previousIntent = null) {
     : { channel, intent: null, version, action: config.recognition?.ambiguityAction || 'clarify', reason: recognition.reason, journeyId: null, queue: config.channels.find((entry) => entry.id === channel)?.queue || null, slaMinutes: null, timeoutSeconds: null };
   if (!config.channels.find((entry) => entry.id === channel)?.enabled) { route.action = 'disabled'; route.reason = 'channel_disabled'; }
   const intent = config.intents.find((entry) => entry.id === recognition.intent);
-  return { ...route, recognition, tools: route.action === 'automated' ? intent?.tools || [] : [], requiredFields: intent?.requiredData || [], scope: 'contract_simulation', externalProviderExecuted: false, modelProfilesTested: false, configuredModelProfiles: configuredModelProfiles(config, recognition.intent) };
+  const procedure = route.action === 'automated' && recognition.intent ? resolveProcedure(config, { intent: recognition.intent, channel }) : null;
+  const procedureFields = (procedure?.guardrails || []).filter((guardrail) => guardrail.type === 'require_fields').flatMap((guardrail) => guardrail.fields);
+  return { ...route, recognition, tools: route.action === 'automated' ? intent?.tools || [] : [], requiredFields: [...new Set([...(intent?.requiredData || []), ...procedureFields])], scope: 'contract_simulation', externalProviderExecuted: false, modelProfilesTested: false, configuredModelProfiles: configuredModelProfiles(config, recognition.intent),
+    ...(procedure ? { procedure: { id: procedure.id, title: procedure.title, source: procedure.source, steps: procedure.steps.length, guardrails: (procedure.guardrails || []).map(({ id, type }) => ({ id, type })) } } : {}) };
 }
 
 function runSuite(definition, config, version) {
@@ -182,6 +186,12 @@ function attachStudioRoutes({ router, store, route, authorize }) {
     res.json(await mutate(req, 'studio.knowledge.imported', async (next, records) => {
       for (const document of documents) await saveDocument(records, document, req.controlPlane.actor);
     }, { count: documents.length }));
+  }));
+  // Converts an SOP document into a disabled draft procedure with suggested
+  // guardrails. Nothing is stored; authors review it and save it into the draft.
+  router.post('/studio/procedures/parse', authorize('canEdit'), route(async (req, res) => {
+    try { res.json(parseProcedureDocument(req.body?.document, (await store.read()).draft)); }
+    catch (error) { if (error.status === 400) throw new ControlPlaneError(400, error.message); throw error; }
   }));
   router.get('/studio/knowledge/:id/versions', authorize('canView'), route(async (req, res) => res.json(await store.listRecords('knowledge_versions', { ...pageParameters(req.query), filters: { documentId: req.params.id } }))));
   router.post('/runtime/knowledge/search', route(async (req, res) => {

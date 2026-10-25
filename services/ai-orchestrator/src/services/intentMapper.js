@@ -9,6 +9,7 @@ const intentConfig = require('../../config/intentConfig');
 const logger = require('../utils/logger');
 const { AsyncLocalStorage } = require('async_hooks');
 const recordProviderUsage = require('./providerUsage');
+const { resolveProcedure } = require('./procedureRuntime');
 const publishedIntents = new AsyncLocalStorage();
 
 // Import prompt templates by category
@@ -32,14 +33,21 @@ const ALL_PROMPTS = {
  * Provides methods for intent-based prompt selection and configuration
  */
 class IntentMapper {
-  withPublishedIntents(intents, callback, prompts = {}, hooks = {}, llm = undefined) {
+  withPublishedIntents(intents, callback, prompts = {}, hooks = {}, llm = undefined, { procedures = [], channel = 'digital' } = {}) {
     // Each asynchronous workflow receives an isolated immutable snapshot.
     // Neither the singleton nor the canonical configuration is mutated.
     return publishedIntents.run({ intents: new Map(intents.map(entry => [entry.id, structuredClone(entry)])), prompts: structuredClone(prompts), hooks,
-      llm: llm === undefined ? undefined : structuredClone(llm) }, callback);
+      llm: llm === undefined ? undefined : structuredClone(llm), procedures: structuredClone(procedures || []), channel }, callback);
   }
 
   getLlmConfig() { return publishedIntents.getStore()?.llm; }
+
+  getPublishedProcedures() { return publishedIntents.getStore()?.procedures || []; }
+
+  // The enabled procedure the pinned release binds to this intent and channel.
+  getProcedure(intent, channel = publishedIntents.getStore()?.channel) {
+    return resolveProcedure(this.getPublishedProcedures(), intent, channel);
+  }
 
   generateForTask(task, intent, input) {
     return require('../llm/profiles').generateWithProfile(this.getLlmConfig(), task, this.getPublishedIntent(intent), input,

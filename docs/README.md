@@ -23,6 +23,7 @@ executable migration scripts resolve conflicts with old implementation reports.
 | System boundaries and data flow | [Architecture overview](architecture/overview.md) |
 | Deterministic banking contracts and model limits | [Determinism](architecture/determinism.md) |
 | Prompt/intent/channel authoring and release governance | [Control plane](guides/control-plane.md) |
+| SOP import, procedure retrieval and enforced guardrails | [Procedures and guardrails](guides/procedures-and-guardrails.md) |
 | Continue an owned conversation across Digital, AVA and IVR | [Channel switching](guides/channel-switching.md) |
 | Operator workflows and permissions | [Studio guide](../services/frontend/OPERATIONS-CONSOLE.md) |
 | Fulfillment, OIDC, evidence, privacy and recovery | [Operations runbook](guides/servicing-operations.md) |

@@ -92,7 +92,7 @@ function validateConfig(config) {
     for (const key of Object.keys(value)) if (!allowed.includes(key)) errors.push(`${path}.${key} is not supported.`);
     return true;
   };
-  fields(config, ['channels', 'journeys', 'queues', 'intents', 'prompts', 'recognition', 'llm'], 'config');
+  fields(config, ['channels', 'journeys', 'queues', 'intents', 'prompts', 'recognition', 'llm', 'procedures'], 'config');
   errors.push(...validateLlmConfig(config.llm, config.intents, config.recognition));
   if (config.recognition !== undefined && fields(config.recognition, ['strategy', 'confidenceThreshold', 'ambiguityMargin', 'ambiguityAction', 'synonyms'], 'recognition')) {
     const settings = config.recognition;
@@ -210,6 +210,8 @@ function validateConfig(config) {
     }
     journeyIds.add(journey.id);
   });
+  // Required lazily: procedures.js builds on the helpers exported below.
+  errors.push(...require('./procedures').validateProcedures(config));
   return errors;
 }
 
