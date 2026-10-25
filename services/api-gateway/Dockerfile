@@ -14,7 +14,11 @@ RUN npm ci --omit=dev
 COPY . .
 
 # Create logs directory
-RUN mkdir -p logs && chown node:node logs
+# logs and the file-mode control-plane store (data/) are the only writable paths
+RUN mkdir -p logs data && chown node:node logs data
+
+# Run as the image's unprivileged user
+USER node
 
 # Expose port
 EXPOSE 3001

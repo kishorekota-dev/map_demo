@@ -22,7 +22,7 @@ Root `db:migrate` and `db:seed` do not use the wrapper themselves:
 ./scripts/run-with-env.sh npm run db:seed
 ```
 
-`db:setup` uses the same safe environment loader, stops on migration failure and rejects production mode; it is a local convenience bootstrap, not an enterprise migration runner. `npm run validate` checks toolchain and basic environment structure, not complete production readiness. To select another file for that validator use `npm run validate -- /absolute/path/deployment.env`.
+`db:setup` uses the same safe environment loader, stops on migration failure and rejects production mode; it is a local convenience bootstrap, not an enterprise migration runner. `npm run validate` checks toolchain and basic environment structure, not complete production readiness. It also runs after `npm install`/`npm ci` as an advisory check: findings are printed but do not fail the install, because secrets are normally injected after dependencies are installed. To select another file for that validator use `npm run validate -- /absolute/path/deployment.env`.
 
 Compose receives only variables referenced in its `environment`/interpolation definitions. A variable present in the host file is not automatically passed into a container. Validate without dumping resolved secrets:
 

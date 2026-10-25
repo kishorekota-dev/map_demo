@@ -16,6 +16,9 @@ COPY . .
 # Create logs directory
 RUN mkdir -p logs && chown node:node logs
 
+# Run as the image's unprivileged user
+USER node
+
 # Expose port
 EXPOSE 8081
 

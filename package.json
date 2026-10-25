@@ -61,7 +61,7 @@
     "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "validate": "bash ./scripts/validate-env.sh",
-    "postinstall": "npm run validate",
+    "postinstall": "npm run validate || echo 'Dependencies are installed. Environment validation reported the issues above; configure them, then run npm run validate.'",
     "platform:bootstrap": "./scripts/run-with-env.sh node services/banking-service/database/scripts/bootstrap-admin.js",
     "docker:production": "node deployment-scripts/production-preflight.cjs --env \"${APP_ENV_FILE:?Set APP_ENV_FILE to your completed production environment file}\" --compose && ./scripts/run-with-env.sh docker compose -f docker/docker-compose-full-stack.yml -f docker/docker-compose.production.yml up -d --build",
     "docs:check": "node deployment-scripts/check-doc-links.cjs"

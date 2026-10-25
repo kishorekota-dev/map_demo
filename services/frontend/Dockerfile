@@ -50,6 +50,9 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
+# Run as the image's unprivileged user
+USER node
+
 EXPOSE 3000
 
 CMD ["./node_modules/.bin/serve", "-s", "dist", "-l", "3000"]

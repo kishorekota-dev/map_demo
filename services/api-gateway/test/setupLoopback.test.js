@@ -3,6 +3,8 @@ const express = require('express');
 const request = require('supertest');
 const listen = (server, host) => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, host, resolve); });
 const close = server => new Promise(resolve => server.close(resolve));
+// Containers without IPv6 cannot bind ::1; the IPv6 isolation case is then skipped, not passed.
+const hasIpv6Loopback = Object.values(require('os').networkInterfaces()).flat().some(entry => entry?.internal && entry.family === 'IPv6' && entry.address === '::1');
 
 test('automatic fixtures bind the exact loopback the client uses and close afterward', async () => {
   let boundAddress;
@@ -31,7 +33,7 @@ test('explicitly listening servers retain ownership and stay open after the requ
   } finally { await close(server); }
 });
 
-test('an IPv6-specific listener on the same port cannot receive automatic fixture requests', async () => {
+(hasIpv6Loopback ? test : test.skip)('an IPv6-specific listener on the same port cannot receive automatic fixture requests', async () => {
   const other = http.createServer((_req, res) => res.end('unrelated-listener'));
   await listen(other, '::1');
   const fixture = http.createServer((_req, res) => res.end('owned-fixture'));

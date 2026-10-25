@@ -19,6 +19,9 @@ RUN mkdir -p logs && chown node:node logs
 # Create credentials directory
 RUN mkdir -p credentials
 
+# Run as the image's unprivileged user
+USER node
+
 # Expose port
 EXPOSE 3003
 

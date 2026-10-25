@@ -23,7 +23,7 @@ npm run docker:up
 npm run health
 ```
 
-Use `npm run docker:logs` and `npm run docker:down` for this same stack. Named PostgreSQL/Redis volumes survive `down`. Both supported base Compose files expose the standard development ports: frontend 3000, gateway 3001, NLU 3003, MCP 3004, banking 3005, chat 3006, orchestrator 3007, agent UI 8081, PostgreSQL 5432 and Redis 6379. The production overlay removes internal host ports. Application containers run as non-root users with dropped capabilities; provision mounted secrets/configuration so the intended container user can read them, without making credentials public.
+Use `npm run docker:logs` and `npm run docker:down` for this same stack. Named PostgreSQL/Redis volumes survive `down`. Both supported base Compose files expose the standard development ports: frontend 3000, gateway 3001, NLU 3003, MCP 3004, banking 3005, chat 3006, orchestrator 3007, agent UI 8081, PostgreSQL 5432 and Redis 6379. The production overlay removes internal host ports. Application containers run as non-root users with dropped capabilities; provision mounted secrets/configuration so the intended container user can read them, without making credentials public. Every application image also defaults to its unprivileged user (`node`, or `nodejs` for the orchestrator), so orchestrators other than Compose, such as Kubernetes, do not run them as root. Writable paths are limited to `logs/` and, for the gateway's file-mode control plane, `data/`; mount persistent volumes with matching ownership.
 
 ## Dedicated production deployment
 

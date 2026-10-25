@@ -130,6 +130,25 @@ jobs:
       - name: Verify current documentation links
         run: node deployment-scripts/check-doc-links.cjs
 
+  workspace-quality:
+    name: lint and build from the workspace install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The documented developer path: one root install for all workspaces. It
+      # also proves the root lockfile carries the Linux build-tool binaries.
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Lint every workspace
+        run: npm run lint
+      - name: Build the frontend from the workspace install
+        run: npm run build:frontend
+      - name: Validate the example enterprise profile
+        run: npm run product:validate
+
   dependency-audit:
     name: audit workspace and frontend runtime locks
     runs-on: ubuntu-latest
