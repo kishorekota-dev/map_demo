@@ -52,3 +52,35 @@ describe('resource ownership middleware', () => {
     expect(req.ownedTransaction).toBe(transaction);
   });
 });
+
+describe('transfer actions', () => {
+  const { verifyTransferOwnership, verifyTransferOriginator } = require('../auth');
+  const transfer = { transfer_id: 'transfer-1', from_user_id: 'sender', to_user_id: 'recipient' };
+
+  test('lets the recipient read a transfer sent to them', async () => {
+    repositories.TransferRepository.findById.mockResolvedValue(transfer);
+    const req = { params: { transferId: 'transfer-1' }, user: { userId: 'recipient', role: 'customer' } };
+    const next = jest.fn();
+    await verifyTransferOwnership(req, makeResponse(), next);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  test('blocks the recipient from cancelling the sender transfer', async () => {
+    repositories.TransferRepository.findById.mockResolvedValue(transfer);
+    const req = { params: { transferId: 'transfer-1' }, user: { userId: 'recipient', role: 'customer' } };
+    const res = makeResponse();
+    const next = jest.fn();
+    await verifyTransferOriginator(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('allows the sender to cancel', async () => {
+    repositories.TransferRepository.findById.mockResolvedValue(transfer);
+    const req = { params: { transferId: 'transfer-1' }, user: { userId: 'sender', role: 'customer' } };
+    const next = jest.fn();
+    await verifyTransferOriginator(req, makeResponse(), next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.ownedTransfer).toBe(transfer);
+  });
+});

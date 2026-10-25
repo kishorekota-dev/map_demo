@@ -77,8 +77,9 @@ const schemas = {
   }),
 
   updateAccount: Joi.object({
-    nickname: Joi.string().max(50).trim(),
-    status: Joi.string().valid('active', 'inactive', 'frozen', 'closed'),
+    nickname: Joi.string().min(1).max(50).trim(),
+    // Mirrors the accounts.status CHECK constraint.
+    status: Joi.string().valid('active', 'pending', 'frozen', 'closed'),
     metadata: Joi.object()
   }),
 

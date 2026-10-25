@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { createHash } = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../database');
 const { authenticateToken } = require('../middleware/auth');
@@ -11,6 +12,20 @@ const router = express.Router();
 const JWT_SECRET = require('../config').security.jwtSecret;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+
+// Consecutive failed passwords before a temporary lock. The counter resets when
+// the lock is applied and on every successful sign-in.
+const positiveInt = (value, fallback) => (Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
+const MAX_FAILED_LOGINS = positiveInt(process.env.AUTH_MAX_FAILED_ATTEMPTS, 5);
+const LOCKOUT_MINUTES = positiveInt(process.env.AUTH_LOCKOUT_MINUTES, 15);
+
+// Unknown usernames still pay for one bcrypt comparison (cost 12, like real
+// accounts), so response timing does not reveal which usernames exist.
+const TIMING_EQUALIZER_HASH = '$2a$12$TPza3BzlliaOZDdukJtIqey6RPcLB2lSX0lQ1AWrcZKawCDPKLXva';
+
+// Refresh tokens are stored as digests. The raw value is still matched so rows
+// written before digests were introduced remain valid until they expire.
+const refreshTokenDigest = (token) => `sha256:${createHash('sha256').update(token).digest('hex')}`;
 
 // Helper function to generate access token
 const generateAccessToken = (user, permissions, roles = []) => {
@@ -58,6 +73,7 @@ const getUserPermissions = async (userId) => {
     WHERE u.user_id = $1
       AND u.is_active = TRUE
       AND NOT u.is_locked
+      AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
   `;
   
   const result = await db.query(query, [userId]);
@@ -71,6 +87,7 @@ const getUserRoles = async (userId) => {
     FROM user_roles ur
     JOIN roles r ON ur.role_id = r.id
     WHERE ur.user_id = $1
+      AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
   `;
   
   const result = await db.query(query, [userId]);
@@ -105,7 +122,8 @@ router.post('/login', async (req, res) => {
   
   try {
     // Validation
-    if (!username || !password) {
+    if (typeof username !== 'string' || typeof password !== 'string' || !username || !password
+      || username.length > 255 || password.length > 1024) {
       return res.status(400).json({
         status: 'error',
         error: {
@@ -131,6 +149,7 @@ router.post('/login', async (req, res) => {
     const userResult = await db.query(userQuery, [username]);
 
     if (userResult.rows.length === 0) {
+      await bcrypt.compare(password, TIMING_EQUALIZER_HASH);
       await createAuditLog(
         null,
         'login_failed',
@@ -155,6 +174,69 @@ router.post('/login', async (req, res) => {
     }
 
     const user = userResult.rows[0];
+
+    // A temporary lock is reported without evaluating the password, so a
+    // locked account cannot be used as a password-guessing oracle.
+    if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+      await createAuditLog(
+        user.user_id,
+        'login_failed',
+        'authentication',
+        { username, reason: 'temporarily_locked' },
+        ipAddress,
+        'failure',
+        'Account temporarily locked'
+      );
+
+      res.set('Retry-After', String(Math.max(1, Math.ceil((new Date(user.locked_until).getTime() - Date.now()) / 1000))));
+      return res.status(429).json({
+        status: 'error',
+        error: {
+          code: 'ACCOUNT_TEMPORARILY_LOCKED',
+          message: 'Too many failed sign-in attempts. Please try again later.'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
+
+    // Verify the password before disclosing any other account state.
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!passwordMatch) {
+      // Count the failure and apply a temporary lock atomically.
+      await db.query(
+        `UPDATE users SET
+           failed_login_attempts = CASE WHEN COALESCE(failed_login_attempts, 0) + 1 >= $2 THEN 0 ELSE COALESCE(failed_login_attempts, 0) + 1 END,
+           locked_until = CASE WHEN COALESCE(failed_login_attempts, 0) + 1 >= $2 THEN NOW() + ($3 * INTERVAL '1 minute') ELSE locked_until END
+         WHERE user_id = $1`,
+        [user.user_id, MAX_FAILED_LOGINS, LOCKOUT_MINUTES]
+      );
+
+      await createAuditLog(
+        user.user_id,
+        'login_failed',
+        'authentication',
+        { username, reason: 'invalid_password' },
+        ipAddress,
+        'failure',
+        'Invalid password'
+      );
+
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid username or password'
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          correlationId: uuidv4()
+        }
+      });
+    }
 
     // Check if user is active
     if (!user.is_active) {
@@ -181,7 +263,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Check if account is locked
+    // Check if an administrator has locked the account
     if (user.is_locked) {
       await createAuditLog(
         user.user_id,
@@ -197,40 +279,7 @@ router.post('/login', async (req, res) => {
         status: 'error',
         error: {
           code: 'ACCOUNT_LOCKED',
-          message: 'Account is locked due to multiple failed login attempts. Please contact support.'
-        },
-        metadata: {
-          timestamp: new Date().toISOString(),
-          correlationId: uuidv4()
-        }
-      });
-    }
-
-    // Verify password
-    const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!passwordMatch) {
-      // Increment failed login attempts
-      await db.query(
-        'UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE user_id = $1',
-        [user.user_id]
-      );
-
-      await createAuditLog(
-        user.user_id,
-        'login_failed',
-        'authentication',
-        { username, reason: 'invalid_password' },
-        ipAddress,
-        'failure',
-        'Invalid password'
-      );
-
-      return res.status(401).json({
-        status: 'error',
-        error: {
-          code: 'INVALID_CREDENTIALS',
-          message: 'Invalid username or password'
+          message: 'Account is locked. Please contact support.'
         },
         metadata: {
           timestamp: new Date().toISOString(),
@@ -247,18 +296,19 @@ router.post('/login', async (req, res) => {
     const accessToken = generateAccessToken(user, permissions, roles);
     const refreshToken = generateRefreshToken(user);
 
-    // Store refresh token in database
+    // Store a digest of the refresh token; its expiry matches the signed token.
     await db.query(
       `INSERT INTO refresh_tokens (user_id, token, expires_at, created_by_ip)
-       VALUES ($1, $2, NOW() + INTERVAL '7 days', $3)`,
-      [user.user_id, refreshToken, ipAddress]
+       VALUES ($1, $2, to_timestamp($3), $4)`,
+      [user.user_id, refreshTokenDigest(refreshToken), jwt.decode(refreshToken).exp, ipAddress]
     );
 
     // Update user last login
     await db.query(
       `UPDATE users 
        SET last_login_at = NOW(), 
-           failed_login_attempts = 0
+           failed_login_attempts = 0,
+           locked_until = NULL
        WHERE user_id = $1`,
       [user.user_id]
     );
@@ -345,7 +395,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Verify refresh token
-    const decoded = jwt.verify(refreshToken, JWT_SECRET);
+    const decoded = jwt.verify(refreshToken, JWT_SECRET, { algorithms: ['HS256'] });
 
     if (decoded.type !== 'refresh' || decoded.purpose === 'quality_evaluation' || [decoded.aud].flat().includes('servicing-quality')) {
       return res.status(401).json({
@@ -364,10 +414,10 @@ router.post('/refresh', async (req, res) => {
     // Check if refresh token exists and is not revoked
     const tokenQuery = `
       SELECT * FROM refresh_tokens 
-      WHERE token = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+      WHERE token IN ($1, $3) AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
     `;
     
-    const tokenResult = await db.query(tokenQuery, [refreshToken, decoded.userId]);
+    const tokenResult = await db.query(tokenQuery, [refreshTokenDigest(refreshToken), decoded.userId, refreshToken]);
 
     if (tokenResult.rows.length === 0) {
       return res.status(401).json({
@@ -475,7 +525,7 @@ router.post('/logout', authenticateToken, async (req, res) => {
   const { refreshToken } = req.body;
 
   try {
-    if (!refreshToken) {
+    if (!refreshToken || typeof refreshToken !== 'string') {
       return res.status(400).json({
         status: 'error',
         error: {
@@ -491,8 +541,8 @@ router.post('/logout', authenticateToken, async (req, res) => {
 
     // Revoke the refresh token
     await db.query(
-      'UPDATE refresh_tokens SET revoked_at = NOW() WHERE token = $1 AND user_id = $2',
-      [refreshToken, req.user.userId]
+      'UPDATE refresh_tokens SET revoked_at = NOW() WHERE token IN ($1, $3) AND user_id = $2',
+      [refreshTokenDigest(refreshToken), req.user.userId, refreshToken]
     );
 
     // Log logout

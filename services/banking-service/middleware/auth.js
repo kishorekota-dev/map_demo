@@ -56,7 +56,10 @@ const authenticateToken = (req, res, next) => {
         errorResponse.message = 'Token verification failed';
       }
 
-      return res.status(403).json(errorResponse);
+      // RFC 6750: an invalid or expired bearer token is an authentication
+      // failure (401), which lets clients refresh. Scope denials remain 403.
+      res.set('WWW-Authenticate', 'Bearer error="invalid_token"');
+      return res.status(401).json(errorResponse);
     }
 
     if (decoded.purpose === 'quality_evaluation' || [decoded.aud].flat().includes('servicing-quality')) {
@@ -347,6 +350,17 @@ const verifyTransferOwnership = createResourceOwnershipVerifier({
   attachAs: 'ownedTransfer'
 });
 
+// Both parties may read a transfer, but only the sender may act on it.
+const verifyTransferOriginator = createResourceOwnershipVerifier({
+  resourceName: 'Transfer',
+  getId: (req) => req.params?.transferId,
+  resolve: async (transferId) => {
+    const transfer = await TransferRepository.findById(transferId);
+    return transfer ? { resource: transfer, ownerIds: [transfer.from_user_id] } : null;
+  },
+  attachAs: 'ownedTransfer'
+});
+
 const verifyFraudAlertOwnership = createResourceOwnershipVerifier({
   resourceName: 'Fraud alert',
   getId: (req) => req.params?.alertId,
@@ -378,6 +392,7 @@ module.exports = {
   verifyCardOwnership,
   verifyOptionalCardOwnership,
   verifyTransferOwnership,
+  verifyTransferOriginator,
   verifyFraudAlertOwnership,
   verifyDisputeOwnership
 };

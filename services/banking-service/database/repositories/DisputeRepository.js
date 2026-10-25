@@ -128,7 +128,7 @@ class DisputeRepository {
         resolution_notes = COALESCE($9, resolution_notes),
         description = COALESCE($10, description),
         amount_disputed = COALESCE($11, amount_disputed),
-        resolved_at = $12,
+        resolved_at = COALESCE($12, resolved_at),
         updated_at = CURRENT_TIMESTAMP
       WHERE dispute_id = $1
       RETURNING *

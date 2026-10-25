@@ -1,6 +1,13 @@
 const { DisputeRepository, TransactionRepository, AccountRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
 
+// Statuses after which a dispute is decided; only staff may change them further.
+const TERMINAL_STATUSES = new Set(['resolved_in_favor', 'resolved_against', 'partially_resolved', 'withdrawn']);
+const CUSTOMER_EDITABLE_FIELDS = new Set(['description', 'reason', 'amountDisputed']);
+
+const exceedsTransaction = (transaction, amount) =>
+  amount !== undefined && transaction && Number(amount) > Math.abs(Number(transaction.amount));
+
 class DisputeController {
   async getAllDisputes(req, res, next) {
     try {
@@ -45,6 +52,10 @@ class DisputeController {
         return res.status(404).json({ success: false, error: 'Transaction account not found' });
       }
 
+      if (exceedsTransaction(transaction, req.body.amountDisputed)) {
+        return res.status(400).json({ success: false, error: 'Disputed amount cannot exceed the transaction amount', code: 'DISPUTE_AMOUNT_EXCEEDS_TRANSACTION' });
+      }
+
       const disputeData = {
         ...req.body,
         userId,
@@ -71,6 +82,24 @@ class DisputeController {
       const { disputeId } = req.params;
       const updateData = req.body;
 
+      // Customers may correct the details of an open dispute. Status, resolution
+      // and refunds are decided by staff through the resolve endpoint.
+      if (req.user?.role !== 'admin') {
+        const forbidden = Object.keys(updateData).filter(field => !CUSTOMER_EDITABLE_FIELDS.has(field));
+        if (forbidden.length) {
+          return res.status(403).json({ success: false, error: 'Dispute status and resolution are managed by the bank', code: 'DISPUTE_FIELD_FORBIDDEN', fields: forbidden });
+        }
+        if (TERMINAL_STATUSES.has(req.ownedDispute?.status)) {
+          return res.status(409).json({ success: false, error: 'A decided dispute cannot be changed', code: 'DISPUTE_CLOSED' });
+        }
+        if (updateData.amountDisputed !== undefined && req.ownedDispute) {
+          const transaction = await TransactionRepository.findById(req.ownedDispute.transaction_id);
+          if (exceedsTransaction(transaction, updateData.amountDisputed)) {
+            return res.status(400).json({ success: false, error: 'Disputed amount cannot exceed the transaction amount', code: 'DISPUTE_AMOUNT_EXCEEDS_TRANSACTION' });
+          }
+        }
+      }
+
       const dispute = await DisputeRepository.update(disputeId, updateData);
 
       if (!dispute) {
@@ -90,6 +119,14 @@ class DisputeController {
     try {
       const { disputeId } = req.params;
       const { resolution, refundAmount, notes } = req.body;
+
+      const existing = await DisputeRepository.findById(disputeId);
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Dispute not found' });
+      }
+      if (TERMINAL_STATUSES.has(existing.status)) {
+        return res.status(409).json({ success: false, error: 'Dispute has already been decided', code: 'DISPUTE_CLOSED' });
+      }
 
       let dispute;
       if (resolution === 'in_favor') {
@@ -113,6 +150,10 @@ class DisputeController {
     try {
       const { disputeId } = req.params;
       const { reason } = req.body;
+
+      if (TERMINAL_STATUSES.has(req.ownedDispute?.status)) {
+        return res.status(409).json({ success: false, error: 'A decided dispute cannot be withdrawn', code: 'DISPUTE_CLOSED' });
+      }
 
       const dispute = await DisputeRepository.withdraw(disputeId, reason);
 

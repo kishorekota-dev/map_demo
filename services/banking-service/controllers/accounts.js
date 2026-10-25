@@ -1,6 +1,13 @@
 const { AccountRepository, TransactionRepository } = require('../database/repositories');
 const logger = require('../utils/logger');
 
+// Opening balances, credit terms and limits create or move money, so only bank
+// staff and trusted services may set them. Customers open accounts at zero and
+// fund them through a confirmed transfer.
+const PRIVILEGED_ROLES = new Set(['admin', 'service']);
+const STAFF_ONLY_CREATE_FIELDS = ['creditLimit', 'interestRate', 'dailyTransactionLimit', 'monthlyTransactionLimit'];
+const isPrivileged = (req) => PRIVILEGED_ROLES.has(req.user?.role);
+
 class AccountController {
   // Get all accounts for authenticated user
   async getAllAccounts(req, res, next) {
@@ -65,6 +72,20 @@ class AccountController {
         monthlyTransactionLimit
       } = req.body;
 
+      if (!isPrivileged(req)) {
+        const forbidden = STAFF_ONLY_CREATE_FIELDS.filter(field => req.body[field] !== undefined);
+        if (Number(initialBalance || 0) !== 0) forbidden.unshift('initialBalance');
+        if (forbidden.length) {
+          logger.warn('Customer attempted to set staff-only account fields', { userId, fields: forbidden });
+          return res.status(403).json({
+            success: false,
+            error: 'Opening balances, credit terms and limits are set by the bank',
+            code: 'ACCOUNT_FIELD_FORBIDDEN',
+            fields: forbidden
+          });
+        }
+      }
+
       const accountData = {
         userId,
         accountType,
@@ -96,9 +117,19 @@ class AccountController {
   async updateAccount(req, res, next) {
     try {
       const { accountId } = req.params;
-      const updateData = req.body;
+      const { nickname, status } = req.body;
 
-      const account = await AccountRepository.update(accountId, updateData);
+      // Status changes bypass the freeze workflow and the zero-balance close
+      // check, so customers may only rename. Closing always uses DELETE.
+      if (status !== undefined && (!isPrivileged(req) || status === 'closed')) {
+        return res.status(403).json({
+          success: false,
+          error: status === 'closed' ? 'Close accounts through the close endpoint' : 'Account status is managed by the bank',
+          code: 'ACCOUNT_STATUS_FORBIDDEN'
+        });
+      }
+
+      const account = await AccountRepository.update(accountId, { accountName: nickname, status });
 
       if (!account) {
         return res.status(404).json({

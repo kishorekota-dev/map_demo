@@ -19,3 +19,19 @@ test.each([
   const ordinary = jwt.sign({ userId: 'customer', type: 'access' }, 'synthetic-banking-token-scope-secret');
   await request(app).get('/accounts').set('Authorization', `Bearer ${ordinary}`).expect(200);
 });
+
+test.each([
+  ['expired', () => jwt.sign({ userId: 'customer', type: 'access', exp: Math.floor(Date.now() / 1000) - 60 }, 'synthetic-banking-token-scope-secret'), 'TOKEN_EXPIRED'],
+  ['forged', () => jwt.sign({ userId: 'customer', type: 'access' }, 'another-secret'), 'MALFORMED_TOKEN'],
+])('an %s bearer token is a 401 so clients can refresh', async (_label, token, code) => {
+  const app = express(); app.get('/accounts', authenticateToken, (_req, res) => res.json({}));
+  const result = await request(app).get('/accounts').set('Authorization', `Bearer ${token()}`).expect(401);
+  expect(result.body.code).toBe(code);
+  expect(result.headers['www-authenticate']).toBe('Bearer error="invalid_token"');
+});
+
+test('a refresh token cannot authenticate banking requests', async () => {
+  const app = express(); app.get('/accounts', authenticateToken, (_req, res) => res.json({}));
+  const refresh = jwt.sign({ userId: 'customer', type: 'refresh' }, 'synthetic-banking-token-scope-secret');
+  await request(app).get('/accounts').set('Authorization', `Bearer ${refresh}`).expect(403);
+});

@@ -13,17 +13,56 @@ the deployment tenant in the token come from trusted server/database state, not
 request-supplied role fields. `POST /auth/refresh` accepts `{ "refreshToken": "..." }`
 and re-reads current roles. `/auth/me` and `/auth/logout` require authentication.
 
-Send `Authorization: Bearer <access-token>` on protected calls. The current
-middleware rejects missing, invalid or expired access tokens with 401; role and
-ownership denials use 403. Clients must inspect the returned error as well as status.
+Send `Authorization: Bearer <access-token>` on protected calls. Missing, invalid,
+forged or expired access tokens return 401 with `WWW-Authenticate: Bearer
+error="invalid_token"`, so clients can refresh and retry. Tokens that are valid but
+out of scope (refresh tokens, evaluation delegations, another tenant) and role or
+ownership denials return 403. Clients must inspect the returned error as well as status.
 Individual routes apply ownership, validation, rate limits, and administrative
 checks. Do not assume every signed role is a banking administrator.
 
 Every environment requires an explicit JWT key shared by signing and verification;
 production additionally requires a non-placeholder key of at least 32 characters.
-Access JWT expiry defaults to `15m`, refresh JWT expiry to `7d`.
-The current persisted refresh-token expiry is also written as seven days, so
-changing only the refresh-JWT setting does not change that database retention.
+Access JWT expiry defaults to `15m`, refresh JWT expiry to `7d`. The persisted
+refresh-token expiry is taken from the signed token, so `REFRESH_TOKEN_EXPIRES_IN`
+controls both. Refresh tokens are stored as SHA-256 digests; rows written before
+digests were introduced still match until they expire.
+
+### Sign-in protection
+
+- Username and password must be strings (username up to 255 characters, password
+  up to 1024); other shapes return 400 before any lookup.
+- An unknown username performs the same bcrypt comparison as a real account and
+  returns the same `INVALID_CREDENTIALS` 401, so timing and responses do not reveal
+  which usernames exist. `ACCOUNT_INACTIVE` and `ACCOUNT_LOCKED` (administrative
+  lock) are disclosed only after the correct password is supplied.
+- `AUTH_MAX_FAILED_ATTEMPTS` (default 5) consecutive wrong passwords set
+  `users.locked_until` to now plus `AUTH_LOCKOUT_MINUTES` (default 15). While the
+  lock is active, sign-in returns 429 `ACCOUNT_TEMPORARILY_LOCKED` with
+  `Retry-After` and the password is not evaluated. A successful sign-in clears the
+  counter and the lock. The lock is per account, so it also protects logins that
+  reach banking through the chat backend from a single network address.
+- Role assignments whose `user_roles.expires_at` has passed grant neither roles nor
+  permissions at sign-in, refresh or `/auth/me`.
+
+### Customer and staff boundaries
+
+The banking service enforces these rules itself, so they hold for direct calls,
+MCP tools and any future integration:
+
+| Operation | Customer (owner) | Staff (`admin`; `service` where noted) |
+| --- | --- | --- |
+| `POST /accounts` | Opens a zero-balance account with default limits. A non-zero `initialBalance`/`initialDeposit`, `creditLimit`, `interestRate` or custom transaction limits return 403 `ACCOUNT_FIELD_FORBIDDEN`. Fund new accounts with a confirmed transfer. | `admin` and `service` may set opening balances, credit terms and limits. |
+| `PUT /accounts/:accountId` | May set `nickname` (stored as the account name). Any `status` returns 403 `ACCOUNT_STATUS_FORBIDDEN`. | May change `status`, except `closed`. Freeze/unfreeze also have dedicated admin routes. |
+| Close an account | `DELETE /accounts/:accountId`, which requires a zero balance. | Same route; `PUT` cannot close. |
+| `POST /transfers/:transferId/cancel` | Sender only. The recipient can read the transfer but cannot cancel it. | Allowed. |
+| `PUT /disputes/:disputeId` | May correct `description`, `reason` or `amountDisputed` while the dispute is open. Other fields return 403 `DISPUTE_FIELD_FORBIDDEN`; a decided dispute returns 409 `DISPUTE_CLOSED`. | May update any field. |
+| Dispute amount | `amountDisputed` cannot exceed the absolute transaction amount (400 `DISPUTE_AMOUNT_EXCEEDS_TRANSACTION`), on create and update. | Same limit on create. |
+| `POST /disputes/:disputeId/withdraw`, `/resolve` | Withdraw only while open. | Resolve only while open; a second resolution returns 409. |
+
+Decided dispute statuses are `resolved_in_favor`, `resolved_against`,
+`partially_resolved` and `withdrawn`. Updating a decided dispute no longer clears
+its `resolved_at` timestamp.
 
 ## Confirmed business mutations and outcome lookup
 

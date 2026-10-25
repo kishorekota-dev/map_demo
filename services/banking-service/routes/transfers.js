@@ -3,7 +3,7 @@ const router = express.Router();
 router.use(require('../middleware/durableMutation').durableMutation);
 const transferController = require('../controllers/transfers');
 const { validators, businessValidators } = require('../middleware/validation');
-const { verifyAccountOwnership, verifyTransferOwnership } = require('../middleware/auth');
+const { verifyAccountOwnership, verifyTransferOwnership, verifyTransferOriginator } = require('../middleware/auth');
 const { bankingRateLimit } = require('../middleware/security');
 
 // Apply banking rate limiting to all transfer routes
@@ -58,11 +58,11 @@ router.post('/',
 /**
  * @route   POST /api/transfers/:transferId/cancel
  * @desc    Cancel pending or scheduled transfer
- * @access  Private (Owner or Admin)
+ * @access  Private (Sender or Admin)
  */
 router.post('/:transferId/cancel',
   validators.validateId,
-  verifyTransferOwnership,
+  verifyTransferOriginator,
   transferController.cancelTransfer
 );
 

@@ -73,6 +73,8 @@ Schema flags are `CONTROL_PLANE_MANAGE_SCHEMA`, `OPERATIONS_MANAGE_SCHEMA`, `WOR
 | Setting | Purpose |
 | --- | --- |
 | `JWT_SECRET` | Shared signing/verification key for local access tokens; replace all sample values together |
+| `JWT_EXPIRES_IN`, `REFRESH_TOKEN_EXPIRES_IN` | Banking access (default `15m`) and refresh (default `7d`) token lifetimes; the stored refresh expiry follows the signed token |
+| `AUTH_MAX_FAILED_ATTEMPTS`, `AUTH_LOCKOUT_MINUTES` | Consecutive wrong passwords (default 5) before banking applies a temporary per-account lock, and its length in minutes (default 15) |
 | `SERVICING_SERVICE_TOKEN` | Separate internal credential shared by gateway, chat and orchestrator; never put it in browser config |
 | `DEPLOYMENT_TENANT_ID` | Server-side deployment tenant binding |
 | `ALLOWED_ORIGINS` | Exact comma-separated browser origins for gateway/chat CORS |
