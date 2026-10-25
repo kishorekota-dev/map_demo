@@ -50,6 +50,18 @@ The advertised address is `ws://host:3004/mcp`. The implementation handles JSON-
 
 Supply the servicing-service header during the authenticated upgrade; query-string credentials are not accepted. Tool calls still need the domain credentials declared by their input schemas.
 
+## Generic backend adapters
+
+Beside the banking tools, the service hosts a generic backend integration
+framework for a company's own systems (CRM, ticketing, core, billing).
+Adapters are declared in a server-side config file (`ADAPTERS_CONFIG_PATH`),
+never registered through an API; credentials come only from environment
+variables; mutating tools require an idempotencyKey, forward it as
+`Idempotency-Key`, and return an explicit `uncertain` outcome (with a
+reconcile endpoint) instead of a blind retry when a response is lost. See
+[the backend integration framework guide](../../docs/guides/backend-integration-framework.md)
+and `adapters.example.json` at this service's root.
+
 ## Run and verify
 
 ```bash

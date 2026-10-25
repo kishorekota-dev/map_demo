@@ -14,6 +14,9 @@ require('dotenv').config();
 
 const logger = require('./utils/logger');
 const mcpApiRoutes = require('./routes/mcpApi.routes'); // New HTTP API routes
+const adapterApiRoutes = require('./routes/adapterApi.routes'); // Generic backend adapters
+const { registry } = require('./adapters/adapterRegistry');
+const { loadAdaptersFromConfig } = require('./adapters/adapterLoader');
 const MCPProtocolServer = require('./mcp/mcpProtocolServer'); // Updated true MCP protocol server
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
@@ -78,6 +81,10 @@ class MCPService {
     this.app.use('/api', internalServiceAuth.authenticate);
     // New HTTP API routes for tool execution
     this.app.use('/api/mcp', mcpApiRoutes);
+    // Generic backend adapters (server-side config only; see adapterLoader).
+    // A bad config fails startup loudly instead of running without backends.
+    loadAdaptersFromConfig(registry, process.env.ADAPTERS_CONFIG_PATH);
+    this.app.use('/api/adapters', adapterApiRoutes);
     
     // Service info endpoint
     this.app.get('/api', (req, res) => {
@@ -109,12 +116,16 @@ class MCPService {
           executeBatch: '/api/mcp/execute-batch',
           validate: '/api/mcp/validate',
           categories: '/api/mcp/categories',
+          adapters: '/api/adapters',
+          adapterExecute: '/api/adapters/:adapterId/tools/:toolName/execute',
+          adapterReconcile: '/api/adapters/:adapterId/reconcile',
           websocket: 'ws://localhost:' + this.port
         },
         capabilities: [
           'MCP Protocol (WebSocket)',
           'HTTP REST API',
           'Banking Tool Integration',
+          'Generic Backend Adapters (idempotent, reconciled)',
           'Automatic Tool Discovery',
           'Batch Tool Execution',
           'Parameter Validation',
