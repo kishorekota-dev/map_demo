@@ -3,11 +3,10 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const logger = require('../services/logger');
-const { isQualityDelegation } = require('../services/accessTokenPolicy');
+const { isQualityDelegation, developmentTokensAllowed } = require('../services/accessTokenPolicy');
 
 const BANKING_SERVICE_URL = process.env.BANKING_SERVICE_URL || 'http://localhost:3005';
 const BANKING_AUTH_URL = `${BANKING_SERVICE_URL}/api/v1/auth/login`;
-const insecureAuthAllowed = () => process.env.NODE_ENV !== 'production';
 
 const validateUserCredentials = async (credentials) => {
     if (!credentials?.username || !credentials?.password) {
@@ -81,7 +80,7 @@ router.post('/token', async (req, res) => {
                     isValidUser = true; resolvedUserId = subject; bankToken = validation.authToken;
                 } catch { isValidUser = false; }
             }
-        } else if (userId && insecureAuthAllowed()) {
+        } else if (userId && developmentTokensAllowed()) {
             isValidUser = true;
         }
 
@@ -154,7 +153,7 @@ router.post('/token', async (req, res) => {
  */
 router.post('/refresh', async (req, res) => {
     try {
-        if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: 'Development token refresh is disabled in production; use the identity provider' });
+        if (!developmentTokensAllowed()) return res.status(403).json({ error: 'Development token refresh is available only in development; use the identity provider' });
         if (!process.env.JWT_SECRET) return res.status(503).json({ error: 'Authentication is not configured' });
         const { token } = req.body;
 

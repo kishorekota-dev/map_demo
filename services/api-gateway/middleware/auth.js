@@ -3,6 +3,24 @@ const logger = require('../utils/logger');
 const { isQualityDelegation } = require('./tokenScope');
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
+const deploymentTenant = () => process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+const scopeError = (status, message) => Object.assign(new Error(message), { name: 'TokenScopeError', status });
+
+/**
+ * One verification policy for every gateway path, matching banking, chat and
+ * the orchestrator: HS256 only, a subject, this deployment's tenant, and never
+ * a refresh token or an evaluation delegation.
+ */
+const verifyAccessToken = (token) => {
+  const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  if (isQualityDelegation(decoded)) throw scopeError(403, 'Evaluation delegation cannot authenticate gateway requests.');
+  const subject = decoded.userId || decoded.sub || decoded.id;
+  if (decoded.type === 'refresh' || typeof subject !== 'string' || !subject
+    || (decoded.tenantId !== undefined && decoded.tenantId !== deploymentTenant())) {
+    throw scopeError(401, 'A valid access token for this deployment is required.');
+  }
+  return decoded;
+};
 
 /**
  * JWT Authentication Middleware
@@ -30,10 +48,8 @@ const authMiddleware = (req, res, next) => {
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // Verify token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (isQualityDelegation(decoded)) return res.status(403).json({ error: 'Evaluation delegation cannot authenticate gateway requests.' });
-    
+    const decoded = verifyAccessToken(token);
+
     // Attach user info to request
     req.user = decoded;
     req.userId = decoded.userId;
@@ -47,6 +63,10 @@ const authMiddleware = (req, res, next) => {
     
     next();
   } catch (error) {
+    if (error.name === 'TokenScopeError') {
+      return res.status(error.status).json({ error: error.message, timestamp: new Date().toISOString() });
+    }
+
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         error: 'Invalid token',
@@ -89,14 +109,14 @@ const optionalAuth = (req, res, next) => {
   }
 
   try {
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (isQualityDelegation(decoded)) return res.status(403).json({ error: 'Evaluation delegation cannot authenticate gateway requests.' });
+    const decoded = verifyAccessToken(authHeader.substring(7));
     req.user = decoded;
     req.userId = decoded.userId;
     req.userRole = decoded.role || 'user';
   } catch (error) {
-    // Token invalid but we allow request to proceed
+    // A delegation is never an anonymous request; other invalid tokens proceed
+    // without an identity.
+    if (error.name === 'TokenScopeError' && error.status === 403) return res.status(403).json({ error: error.message });
     logger.warn('Optional auth token invalid', { error: error.message });
   }
   
@@ -147,9 +167,7 @@ const generateToken = (payload, expiresIn = '24h') => {
  */
 const verifyToken = (token) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (isQualityDelegation(decoded)) return { valid: false, error: 'Evaluation delegation is not an access token.' };
-    return { valid: true, decoded };
+    return { valid: true, decoded: verifyAccessToken(token) };
   } catch (error) {
     return { valid: false, error: error.message };
   }
@@ -160,5 +178,6 @@ module.exports = {
   optionalAuth,
   requireRole,
   generateToken,
-  verifyToken
+  verifyToken,
+  verifyAccessToken
 };

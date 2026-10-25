@@ -49,6 +49,11 @@ frontend runtime JSON or a query string.
 - [Provider callback/fulfillment/identity contracts](../guides/servicing-operations.md)
   and [usage/cost API](../../services/api-gateway/operations/USAGE.md).
 
+Every gateway route that requires a JWT applies one policy, matching banking,
+chat and the orchestrator: HS256 only, a subject, the deployment tenant when a
+tenant claim is present, and never a refresh token or an evaluation delegation.
+Invalid or out-of-scope tokens return 401; delegations return 403.
+
 Internal NLU/MCP URLs are service-network addresses, not public customer APIs.
 Production or `INTERNAL_SERVICE_AUTH_REQUIRED=true` requires
 `X-Servicing-Service-Token` on those HTTP/WebSocket hops. The gateway discards a

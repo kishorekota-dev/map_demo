@@ -5,10 +5,10 @@ const socketIo = require('socket.io');
 const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
-const jwt = require('jsonwebtoken');
 
 // Import services
 const logger = require('./services/logger');
+const { verifyConnectionToken } = require('./services/accessTokenPolicy');
 const ChatService = require('./services/chatService');
 const AgentOrchestrator = require('./services/agentOrchestrator');
 const SessionManager = require('./services/sessionManager');
@@ -150,11 +150,7 @@ io.use(async (socket, next) => {
             return next(new Error('Authentication token required'));
         }
 
-        // Verify JWT token
-        const decoded = jwt.verify(
-            token, 
-            process.env.JWT_SECRET
-        );
+        const decoded = verifyConnectionToken(token);
         
         // Add user info to socket
         socket.userId = decoded.userId;

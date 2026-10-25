@@ -116,12 +116,16 @@ Use the gateway's enterprise identity exchange or domain login flow to obtain ve
 Credential-backed `/auth/token` now returns the verified bank-issued access token
 and its signed identity/roles rather than minting a role-free replacement token.
 `/auth/validate` returns validated top-level roles and expiry without echoing
-caller profile/session data. Development customer token issuance cannot be enabled
-in production; the development refresh route returns 403 there. Bank/IdP access
+caller profile/session data. Credential-free development customer tokens and the
+development refresh route work only when `NODE_ENV` is unset, `development` or
+`test`; any other value, including `staging`, `uat` and `production`, refuses
+them (refresh returns 403). Bank/IdP access
 tokens must refresh through their owning identity service. `JWT_SECRET` is required
 in the environment (at least 32 bytes at startup); there is no built-in signing key.
 Socket credentials belong in the Socket.IO auth payload or authorization header,
-never a query string.
+never a query string. The connection handshake accepts only HS256 access or
+development customer tokens with a subject for this deployment's tenant; refresh
+tokens and evaluation delegations are refused before the `authenticate` event.
 `/auth/logout` acknowledges client sign-out and explicitly returns
 `tokenRevoked:false`; actual revocation belongs to the configured identity service.
 
