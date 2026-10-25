@@ -277,3 +277,21 @@ remains missing. Configure rates for the registry **provider ID** and task
 Repository validation uses deterministic HTTP fixtures for protocols and
 governance. The separate Studio, cloud credentials, model quality and performance
 remain deployment checks; none are represented as live-verified by those tests.
+
+## Production registry and lifecycle
+
+For the dedicated production overlay, mount an explicitly reviewed registry file
+through `LLM_PROVIDERS_HOST_FILE`; the empty
+[production example](../../config/product/llm-providers.production.example.json)
+allows deterministic servicing before any provider is enabled. The production
+preflight uses the runtime registry validator without contacting a model and
+rejects enabled providers with unresolved credentials. Runtime readiness does not
+make inference calls or establish model quality. Run explicit synthetic model
+tests only when the target endpoint and data policy are configured.
+
+Environment files are loaded as data through `scripts/run-with-env.sh`. Values
+are not shell commands and `${VARIABLE}` is not expanded. Secret references in
+the provider registry are resolved by the provider registry itself. Follow
+[Deployment](deployment.md) for private mounts and [Platform operations](platform-readiness.md)
+for startup/schema requirements. The Qwen host is on the separate Mac Studio;
+standard-port examples are editable defaults, not a verified connection.

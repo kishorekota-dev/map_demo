@@ -20,7 +20,8 @@ describe('service proxy', () => {
           path: req.url,
           body: raw ? JSON.parse(raw) : null,
           requestId: req.headers['x-request-id'],
-          userId: req.headers['x-user-id']
+          userId: req.headers['x-user-id'],
+          serviceToken: req.headers['x-servicing-service-token']
         }));
       });
     });
@@ -99,4 +100,20 @@ describe('service proxy', () => {
       requestId: 'nlu-request-123'
     });
   });
+  test('injects trusted service tokens only for internal NLU/MCP targets', async () => {
+    const previous = process.env.SERVICING_SERVICE_TOKEN;
+    process.env.SERVICING_SERVICE_TOKEN = 'trusted-server-secret';
+    try {
+      for (const target of ['nlu','mcp','nlp','chat-backend','banking']) {
+        serviceRegistry.register(target, downstreamUrl, { healthCheckPath: '/health' });
+        const app = express(); app.use((req, res, next) => { req.startTime = Date.now(); next(); });
+        app.use('/api', createServiceProxy({ serviceName: target }));
+        const response = await request(app).get('/api/probe').set('X-Servicing-Service-Token','forged-browser-value').expect(200);
+        expect(response.body.serviceToken).toBe(['nlu','mcp','nlp'].includes(target) ? 'trusted-server-secret' : undefined);
+      }
+    } finally { if (previous === undefined) delete process.env.SERVICING_SERVICE_TOKEN; else process.env.SERVICING_SERVICE_TOKEN = previous; }
+  });
+
 });
+
+// The HTTP proxy must overwrite, rather than trust, caller service credentials.

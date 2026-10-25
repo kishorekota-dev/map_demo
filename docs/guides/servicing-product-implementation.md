@@ -25,6 +25,7 @@ not a statement of the repository after this implementation.
 | Privacy / assurance | Restricted context, bounded payloads, transcript-free operational events, case-detail retention/subject export/erasure, replay tombstones, hash-chain/signed export | Operational scope is explicit; owning services retain banking/chat policy, external immutable archival and retention/legal decisions are customer responsibilities |
 | Agent experience | Sanitized context/summary/required field names/confirmation state/release/evidence/case links, queue work and exception reconciliation | Provider adapter maps logical queues to actual agents; existing agent console remains available |
 | Storage | Normalized studio records, cases/jobs/events/identity/receipts/usage and indexed pagination | Legacy configuration release/audit/manual-work aggregates remain bounded through API but require archival for very large histories |
+| Platform reuse / readiness | Validated solution catalog/import/export, reviewed conflict-aware draft merges, package provenance, sanitized runtime diagnostics and explicit production lifecycle | Unit/browser/PostgreSQL and isolated container checks; full customer/provider/capacity/recovery acceptance remains deployment work |
 | Shared SaaS platform | Deliberately not introduced | Dedicated enterprise deployment selected; no unsupported billing, pooled-tenancy or residency claims |
 
 ## Differentiating factors supported by this implementation
@@ -42,6 +43,8 @@ combination is:
   keep business policy in the established architecture.
 - Local/private and cloud model profiles share the same governed workflow and
   release process; provider errors cannot silently move traffic to another model.
+- Reusable configurations retain the same banking contracts and release governance
+  rather than silently publishing imported settings.
 - Release fingerprints, operation records and external outcome references make
   changes and actions inspectable.
 
@@ -72,9 +75,9 @@ cannot supply an enterprise's provider credentials, actual telephony/media stack
 commercial entitlements, authoritative customer identity mapping, or measured
 production SLA without a configured deployment.
 
-## Verification recorded
+## Baseline verification (initial control-plane implementation)
 
-The final local validation used Node.js 22 and a disposable PostgreSQL 15 database:
+The initial control-plane commit `0dd5d15` validation used Node.js 22 and a disposable PostgreSQL 15 database:
 
 | Suite | Passing tests |
 | --- | ---: |
@@ -109,3 +112,59 @@ publication/rollback and 390px layout. The administrative probe passed registry
 listing, discovery, text and JSON tests, explicit-model and allowlist rejection
 checks using another fixture. Remote Mac Studio and cloud inference were not
 performed. The configuration uses editable standard-port examples.
+
+## Platform and production-hardening verification
+
+The subsequent platform slice adds readiness and governed solution packages,
+explicit production lifecycle tooling, first-administrator provisioning, required
+internal NLU/MCP identity, verified database TLS, migration failure handling and
+reproducible dependency locks. The documentation was reviewed against these
+changes; historical completion reports retain explicit banners.
+
+Browser checks against the actual PostgreSQL-backed platform routes exercised
+read-only preview, reviewed draft application, downloadable export, normal
+publication/rollback, explicit conflict consent, stale revision rejection,
+actionable financial validation, runtime failure/recovery, viewer restrictions
+and partial diagnostics outages. Desktop and 390px layouts had no clipped
+controls or browser exceptions. Health/model dependencies in that browser test
+were fixtures; separate isolated production-container checks cover real service
+health and private networking.
+
+The production Compose check uses an unseeded disposable deployment with synthetic
+secrets and no enabled model provider. Explicit banking and servicing migrations
+run before applications with runtime DDL disabled. Infrastructure health is
+recorded separately from live identity, voice/media, customer integrations, remote
+Mac Studio inference, capacity and backup/restore acceptance, which still require
+the configured target environment. See [dependency audit](../architecture/dependency-audit.md),
+[deployment](deployment.md) and [platform runbook](platform-readiness.md).
+
+Final Node 22 regression counts for this slice:
+
+| Suite | Passing tests |
+| --- | ---: |
+| Gateway, platform, control plane, identity and operations | 156 |
+| AI orchestration, models, schema and recovery | 130 |
+| Chat, schema and handoffs | 63 |
+| Banking, migrations and administrator/bootstrap safety | 29 |
+| NLU | 15 |
+| MCP | 16 |
+| Agent UI | 9 |
+| Frontend | 29 |
+| Deployment tooling and repeated real PostgreSQL migrations | 13 |
+| **Total** | **460** |
+
+Production dependency and build/test audits report zero known npm findings across
+the audited root, standalone services, locked frontend static server and nested
+banking database tree. This is dated registry/advisory evidence, with no claim
+that container operating systems or application logic are vulnerability-free.
+
+Final isolated production smoke built all nine images and started ten healthy
+containers from empty disposable volumes. Banking V1–V9 and all four servicing
+schema components migrated successfully, then the offline administrator CLI,
+gateway password login, protected `/auth/me`, authenticated platform readiness
+(all eight runtime checks) and catalog passed. Unauthenticated platform access
+returned 401; MCP/NLU rejected missing service credentials. Redis outage and
+recovery changed readiness 200→503→200 while application users remained non-root.
+The deployed gateway package-author fix matched host source. Test containers,
+volumes, images and temporary credentials were removed afterward; no enterprise
+IdP, external model or customer provider was contacted.

@@ -1,5 +1,5 @@
 // POC Banking Chat - PM2 Ecosystem Configuration
-// Usage: pm2 start ecosystem.config.js --env production
+// Usage: APP_ENV_FILE=/absolute/deployment.env ./scripts/run-with-env.sh pm2 start ecosystem.config.js --env production
 
 module.exports = {
   apps: [
@@ -20,9 +20,7 @@ module.exports = {
       },
       env_production: {
         NODE_ENV: 'production',
-        PORT: 3001,
-        CONTROL_PLANE_SINGLE_WRITER: 'true',
-        CONTROL_PLANE_DATA_FILE: require('path').join(__dirname, 'services/api-gateway/data/control-plane.json')
+        PORT: 3001
       }
     },
 

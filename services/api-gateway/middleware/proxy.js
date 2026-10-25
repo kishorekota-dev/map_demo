@@ -90,6 +90,12 @@ const createServiceProxy = (options) => {
       proxyReq.setHeader('X-Gateway-Service', 'poc-api-gateway');
       proxyReq.setHeader('X-Target-Service', serviceName);
       
+      // Never trust a browser-supplied service credential or leak it to banking.
+      proxyReq.removeHeader('X-Servicing-Service-Token');
+      if (['mcp', 'nlu', 'nlp'].includes(serviceName) && process.env.SERVICING_SERVICE_TOKEN) {
+        proxyReq.setHeader('X-Servicing-Service-Token', process.env.SERVICING_SERVICE_TOKEN);
+      }
+
       // Forward user context
       if (req.user) {
         const userId = req.userId || req.user.userId || req.user.id || req.user.sub;
@@ -114,7 +120,7 @@ const createServiceProxy = (options) => {
 
     // Response logging and modification
     onProxyRes: (proxyRes, req, res) => {
-      const requestId = req.id || proxyRes.getHeader('X-Request-ID');
+      const requestId = req.id || proxyRes.headers['x-request-id'];
       
       // Add gateway headers
       proxyRes.headers['X-Gateway-Service'] = 'poc-api-gateway';

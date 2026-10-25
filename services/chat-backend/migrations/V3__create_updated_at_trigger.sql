@@ -17,12 +17,14 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION update_updated_at_column() IS 'Trigger function to automatically update updated_at timestamp on row updates';
 
 -- Create trigger for chat_sessions table
+DROP TRIGGER IF EXISTS update_chat_sessions_updated_at ON chat_sessions;
 CREATE TRIGGER update_chat_sessions_updated_at
     BEFORE UPDATE ON chat_sessions
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Create trigger for chat_messages table
+DROP TRIGGER IF EXISTS update_chat_messages_updated_at ON chat_messages;
 CREATE TRIGGER update_chat_messages_updated_at
     BEFORE UPDATE ON chat_messages
     FOR EACH ROW

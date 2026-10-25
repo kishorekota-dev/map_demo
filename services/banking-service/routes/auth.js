@@ -8,7 +8,7 @@ const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // JWT Configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = require('../config').security.jwtSecret;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 
@@ -544,7 +544,7 @@ router.get('/me', authenticateToken, async (req, res) => {
              CONCAT(c.first_name, ' ', c.last_name) as full_name
       FROM users u
       LEFT JOIN customers c ON u.customer_id = c.id
-      WHERE u.id = $1
+      WHERE u.user_id = $1
     `;
     
     const userResult = await db.query(userQuery, [req.user.userId]);

@@ -15,7 +15,9 @@ const SERVICE = 'rollout-integration-service-secret';
   let store; let configStore; let app; let server; let operations; let controlPlane; let monitor;
   const tenantId = `rollout-integration-${randomUUID()}`;
   const token = (role = 'admin') => jwt.sign({ userId: role === 'admin' ? 'operator-a' : 'customer-a', role, tenantId, type: 'access' }, SECRET, { expiresIn: '10m' });
-  const api = (method, path, body, role = 'admin') => request(app)[method](path).set('Authorization', `Bearer ${token(role)}`).send(body);
+  // Use the same persistent listener as the monitor; avoid creating/closing a
+  // second ephemeral HTTP server for every assertion.
+  const api = (method, path, body, role = 'admin') => request(server)[method](path).set('Authorization', `Bearer ${token(role)}`).send(body);
   beforeAll(async () => {
     store = new OperationsStore({ databaseUrl, tenantId });
     configStore = new PostgresControlPlaneStore({ databaseUrl, tenantId });

@@ -1,6 +1,6 @@
 const { Sequelize } = require('sequelize');
 const config = require('../../config');
-const logger = require('../utils/logger');
+const { databaseTls } = require('./tls');
 
 // Initialize Sequelize
 const sequelize = new Sequelize(
@@ -12,18 +12,9 @@ const sequelize = new Sequelize(
     port: config.database.port,
     dialect: config.database.dialect,
     logging: config.database.logging,
-    pool: config.database.pool
+    pool: config.database.pool,
+    dialectOptions: { ssl: databaseTls() }
   }
 );
-
-// Test connection
-sequelize
-  .authenticate()
-  .then(() => {
-    logger.info('Database connection established successfully');
-  })
-  .catch((err) => {
-    logger.error('Unable to connect to database:', err);
-  });
 
 module.exports = sequelize;

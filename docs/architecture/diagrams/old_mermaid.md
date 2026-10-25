@@ -1,3 +1,5 @@
+> **Historical engineering record.** Earlier implementation decisions and counts below are retained for context. Use the [current architecture](../overview.md) and [documentation index](../../README.md) for current behavior and deployment instructions.
+
 FIG 1
 
 

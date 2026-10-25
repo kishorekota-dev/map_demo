@@ -209,7 +209,7 @@ class AgentOrchestrator extends EventEmitter {
             const response = await this.httpPost(
                 `${this.nluServiceUrl}/api/nlu/intents`,
                 { message: question, sessionId },
-                { 'X-Session-ID': sessionId }
+                { 'X-Session-ID': sessionId, ...(process.env.SERVICING_SERVICE_TOKEN ? { 'X-Servicing-Service-Token': process.env.SERVICING_SERVICE_TOKEN } : {}) }
             );
 
             const intent = response?.data?.intent
@@ -434,6 +434,7 @@ class AgentOrchestrator extends EventEmitter {
         try {
             return await axios.post(url, body, {
                 timeout: this.nluTimeout,
+                maxRedirects: 0,
                 signal: controller.signal,
                 headers: { 'Content-Type': 'application/json', ...extraHeaders }
             });

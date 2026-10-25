@@ -1,9 +1,6 @@
 # Banking Service Dockerfile
 FROM node:22-alpine
 
-# Install netcat for database wait script
-RUN apk add --no-cache netcat-openbsd
-
 # Set working directory
 WORKDIR /app
 
@@ -22,14 +19,14 @@ COPY . .
 RUN chmod +x docker-entrypoint.sh
 
 # Create logs directory
-RUN mkdir -p logs
+RUN mkdir -p logs && chown node:node logs
 
 # Expose port
 EXPOSE 3005
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3005/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+  CMD node -e "require('http').get('http://localhost:3005/health/ready', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Start application with entrypoint
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -18,10 +18,10 @@ echo ""
 
 # Service definitions: name:port:health-path
 SERVICES=(
-  "API Gateway:3001:/health"
+  "API Gateway:3001:/health/ready"
   "NLU Service:3003:/health"
   "MCP Service:3004:/health"
-  "Banking Service:3005:/health"
+  "Banking Service:3005:/health/ready"
   "Chat Backend:3006:/health"
   "AI Orchestrator:3007:/health"
   "Agent UI:8081:/health"

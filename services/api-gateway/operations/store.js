@@ -56,14 +56,16 @@ class OperationsStore {
       );
     if (!this.ready)
       this.ready = (async () => {
-        if (!this.manageSchema) return;
         const client = await this.pool.connect();
         try {
           await client.query("BEGIN");
-          await client.query("SELECT pg_advisory_xact_lock(714936,1)");
-          await client.query(
-            readFileSync(join(__dirname, "schema.sql"), "utf8"),
-          );
+          if (this.manageSchema) {
+            await client.query("SELECT pg_advisory_xact_lock(714936,1)");
+            await client.query(readFileSync(join(__dirname, "schema.sql"), "utf8"));
+          }
+          await client.query("SELECT tenant_id,kind,id FROM servicing_operations_records LIMIT 0");
+          await client.query("SELECT kind,lease_id,status FROM servicing_operations_jobs LIMIT 0");
+          await client.query("SELECT seq,hash FROM servicing_operations_events LIMIT 0");
           await client.query("COMMIT");
         } catch (e) {
           await client.query("ROLLBACK");

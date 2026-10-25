@@ -46,6 +46,18 @@ describe('AgentOrchestrator NLU contract', () => {
     );
   });
 
+  test('authenticates each NLU request with the current server credential and disables redirects', async () => {
+    const previous = process.env.SERVICING_SERVICE_TOKEN;
+    const orchestrator = new AgentOrchestrator(); axios.post.mockResolvedValue({ data: { intent: 'general_inquiry' } });
+    try {
+      for (const value of ['server-one', 'server-two']) {
+        process.env.SERVICING_SERVICE_TOKEN = value;
+        await orchestrator.classifyIntent('hello', 'session-1', {});
+        expect(axios.post).toHaveBeenLastCalledWith(expect.stringContaining('/api/nlu/intents'), expect.anything(), expect.objectContaining({ maxRedirects: 0, headers: expect.objectContaining({ 'X-Servicing-Service-Token': value }) }));
+      }
+    } finally { if (previous === undefined) delete process.env.SERVICING_SERVICE_TOKEN; else process.env.SERVICING_SERVICE_TOKEN = previous; }
+  });
+
   test('carries the bound channel to the workflow and uses its published intent', async () => {
     const orchestrator = new AgentOrchestrator();
     orchestrator.classifyIntent = jest.fn().mockResolvedValue('help');

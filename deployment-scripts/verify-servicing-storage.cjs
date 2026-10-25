@@ -27,7 +27,7 @@ async function main() {
       previous = event.hash;
     }
     const page = await store.events({ limit: 25, offset: 25 });
-    if (page.total !== count || page.items.length !== 25) throw new Error('Pagination count mismatch.');
+    if (page.total !== count || page.items.length !== Math.min(25, Math.max(0, count - 25))) throw new Error('Pagination count mismatch.');
     latencies.sort((a,b) => a-b);
     console.log(JSON.stringify({ scope: 'synthetic local storage probe; not production capacity or SLA', records: count, concurrency: 20,
       elapsedMs: Math.round(elapsedMs), writesPerSecond: Number((count / elapsedMs * 1000).toFixed(1)),

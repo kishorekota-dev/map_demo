@@ -1,3 +1,5 @@
+> **Historical engineering record.** Earlier implementation decisions and counts below are retained for context. Use the [current architecture](architecture/determinism.md) and [documentation index](README.md) for current behavior and deployment instructions.
+
 # Determinism & End-to-End Remediation
 
 This document summarizes the remediation that made the banking conversational

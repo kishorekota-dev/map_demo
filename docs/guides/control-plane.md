@@ -165,3 +165,19 @@ Database tests cover replica conflicts, durable operation replay, unknown
 outcomes, one-time handoffs, signed callbacks, field/permission boundaries,
 knowledge filtering, retention tombstones and evidence-chain verification. CI
 runs these against disposable PostgreSQL, not production data.
+
+## Platform packages and operational readiness
+
+The fourteenth workspace, **Platform & solutions**, shows sanitized infrastructure
+and gateway configuration checks, exports diagnostics, and provides a reusable
+solution catalog and JSON import/export. Preview reports semantic differences and
+conflicts; reviewed application changes only the draft and records provenance.
+Existing evaluation/approval/publication gates remain mandatory. See the
+[platform guide](platform-readiness.md) and [API contract](../../services/api-gateway/platform/README.md).
+
+Production uses explicit migration jobs followed by verification-only runtime
+schema access; do not rely on automatic development DDL. Start with the
+[production deployment guide](deployment.md) and the offline first-administrator
+bootstrap instead of granting demo customer identities privileges. MCP/NLU internal
+requests require the separate server-side service token in production. Customer
+authorization remains required for banking effects.

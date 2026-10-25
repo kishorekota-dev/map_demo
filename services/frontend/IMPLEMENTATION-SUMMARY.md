@@ -1,3 +1,10 @@
+> **Historical record — not current operating instructions.** The original report
+> below is preserved for context. Its old ports, commands, links, completion claims,
+> test counts, timings, and readiness statements describe an earlier implementation.
+> Use the [current frontend README](README.md), [setup](SETUP-GUIDE.md), and [Servicing Studio guide](OPERATIONS-CONSOLE.md)
+> for current behavior, starting from the [documentation index](../../docs/README.md).
+> Original links below may refer to removed or superseded artifacts.
+
 # POC Frontend - Implementation Summary
 
 ## Overview

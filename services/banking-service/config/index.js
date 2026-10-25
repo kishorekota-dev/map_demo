@@ -1,3 +1,5 @@
+const { getJwtSecret } = require('./security');
+
 module.exports = {
   // Server configuration
   server: {
@@ -8,7 +10,7 @@ module.exports = {
 
   // Security configuration
   security: {
-    jwtSecret: process.env.JWT_SECRET || 'fallback-secret-change-me',
+    jwtSecret: getJwtSecret(),
     jwtExpiry: process.env.JWT_EXPIRY || '24h',
     bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS) || 12,
     corsOrigins: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']

@@ -14,14 +14,14 @@ RUN npm ci --omit=dev
 COPY . .
 
 # Create logs directory
-RUN mkdir -p logs
+RUN mkdir -p logs && chown node:node logs
 
 # Expose port
 EXPOSE 8081
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8081', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+  CMD node -e "require('http').get('http://localhost:8081/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Start application
 CMD ["node", "server.js"]

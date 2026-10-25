@@ -27,9 +27,11 @@ import RecognitionEditor from "@/components/control-plane/RecognitionEditor";
 import IntentContractEditor from "@/components/control-plane/IntentContractEditor";
 import ReleaseDiff from "@/components/control-plane/ReleaseDiff";
 import ModelProviderConsole from "@/components/control-plane/ModelProviderConsole";
+import PlatformConsole from "@/components/control-plane/PlatformConsole";
 
 type Section =
   | "overview"
+  | "platform"
   | "channels"
   | "intents"
   | "models"
@@ -44,6 +46,7 @@ type Section =
   | "operations";
 const sections: Array<{ id: Section; label: string; detail: string }> = [
   { id: "overview", label: "Overview", detail: "Service readiness" },
+  { id: "platform", label: "Platform & solutions", detail: "Deployment health and reusable solutions" },
   { id: "channels", label: "Channels", detail: "Digital · AVA · IVR" },
   { id: "intents", label: "Intents & prompts", detail: "Conversation design" },
   {
@@ -1020,6 +1023,8 @@ export default function ControlPlanePage() {
             </fieldset>
           </>
         )}
+
+        {section === "platform" && <PlatformConsole editable={editable} configurationDirty={dirty || rawEdited} onApplied={refresh} />}
 
         {section === "models" && (
           <ModelProviderConsole

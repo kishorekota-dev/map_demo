@@ -15,9 +15,11 @@ const NLUController = require('./controllers/nlu.controller');
 const nluRoutes = require('./routes/nlu.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
+const internalServiceAuth = require('./middleware/internalServiceAuth');
 
 class NLUService {
   constructor() {
+    internalServiceAuth.validateConfiguration();
     this.app = express();
     this.port = config.port;
     this.setupMiddleware();
@@ -48,12 +50,12 @@ class NLUService {
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
     // Logging
-    this.app.use(morgan('combined', {
+    this.app.use(morgan((tokens, req, res) => `${tokens.method(req, res)} ${req.originalUrl.split('?')[0]} ${tokens.status(req, res)} ${tokens['response-time'](req, res)} ms`, {
       stream: { write: (message) => logger.info(message.trim()) }
     }));
 
     // Health check
-    this.app.get('/health', (req, res) => {
+    this.app.get(['/health', '/api/nlu/health', '/api/nlp/health'], (req, res) => {
       res.json({
         service: 'poc-nlu-service',
         status: 'healthy',
@@ -65,6 +67,7 @@ class NLUService {
   }
 
   setupRoutes() {
+    this.app.use('/api', internalServiceAuth.authenticate);
     this.app.use('/api/nlu', nluRoutes);
     this.app.use('/api/nlp', nluRoutes);
     this.app.post('/api/process', NLUController.processLegacyNlp);

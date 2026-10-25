@@ -1,0 +1,14 @@
+# Root context is used by the one-shot servicing migration image.
+.git
+**/node_modules
+.env
+.env.*
+**/.env
+**/.env.*
+**/credentials
+**/logs
+**/coverage
+**/dist
+**/*.log
+deployment-scripts/output
+docs/archive

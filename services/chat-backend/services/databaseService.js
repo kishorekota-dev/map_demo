@@ -2,6 +2,7 @@ const { models, sequelize } = require('../database');
 const { ChatSession, ChatMessage } = models;
 const logger = require('./logger');
 const { Op } = require('sequelize');
+const { initializeModelSchema } = require('../database/schema');
 
 class DatabaseService {
     constructor() {
@@ -18,10 +19,8 @@ class DatabaseService {
             await sequelize.authenticate();
             logger.info('Database connection established');
             
-            // Sync models without alter since migrations handle schema
-            // Using alter: false prevents conflicts with database views
-            await sequelize.sync({ alter: false });
-            logger.info('Database models synchronized');
+            await initializeModelSchema(sequelize);
+            logger.info('Database model schema verified');
             
             this.initialized = true;
             return true;

@@ -1,265 +1,100 @@
-# POC Frontend - Quick Setup Guide
+# Frontend setup and troubleshooting
 
-## Overview
+Use the [repository documentation index](../../docs/README.md) for full-stack
+setup. All commands below run from the repository root unless stated otherwise.
+Node.js 22+ and npm 10+ are required by the workspace packages.
 
-This is a comprehensive guide to quickly set up and run the POC Banking Chatbot frontend application.
+## Start the browser application
 
-## Quick Start (5 minutes)
+1. Configure the root environment using the current
+   [deployment guide](../../docs/guides/productization.md). Keep real credentials
+   out of `VITE_*` variables and runtime JSON, which are browser-visible.
+2. Install workspace dependencies with `npm ci`.
+3. Start the required backend services using the root deployment instructions.
+4. Run `npm run dev:frontend`, then open `http://localhost:3000`.
 
-### 1. Prerequisites Check
+`npm run dev:frontend` loads `.env.development`; set `APP_ENV_FILE` to select a
+reviewed alternative environment file. Running `npm run dev -w services/frontend`
+directly bypasses that root wrapper. Vite's default port is 3000; `PORT` can
+change it. `--strictPort` makes a port conflict fail visibly.
 
-Make sure you have the following running:
+## Connect the correct endpoints
 
-```bash
-# Check Node.js version (needs >= 16.0.0)
-node --version
+| Component | Default local endpoint | Browser use |
+| --- | --- | --- |
+| Frontend | `http://localhost:3000` | Application |
+| API gateway | `http://localhost:3001/api` | Chat, sessions, control plane, operations, and orchestrator proxy |
+| Banking service | `http://localhost:3005/api/v1` | Default password authentication base |
+| Chat backend | `http://localhost:3006` | Gateway upstream; usually not the browser's API base |
+| Orchestrator | `http://localhost:3007` | Gateway upstream; model credentials stay here |
 
-# POC Banking Service should be running on port 3010
-curl http://localhost:3010/health
+Port 3010 in older documents belongs to a previous customer-service topology.
+Do not use it as the current banking default. The Vite `/api` development proxy
+forwards relative requests to port 3001; absolute runtime API URLs bypass it.
+Configure server CORS for the actual browser origin.
 
-# POC Chat Backend should be running on port 3006
-curl http://localhost:3006/health
-```
+Serve a valid `/runtime-config.json`, or use the build-time fallbacks described
+in the [README](README.md#runtime-configuration). Check it directly in the browser:
+it must be JSON, not the SPA's `index.html`. A changed runtime file takes effect
+when the application reloads. Backend addresses must resolve from the browser;
+Docker hostnames such as `api-gateway` usually do not.
 
-### 2. Install Dependencies
+## Sign in and access the studio
 
-```bash
-cd poc-frontend
-npm install
-```
+Password login uses the configured authentication API. Provision users and roles
+in the deployment; this UI does not create operator accounts. The banking
+[database guide](../banking-service/database/README.md) explains demo seeds and
+the V9 servicing roles. Demo data is not production identity provisioning.
 
-### 3. Configure Environment
+Enterprise login is offered only when `/api/identity/config` reports it enabled.
+After the provider handshake, `/auth?enterprise=1` retrieves a server-issued
+session token with credentials included. See
+[identity operations](OPERATIONS-CONSOLE.md#access-and-identity).
 
-The `.env` file has already been created with the correct settings:
+Manual access-token entry is controlled by `features.allowTokenAuth`. A typed
+profile or role is not server authorization. A valid customer may access chat
+while receiving a permission error from studio APIs; grant an appropriate
+servicing role through the trusted identity system.
 
-```env
-VITE_CHAT_BACKEND_URL=http://localhost:3006
-VITE_BANKING_SERVICE_URL=http://localhost:3010/api/v1
-VITE_APP_NAME=Banking Chatbot POC
-VITE_APP_VERSION=1.0.0
-```
+## Models and IVR
 
-### 4. Start the Application
+Follow [LLM provider setup](../../docs/guides/llm-providers.md) for the remote Mac
+Studio Qwen provider. The starter model name is an example, and the host must be
+configured before discovery or testing. The current computer's local Ollama is
+not assumed to be the target. Publishing `llm.enabled: false` disables model
+calls; a missing `llm` section retains legacy behavior.
 
-```bash
-npm run dev
-```
+IVR requires a configured voice adapter and its provider prerequisites. Enabling
+an IVR channel in the console changes policy, not telephony connectivity.
 
-The application will start on `http://localhost:3000`
-
-### 5. Login
-
-Navigate to `http://localhost:3000` in your browser. You'll be redirected to the login page.
-
-**Test Credentials:**
-- Username: `admin`
-- Password: `Password123!`
-
-Alternatively, you can use the **Use Token** tab if you already have a JWT token.
-
-## Architecture Summary
-
-### Authentication Flow
-
-1. **Login Page** → POC Banking Service (`/api/v1/auth/login`)
-2. Receive JWT token + user profile
-3. Store token in localStorage
-4. Redirect to Chat Page
-5. All subsequent requests to POC Chat Backend include token
-
-### API Integration
-
-```
-Frontend → POC Chat Backend (3006) → All Chat Operations
-            ↓
-        POC Banking Service (3010) → Login Only
-```
-
-**Key Point:** Only the login uses the Banking Service directly. All other operations go through the Chat Backend.
-
-### Component Hierarchy
-
-```
-App
-├── AuthPage (Unauthenticated)
-│   ├── LoginForm
-│   └── TokenInput
-└── ChatPage (Protected)
-    └── ChatContainer
-        ├── ChatMessage (list)
-        ├── SessionList (sidebar)
-        ├── IntentDisplay (sidebar)
-        └── ChatInput
-```
-
-## Features Implemented
-
-✅ **Authentication**
-- Login with banking credentials
-- Manual token input
-- Token storage & refresh
-- Protected routes
-
-✅ **Chat Operations**
-- Send/receive messages
-- Real-time responses
-- Message history
-- Intent detection
-
-✅ **Session Management**
-- Auto-create sessions
-- Resume previous sessions
-- View unresolved sessions
-- End/resolve sessions
-- Session status tracking
-
-✅ **UI/UX**
-- Responsive design
-- Loading states
-- Error handling
-- Session controls
-- User profile display
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/services/authService.ts` | Authentication logic, token management |
-| `src/services/api.ts` | API client for chat backend |
-| `src/stores/authStore.ts` | Global authentication state |
-| `src/hooks/useChat.tsx` | Chat logic and session management |
-| `src/pages/AuthPage.tsx` | Login/token input page |
-| `src/pages/ChatPage.tsx` | Main chat interface |
-| `src/components/organisms/ChatContainer/ChatContainer.tsx` | Chat UI |
-
-## API Endpoints Used
-
-### Banking Service (Authentication Only)
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/refresh` - Token refresh
-
-### Chat Backend (All Chat Operations)
-- `POST /api/sessions` - Create session
-- `GET /api/sessions/:id` - Get session
-- `POST /api/sessions/:id/resume` - Resume session
-- `GET /api/users/:userId/sessions` - Get user sessions
-- `POST /api/sessions/:id/messages` - Send message
-- `GET /api/sessions/:id/history` - Get history
-- `POST /api/sessions/:id/resolve` - Resolve session
-- `DELETE /api/sessions/:id` - End session
-
-## Development Commands
+## Verify a change
 
 ```bash
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-
-# Type checking
-npm run type-check
-
-# Lint code
-npm run lint
-
-# Format code
-npm run format
+npm run typecheck -w services/frontend
+npm run lint -w services/frontend
+npm run test -w services/frontend
+npm run build -w services/frontend
+npm run preview -w services/frontend
 ```
 
-## Common Issues & Solutions
+Stop the development server before previewing on the same port. Frontend unit
+tests cover request/authentication contracts and timeout normalization; they do
+not certify a live banking or model provider. Use an isolated deployment for
+write-flow verification and contract evaluations. Inspect real panel and input
+bounds at mobile widths; an outer clipped container can conceal overflow.
 
-### Issue: "Cannot connect to backend"
-**Solution:** Ensure both backend services are running:
-```bash
-# Check POC Chat Backend
-curl http://localhost:3006/health
+## Troubleshooting
 
-# Check POC Banking Service  
-curl http://localhost:3010/health
-```
+| Symptom | Inspect |
+| --- | --- |
+| App cannot load | Port conflict, Vite output, `dist` build, SPA fallback, and runtime JSON |
+| API returns HTML | `apiBaseUrl` and gateway route; HTML is rejected as an invalid API response |
+| Password login fails | Banking `/health/ready`, migrated schema, supplied credentials, and shared explicit JWT configuration |
+| Studio returns 403 | Signed servicing roles and required scopes; local profile edits cannot grant them |
+| Save returns 409 | Preserve local config JSON, refresh the server revision, then reconcile and save |
+| Model test unavailable | Registered provider's enabled/configured state and allowed model; no implicit cloud fallback |
+| Chat times out | `chatRequestTimeoutMs`, gateway/chat deadlines, and per-profile model-call budgets |
+| Old session behavior after publish | Sessions retain their pinned release; start a new conversation to adopt environment routing |
 
-### Issue: "Login fails with 401"
-**Solution:** 
-- Verify credentials: `admin` / `Password123!`
-- Check Banking Service is accessible
-- Look at backend logs for errors
-
-### Issue: "CORS errors in console"
-**Solution:**
-- Ensure backend CORS allows `http://localhost:3000`
-- Check backend CORS configuration
-- Restart backend services after config changes
-
-### Issue: "Session not resuming"
-**Solution:**
-- Check chat backend database is running
-- Verify session exists in database
-- Check browser console for errors
-
-## Testing the Application
-
-### Test Authentication
-1. Go to `http://localhost:3000`
-2. Login with admin credentials
-3. Verify redirect to chat page
-4. Check token in localStorage (DevTools → Application → Local Storage)
-
-### Test Chat Functionality
-1. Send a message: "What is my account balance?"
-2. Verify bot response appears
-3. Check session ID in header
-4. Send another message to test conversation flow
-
-### Test Session Management
-1. Send multiple messages in a session
-2. Click "New Session" to start fresh
-3. Check unresolved sessions in sidebar
-4. Click "Resume" on previous session
-5. Verify all messages are loaded
-
-### Test Session Controls
-1. Click "More" in session bar
-2. Click "Mark as Resolved"
-3. Verify session status changes
-4. Test "End Session" functionality
-
-## Production Deployment
-
-### Build
-```bash
-npm run build
-```
-
-### Deploy
-The `dist/` folder contains the production build. Deploy to:
-- Netlify
-- Vercel
-- AWS S3 + CloudFront
-- Any static hosting service
-
-### Environment Variables for Production
-Update `.env` with production URLs:
-```env
-VITE_CHAT_BACKEND_URL=https://your-chat-backend.com
-VITE_BANKING_SERVICE_URL=https://your-banking-service.com/api/v1
-```
-
-## Next Steps
-
-1. **Start the application** and test basic chat
-2. **Explore session management** features
-3. **Test authentication** with different credentials
-4. **Review the code** structure and patterns
-5. **Customize** for your specific needs
-
-## Support
-
-For detailed information, see the main [README.md](./README.md)
-
-For backend API documentation, see:
-- `poc-chat-backend/openapi.yaml`
-- `poc-banking-service/openapi.yaml`
+See [architecture](ARCHITECTURE.md) for request ownership and
+[operator flows](OPERATIONS-CONSOLE.md) for draft/publish, approvals, and recovery.

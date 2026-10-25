@@ -1,11 +1,7 @@
 require('dotenv').config();
 
-const sslOptions = process.env.DB_SSL === 'true' ? {
-  ssl: {
-    require: true,
-    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
-  }
-} : {};
+const { databaseTls } = require('./tls');
+const sslOptions = { ssl: databaseTls() };
 
 module.exports = {
   development: {

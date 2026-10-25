@@ -8,10 +8,9 @@ class HandoffService {
     if (!this.ready) this.ready = (async () => {
       if (!this.pool) {
         const { Pool } = require('pg');
-        this.pool = new Pool(process.env.HANDOFF_DATABASE_URL ? { connectionString: process.env.HANDOFF_DATABASE_URL }
-          : { host: process.env.DB_HOST || 'localhost', port: Number(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'poc_chat',
-            user: process.env.DB_USER || 'postgres', password: process.env.DB_PASSWORD || 'postgres',
-            ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false });
+        this.pool = new Pool(require('../database/tls').pgOptions(process.env.HANDOFF_DATABASE_URL,
+          { host: process.env.DB_HOST || 'localhost', port: Number(process.env.DB_PORT || 5432), database: process.env.DB_NAME || 'poc_chat',
+            user: process.env.DB_USER || 'postgres', password: process.env.DB_PASSWORD || 'postgres' }));
       }
       if (process.env.HANDOFF_SCHEMA_AUTO_MIGRATE === 'false') {
         await this.pool.query('SELECT grant_hash,consumed_at FROM servicing_resume_grants LIMIT 0');

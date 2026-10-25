@@ -1,309 +1,85 @@
-# Development Guide
+# Development
 
-This guide covers development workflows for the POC Banking Chat application.
+Use Node.js 22 and npm 10 or later. The root workspace includes eight application services; PostgreSQL 15 and Redis 7 are the reference infrastructure. Start with [Quick start](../getting-started/quick-start.md).
 
-## Project Structure
+## Repository map
 
-```
-poc-banking-chat/
-├── services/                  # Microservices (npm workspaces)
-│   ├── frontend/             # React/Vite chat UI
-│   ├── api-gateway/          # API Gateway
-│   ├── chat-backend/         # Socket.IO chat server
-│   ├── banking-service/      # Banking domain APIs
-│   ├── nlu-service/          # DialogFlow NLU
-│   ├── mcp-service/          # MCP tools
-│   ├── ai-orchestrator/      # LangGraph workflows
-│   └── agent-ui/             # Agent dashboard
-├── docs/                      # Documentation
-├── scripts/                   # Build/deploy scripts
-├── docker/                    # Docker configurations
-├── api-docs/                  # OpenAPI specifications
-└── package.json              # Root monorepo config
-```
+| Path | Responsibility |
+| --- | --- |
+| `services/frontend` | React/Vite customer application and Servicing Studio |
+| `services/api-gateway` | Routing, control-plane releases, operations, identity and readiness |
+| `services/chat-backend` | Authenticated chat/Socket.IO, session persistence and handoff grants |
+| `services/banking-service` | Authoritative domain APIs, local authentication and banking migrations |
+| `services/nlu-service` | Legacy NLU/intent integration |
+| `services/mcp-service` | Registered banking tool contracts |
+| `services/ai-orchestrator` | Governed workflows, model adapters and durable financial dispatch |
+| `services/agent-ui` | Separate support-agent dashboard |
+| `deployment-scripts` | Profile generation, preflight, explicit migrations and probes |
 
-## Development Setup
-
-### Prerequisites
+## Start the development stack
 
 ```bash
-# Verify Node.js version
-node -v  # Should be >= 22.0.0
-
-# Verify npm version
-npm -v   # Should be >= 10.0.0
-
-# Verify PostgreSQL version
-psql --version  # Should be >= 15.0
-```
-
-### Initial Setup
-
-```bash
-# Clone and install
-git clone https://github.com/kishorekota-dev/map_demo.git
-cd map_demo
-npm install
-
-# Validate environment
-npm run validate
-```
-
-### Environment Configuration
-
-1. Copy the example environment file:
-```bash
-cp .env.example .env.development
-```
-
-2. Configure service-specific environments:
-```bash
-# Each service has its own .env.example
-cp services/frontend/.env.example services/frontend/.env
-cp services/banking-service/.env.example services/banking-service/.env
-# ... repeat for other services
-```
-
-### Database Setup
-
-The default development configuration persists banking data, AI workflow state,
-and chat sessions and messages in PostgreSQL. Start PostgreSQL before launching
-the services; the chat backend fails fast instead of silently using process
-memory when persistence is enabled and the database is unavailable.
-
-```bash
-# Skip this command if PostgreSQL 15+ is already running locally
-docker compose -f docker/docker-compose.local.yml up -d postgres
-
-# Create databases, run migrations, and load the documented demo customer
+test -f .env.development || cp .env.example .env.development
+npm ci
+./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml up -d postgres redis
 npm run db:setup
-npm run db:seed
-```
-
-## Running Services
-
-### Development Mode (Hot Reload)
-
-```bash
-# Start all eight services with live reload
+./scripts/run-with-env.sh npm run db:seed
 npm run dev
-
-# Start specific service
-npm run dev:frontend
-npm run dev:banking
-npm run dev:chat
 ```
 
-### Production Mode
+The environment loader parses dotenv data without executing shell expressions. It exports the selected file's values to child processes. Set `APP_ENV_FILE` to choose another file; see [Configuration](../getting-started/configuration.md). Do not use a production database for bootstrap or test commands.
+
+`npm run dev` starts all eight applications. The individual commands are `dev:frontend`, `dev:gateway`, `dev:chat`, `dev:banking`, `dev:nlu`, `dev:mcp`, `dev:ai` and `dev:agent`. Use Ctrl-C to stop foreground development. `npm run health` checks the fixed default host ports; inspect gateway `/health/ready` for readiness and `/health/live` for liveness.
+
+Both current Docker stacks also contain all eight applications. `npm run docker:build` then `npm run docker:up` uses the local development frontend; `npm run docker:full` uses its static build. The full-stack service mode follows `NODE_ENV` and defaults to development. The dedicated [production overlay](deployment.md#dedicated-production-deployment) is the supported starting point for hardened deployment. Avoid running host and container copies on identical ports.
+
+## Workspace commands and checks
 
 ```bash
-# Build all services
-npm run build
-
-# Start all services
-npm run start
-```
-
-## Workspace Commands
-
-The project uses npm workspaces. Run commands in specific services:
-
-```bash
-# Run command in specific workspace
-npm run <script> -w services/<service-name>
-
-# Examples
-npm run test -w services/banking-service
-npm run lint -w services/frontend
-npm install axios -w services/chat-backend
-```
-
-## Code Style
-
-### TypeScript/JavaScript
-
-- Use ESLint with project config
-- Prettier for formatting
-- TypeScript strict mode for frontend
-
-```bash
-# Lint all services
+npm run test -w services/api-gateway -- --runInBand
+npm run test -w services/chat-backend -- --runInBand
+npm run test -w services/ai-orchestrator -- --runInBand
+npm run test -w services/frontend
+npm run build -w services/frontend
 npm run lint
-
-# Format code
-npm run format
+npm run typecheck
+node --test deployment-scripts/__tests__/*.test.cjs
 ```
 
-### React Components (Frontend)
+Root `npm test` runs workspace tests; not every suite is a live integration test. The CI workflow uses Node 22, service Jest suites, frontend Vitest/build and a separate disposable PostgreSQL job. Database-backed tests skip unless their explicit test URLs are present:
 
-Follow **Atomic Design** principles:
+| Test group | Variable |
+| --- | --- |
+| Control-plane persistence | `TEST_CONTROL_PLANE_DATABASE_URL` |
+| Operations, identity, replicas | `TEST_OPERATIONS_DATABASE_URL` (falls back to the control-plane test URL) |
+| Runtime ledger and handoff grants | `RUNTIME_TEST_DATABASE_URL` |
 
-```
-components/
-├── atoms/        # Basic elements (Button, Input)
-├── molecules/    # Combinations (SearchBox, FormField)
-├── organisms/    # Complex components (ChatWindow, Header)
-├── templates/    # Page layouts
-└── pages/        # Full pages
-```
+Provision a **disposable** test database and inject these URLs through your local environment. The tests create/update/delete synthetic data and schemas. Run the matching workspace suite with `--runInBand`. Passing skipped suites is not evidence of PostgreSQL behavior. Provider protocol tests use fixtures; no live model availability or quality is established by them.
 
-### Node.js Services
+`npm run validate` checks basic environment/toolchain structure. `npm run product:validate` checks an enterprise profile's shape. `npm run production:preflight -- --env /absolute/path/deployment.env --compose` checks the complete deployment configuration and merged production Compose manifest. These are different checks.
 
-- Express route handlers in `/routes`
-- Business logic in `/services`
-- Database queries in `/database` or `/models`
-- Middleware in `/middleware`
+## Database changes
 
-## Testing
-
-### Unit Tests
+Banking migrations live in `services/banking-service/database/migrations/V<number>__<description>.sql`. The Node migration runner records successful versions in `flyway_schema_history`; root `npm run db:migrate` affects banking only. Run it through the environment loader:
 
 ```bash
-# Run all tests
-npm run test
-
-# Run specific service tests
-npm run test -w services/banking-service
-
-# Watch mode
-npm run test -- --watch -w services/frontend
+./scripts/run-with-env.sh npm run db:migrate
 ```
 
-### Integration Tests
+Use a new version for schema changes; do not edit an already-deployed migration to change its meaning. Seeds are local demo data. Production startup rejects demo seeding.
 
-```bash
-# Start services first
-npm run dev
+Control-plane/operations schemas, the financial dispatch ledger and resume grants have separate owners. `npm run platform:migrate -- --env /absolute/path/migration.env` applies their canonical SQL under transactions and advisory locks. Base chat/orchestrator tables have their own schema commands described in [Deployment](deployment.md#database-initialization-and-upgrades). Keep schema ownership separate from application runtime credentials and verify upgrades on restored staging data.
 
-# Run integration tests
-npm run test:integration
-```
+## Governed behavior changes
 
-### End-to-End Tests
+Prompts, intent examples, field collection, channel policy and model profiles should change through a draft release, diff, evaluation, approval and publication. A prompt cannot create a new MCP tool or bypass confirmation/ownership checks. Adding a new executable intent requires matching code/catalog/tool contracts and tests. See [Control plane](control-plane.md) and [Model providers](llm-providers.md).
 
-```bash
-npm run test:e2e
-```
+Model connectivity tests are explicit administrative actions. `npm run llm:probe -- --list` reads sanitized configuration only; `--models` contacts a provider, and `--test` performs inference. Never treat an endpoint health check as a quality evaluation.
 
-## Database Development
+## Debugging and changes
 
-### Migrations
+Run service-specific development commands for readable logs. For a Node inspector, load the environment and invoke the correct service entrypoint from its workspace directory; remember that root wrappers change the working directory to the repository root. Avoid attaching a debugger to production traffic.
 
-```bash
-# Run migrations
-npm run db:migrate
+Use existing ESLint/TypeScript conventions and run focused tests appropriate to the behavior changed. `npm run format` rewrites matching files repository-wide; prefer formatting only your edited files during a scoped change. Keep generated deployment outputs, runtime data, credentials and local logs out of commits.
 
-# Seed database
-npm run db:seed
-
-# Reset database
-npm run db:reset
-```
-
-### Adding New Migrations
-
-Create migration files in `services/banking-service/database/migrations/`:
-
-```
-V1__initial_schema.sql
-V2__add_fraud_table.sql
-V3__add_indexes.sql
-```
-
-## Adding a New Service
-
-1. Create service directory:
-```bash
-mkdir -p services/new-service/src
-```
-
-2. Initialize package.json:
-```bash
-cd services/new-service
-npm init -y
-```
-
-3. Add to workspace (automatic with `services/*` glob)
-
-4. Create standard structure:
-```
-services/new-service/
-├── src/
-│   ├── server.js
-│   ├── routes/
-│   ├── services/
-│   └── middleware/
-├── package.json
-├── .env.example
-└── README.md
-```
-
-5. Add health endpoint:
-```javascript
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', service: 'new-service' });
-});
-```
-
-## Debugging
-
-### VS Code Launch Configuration
-
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Debug Banking Service",
-      "type": "node",
-      "request": "launch",
-      "cwd": "${workspaceFolder}/services/banking-service",
-      "program": "${workspaceFolder}/services/banking-service/server.js",
-      "env": { "NODE_ENV": "development" }
-    }
-  ]
-}
-```
-
-### Debug Logging
-
-Set log level in `.env`:
-```
-LOG_LEVEL=debug
-```
-
-### Common Issues
-
-See [Troubleshooting Guide](../reference/troubleshooting.md)
-
-## Git Workflow
-
-### Branch Naming
-
-- `feature/description` - New features
-- `fix/description` - Bug fixes
-- `docs/description` - Documentation
-- `refactor/description` - Code refactoring
-
-### Commit Messages
-
-Follow conventional commits:
-```
-feat: add payment processing
-fix: resolve session timeout issue
-docs: update API documentation
-refactor: simplify auth middleware
-```
-
-### Pull Request Process
-
-1. Create feature branch
-2. Make changes with tests
-3. Run linting and tests
-4. Create PR with description
-5. Address review feedback
-6. Merge after approval
-
-## Deployment
-
-See [Deployment Guide](deployment.md) for production deployment instructions.
+For failures, use the [Troubleshooting guide](../reference/troubleshooting.md) before deleting dependencies, resetting databases or changing schemas manually.

@@ -1,107 +1,53 @@
-# Deterministic Behavior
+# Determinism, replay, and recovery
 
-This platform is engineered so that the **banking use case is reproducible**:
-for the same input and the same session state, the system produces the same
-intent routing, the same data-collection / confirmation gates, the same tool
-calls, the same policy decisions, and a stable response. Determinism is a
-correctness property for a banking assistant — a confirmed transfer must behave
-identically every time, and an auditor must be able to replay a conversation.
+The correctness boundary is deterministic policy and authoritative domain results, not a promise that every natural-language or provider response is identical. This document describes the current implementation and its limits.
 
-This document describes where determinism is enforced and how it is verified.
+## Request paths
 
-## End-to-end request flow
+Chat sends a new request to the orchestrator and sends pending customer replies to its feedback endpoint. Legacy NLU supplies a canonical hint. With control-plane governance enabled, published literal/lexical/external/LLM recognition determines the actual intent. A live provider, newly published release, changed domain state, or different user input can change the result.
 
-```
-Customer ──ws──► chat-backend ──http──► nlu-service ──► (canonical intent)
-                      │
-                      └──http (Bearer JWT)──► ai-orchestrator
-                                                  │  LangGraph workflow
-                                                  │  + policy engine
-                                                  └──► mcp-service ──► banking-service
-```
+| Layer | Controlled behavior | Limit |
+| --- | --- | --- |
+| Published policy | Drafts are isolated; a workflow pins one release/environment/cohort | Deployment provider endpoints and credentials can rotate outside a release |
+| Literal/lexical recognition | Same catalog, rules, and input produce the same candidate ordering | Lexical similarity is not embedding semantics or calibrated probability |
+| External/LLM recognition | Published catalog IDs, thresholds, ambiguity policy, and bounded JSON results | Hosted/local inference is not guaranteed bit-for-bit reproducible |
+| Fields | Canonical validators plus additive published requirements/schemas | Model extraction may vary; its output still must validate |
+| Confirmation | Canonical and sensitive-tool floors remain; continuation revalidates data | A model cannot supply verified confirmation |
+| Tool selection | Canonical handler and published allowlist determine available operations | A new executable action requires a reviewed handler |
+| Financial mutation | Stable interaction key, dispatch ledger, explicit uncertain outcome | There is no atomic exactly-once transaction across the bank and runtime |
+| Response | Banking values come from deterministic formatting of raw tool results | Optional no-tool model prose can vary |
+| Coordination | Local mutex plus enabled PostgreSQL session advisory lock | Memory-only development mode is not cross-worker or restart safe |
 
-Every customer message follows the **same fixed pipeline**:
+## Operation identity
 
-1. **chat-backend** classifies the message via the NLU service, then calls the
-   AI orchestrator. Routing is a pure function of `(intent, workflow state)` —
-   it does **not** depend on live agent load or health.
-2. **nlu-service** returns a single canonical intent (snake_case) from a
-   deterministic classifier, with a fixed fallback intent.
-3. **ai-orchestrator** runs the LangGraph workflow: deterministic routing,
-   policy checks, data validation, tool execution, and response generation.
-4. **mcp-service** executes the mapped banking tools.
-5. **banking-service** is the authoritative system of record.
+REST clients retain `X-Interaction-ID` across retries of the same new action; socket clients use `clientMessageId`. Feedback retains the original pinned interaction ID. The mutation ledger keys tenant, session, interaction, and tool, and hashes action parameters without credentials.
 
-## Determinism guarantees by layer
+A successful prior action returns its recorded result. Reusing a key with different parameters is rejected. A dispatched action without an acknowledged durable outcome becomes `reconciliation_required`; it is not blindly retried on another transport. An operator records an external evidence reference when reconciling it. A reconciled failed key remains blocked.
 
-| Layer | What is deterministic | How it is enforced |
-|-------|----------------------|--------------------|
-| Intent classification | Same text → same canonical intent | Deterministic pattern matcher is primary; DialogFlow is advisory only and gated behind a confidence threshold; one canonical fallback intent (`general_inquiry`). See `nlu-service/src/services/intent-vocabulary.js`. |
-| Intent vocabulary | One vocabulary across services | Every classifier name is mapped to the orchestrator's snake_case vocabulary; parity with `intentConfig` is enforced by a contract test. |
-| Workflow routing | Same state → same next node | LangGraph `StateGraph` with pure routing functions (`routeAfterIntent`, `routeAfterDataCheck`, `routeAfterTools`). |
-| Data collection | Same input → same required/invalid fields by default | Rule-based `intentMapper.validateData`; remote SLM extraction requires `SLM_ENABLED=true`, while an explicit local `SLM_BASE_URL` is a separate opt-in. |
-| Confirmation / limits | Same amount + state → same gate | Policy engine: regex + fixed thresholds (`>$25k` hard block, `≥$1k` confirmation). The confirm-then-execute path re-runs the same validation as the graph path. |
-| Tool execution | Same tool set per intent; same call shape | `INTENT_TOOL_MAPPING` is static; a single pinned MCP transport (no implicit per-error fallback); arguments validated against each tool's schema. |
-| Response generation | Tool-backed replies contain authoritative banking values | Any intent with a tool path uses the deterministic formatter over raw tool results. Optional remote generation can run only for no-tool intents and requires `OPENAI_ENABLED=true` plus a usable key. |
-| Session state | No lost updates under concurrency | Per-session mutex serializes read-modify-write; reads are side-effect free. |
+After acknowledged completion, ancillary transcript/evidence/session-write failure must not turn success into an automatic new action. A stale pending session blocks a fresh process request; confirmation retry uses the original ledger key. Storage recovery can still require operator attention. These safeguards do not deduplicate a different business action that the client intentionally submits under a new key.
 
-## Optional model configuration
+## Model controls
 
-Remote model calls are disabled by default. Tool-backed responses never use a
-response LLM, even when it is enabled. If an operator explicitly enables remote
-generation for no-tool intents or remote structured extraction, sampling is
-pinned as follows:
+See [provider configuration](../guides/llm-providers.md). Missing `config.llm` preserves the legacy environment-controlled model paths; explicit disabled blocks all legacy/plugin calls; enabled profiles are pinned to the release. Model providers receive their explicit server credential, never the customer's bearer token. Tool-backed generation remains deterministic even when a model profile is enabled.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `OPENAI_ENABLED` | `false` | Explicitly opt into remote generation for no-tool intents; also requires a usable `OPENAI_API_KEY`. |
-| `OPENAI_TEMPERATURE` | `0` | Greedy decoding for reproducible responses. |
-| `OPENAI_TOP_P` | `0` | Disable nucleus sampling. |
-| `OPENAI_SEED` | `42` | Pin the seed where the endpoint supports it. |
-| `SLM_ENABLED` | `false` | Explicitly opt into remote extraction; also requires a usable SLM or OpenAI key. |
-| `SLM_BASE_URL` | unset | A non-empty local OpenAI-compatible URL is itself an opt-in and needs no remote key. |
-| `SLM_TEMPERATURE` | `0` | Structured field extraction must be stable. |
-| `SLM_JSON_MODE` | `true` | Force parseable JSON output. |
-| `MCP_TRANSPORT` | `http` | Pin a single tool transport (no implicit fallback). |
+Temperature zero and provider-specific sampling controls are best-effort reproducibility settings, not an audit replay guarantee. Profile temperature can be omitted when a server registration declares it unsupported. Model timeouts apply to text/JSON requests; channel response budgets do not cancel financial tools.
 
-> **Falsy-zero bug (fixed):** configuration uses NaN-safe parsing. The previous
-> `parseFloat(x) || 0.7` silently overrode an explicit `0`, making determinism
-> unconfigurable. Setting `OPENAI_TEMPERATURE=0` is now honored.
+`MCP_TRANSPORT=http` is the default adapter selection. `protocol` and `auto` use the repository WebSocket client where available; read fallback and connection behavior are documented in the [MCP integration guide](../../services/ai-orchestrator/MCP-INTEGRATION-README.md). The durable mutation path does not retry a dispatched financial effect just because its acknowledgement was lost.
 
-Pinned sampling is best-effort reproducibility for optional model calls, not the
-banking-data correctness boundary. Raising temperature above 0 trades
-reproducibility for response variety and is **not recommended**.
+## Persistence is layered
 
-## Fail-fast contracts
-
-Misconfiguration cannot silently degrade behavior:
-
-- **Intent config consistency** — the orchestrator asserts at startup that every
-  categorized intent has all five config blocks and that every referenced prompt
-  template resolves (the historical "dead prompt" bug). See
-  `intentMapper.assertConfigConsistency()`.
-- **Tool contract** — the orchestrator's `CANONICAL_BANKING_TOOLS` must each map
-  to an implemented MCP handler; the MCP server asserts this at startup and a
-  cross-service test enforces it (would have caught the 8 missing tools and the
-  `banking_transfer` rename).
-- **Intent vocabulary parity** — a test asserts the NLU canonical set equals the
-  orchestrator's intent set.
-
-## What is *not* deterministic (by design)
-
-- **Identifiers and timestamps** — request IDs, execution IDs, and reference
-  numbers use `Date.now()` / random suffixes. These are intentionally unique and
-  never drive control flow or business outcomes.
-- **External ML (DialogFlow)** — treated as advisory only; the deterministic
-  classifier wins on disagreement or low confidence.
-- **Wall-clock dependent expiry** — session TTLs depend on real time.
+`ai_sessions`, `ai_human_feedback`, and the tool ledger provide persistent release/continuation and outcome data. LangGraph's `MemorySaver` is process-local. Enabling `CHECKPOINT_ENABLED` does not make checkpoints durable, and its current history/clear helper methods do not implement a durable audit store.
 
 ## Verification
 
-Determinism is covered by regression tests run in CI (`.github/workflows/ci.yml`):
+Run the relevant workspace suites from the repository root:
 
-- `ai-orchestrator/config/__tests__/determinism.test.js` — temperature/seed/transport defaults, falsy-zero regression.
-- `ai-orchestrator/config/__tests__/intentConfig.test.js` — config consistency + prompt resolution + tool contract.
-- `nlu-service/src/services/__tests__/intent-vocabulary.test.js` — mapping + cross-service parity.
-- `mcp-service/src/tools/__tests__/toolContract.test.js` — tool-name resolution + argument validation.
-- `chat-backend/services/__tests__/keyedMutex.test.js` — per-session serialization.
+```bash
+npm test -w services/ai-orchestrator -- --runInBand
+npm test -w services/chat-backend -- --runInBand
+npm test -w services/mcp-service -- --runInBand
+npm test -w services/nlu-service -- --runInBand
+npm test -w services/api-gateway -- --runInBand
+```
+
+Set `RUNTIME_TEST_DATABASE_URL` to an isolated PostgreSQL test database for actual multi-worker/restart/replay tests. Without it, those database tests are skipped. Provider tests use synthetic fixtures and do not certify the separate Mac Studio or a cloud account. Current test output, deployment smoke tests, provider contract verification, and recovery drills are evidence; historical test reports are not current readiness certificates.

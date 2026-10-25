@@ -1,424 +1,157 @@
-# POC Banking Service
+# Banking service
 
-A comprehensive microservice for banking operations including account management, transactions, cards, transfers, fraud detection, and dispute resolution.
+The current Express service owns database-backed account, transaction, card,
+transfer, fraud-alert, dispute, and password-authentication operations. It listens
+on **port 3005** by default. The customer browser normally reaches business
+operations through the gateway and orchestration layer, not direct banking forms.
 
-## Features
+Start with the [documentation index](../../docs/README.md). The route mounts in
+[server.js](server.js), the [API quick reference](API-QUICK-REFERENCE.md), and
+[database guide](database/README.md) describe the current implementation.
 
-- ✅ **Account Management**: Checking, savings, credit, loan, and investment accounts
-- ✅ **Transactions**: Deposits, withdrawals, purchases, payments with full history
-- ✅ **Card Services**: Debit and credit card management with security features
-- ✅ **Transfers**: Internal, external, wire, ACH, and P2P transfers
-- ✅ **Fraud Detection**: Real-time fraud alerts with risk scoring
-- ✅ **Dispute Resolution**: Complete dispute lifecycle management
-- ✅ **Database Integration**: PostgreSQL with Flyway migrations
-- ✅ **Security**: JWT authentication, encryption, rate limiting
-- ✅ **Health Checks**: Comprehensive service monitoring
+## Start locally
 
-## Technology Stack
-
-- **Runtime**: Node.js >= 22.0.0
-- **Framework**: Express.js
-- **Database**: PostgreSQL >= 12.0
-- **Migrations**: Flyway
-- **Authentication**: JWT (JSON Web Tokens)
-- **Security**: Helmet, CORS, bcrypt
-- **Logging**: Winston
-- **Validation**: Joi
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 22+
-- PostgreSQL 12+
-- npm or yarn
-
-### Installation
-
-1. **Clone and install**:
-   ```bash
-   cd poc-banking-service
-   npm install
-   ```
-
-2. **Set up database**:
-   ```bash
-   # Create PostgreSQL database
-   createdb poc_banking
-
-   # Copy environment file
-   cp .env.example .env
-
-   # Edit .env with your database credentials
-   vim .env
-
-   # Run migrations and seed data
-   npm run db:setup
-   ```
-
-3. **Start the service**:
-   ```bash
-   # Development mode with auto-reload
-   npm run dev
-
-   # Production mode
-   npm start
-   ```
-
-4. **Verify it's running**:
-   ```bash
-   curl http://localhost:3005/health
-   ```
-
-## API Endpoints
-
-### Accounts
-- `GET /api/accounts` - Get all user accounts
-- `GET /api/accounts/:accountId` - Get account details
-- `POST /api/accounts` - Create new account
-- `PUT /api/accounts/:accountId` - Update account
-- `DELETE /api/accounts/:accountId` - Close account
-- `GET /api/accounts/:accountId/balance` - Get account balance
-- `GET /api/accounts/:accountId/transactions` - Get account transactions
-- `GET /api/accounts/:accountId/statements` - Get account statements
-
-### Transactions
-- `GET /api/transactions` - Get all transactions
-- `GET /api/transactions/:transactionId` - Get transaction details
-- `POST /api/transactions` - Create transaction
-- `POST /api/transactions/:transactionId/cancel` - Cancel transaction
-- `GET /api/transactions/pending` - Get pending transactions
-- `GET /api/transactions/search` - Search transactions
-- `GET /api/transactions/summary` - Get transaction summary
-- `POST /api/transactions/:transactionId/receipt` - Generate receipt
-- `GET /api/transactions/categories` - Get transaction categories
-
-### Cards
-- `GET /api/cards` - Get all user cards
-- `GET /api/cards/:cardId` - Get card details
-- `POST /api/cards` - Create new card
-- `PUT /api/cards/:cardId` - Update card
-- `POST /api/cards/:cardId/block` - Block card
-- `POST /api/cards/:cardId/activate` - Activate card
-- `POST /api/cards/:cardId/replace` - Replace card
-
-### Transfers
-- `GET /api/transfers` - Get all transfers
-- `GET /api/transfers/:transferId` - Get transfer details
-- `POST /api/transfers` - Create transfer
-- `POST /api/transfers/:transferId/process` - Process transfer
-- `POST /api/transfers/:transferId/cancel` - Cancel transfer
-
-### Fraud Detection
-- `GET /api/fraud` - Get fraud alerts
-- `GET /api/fraud/:alertId` - Get alert details
-- `POST /api/fraud` - Create fraud alert
-- `PUT /api/fraud/:alertId` - Update alert
-- `POST /api/fraud/:alertId/confirm` - Confirm fraud
-- `POST /api/fraud/:alertId/false-positive` - Mark as false positive
-
-### Disputes
-- `GET /api/disputes` - Get all disputes
-- `GET /api/disputes/:disputeId` - Get dispute details
-- `POST /api/disputes` - Create dispute
-- `PUT /api/disputes/:disputeId` - Update dispute
-- `POST /api/disputes/:disputeId/resolve` - Resolve dispute
-- `POST /api/disputes/:disputeId/withdraw` - Withdraw dispute
-- `POST /api/disputes/:disputeId/evidence` - Add evidence
-
-### Health & Docs
-- `GET /health` - Service health check
-- `GET /health/ready` - Readiness probe
-- `GET /health/live` - Liveness probe
-- `GET /api/docs` - API documentation
-
-## Environment Variables
-
-### Server
-```bash
-PORT=3005
-NODE_ENV=development
-LOG_LEVEL=info
-```
-
-### Database
-```bash
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=poc_banking
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_POOL_MIN=2
-DB_POOL_MAX=10
-```
-
-### Security
-```bash
-JWT_SECRET=your-super-secret-jwt-key
-JWT_EXPIRY=24h
-BCRYPT_ROUNDS=12
-ALLOWED_ORIGINS=http://localhost:3000
-```
-
-### Banking Configuration
-```bash
-DAILY_TRANSFER_LIMIT=10000
-MONTHLY_TRANSFER_LIMIT=50000
-FRAUD_THRESHOLD_AMOUNT=5000
-CARD_DAILY_LIMIT=2000
-```
-
-See `.env.example` for complete configuration options.
-
-## Database
-
-### Setup
+Use Node.js 22+ and npm 10+ at the repository root. Configure a disposable local
+PostgreSQL database and root environment before running:
 
 ```bash
-# Install database dependencies
-cd database && npm install && cd ..
-
-# Check connection
-node database/scripts/check-connection.js
-
-# Run migrations
-npm run db:migrate
-
-# Seed test data
-npm run db:seed
-
-# Complete setup (migrations + seeds)
-npm run db:setup
-
-# Reset database (drops all tables)
-npm run db:reset
+npm ci
+./scripts/run-with-env.sh node services/banking-service/database/scripts/check-connection.js
+./scripts/run-with-env.sh npm run db:migrate -w services/banking-service
+npm run dev:banking
 ```
 
-### Schema
+The root launcher loads `.env.development`; `APP_ENV_FILE` selects another reviewed
+environment file. Direct `npm start -w services/banking-service` starts the server
+without running container bootstrap. Migrate first when running that way.
 
-- **users**: Customer information and authentication
-- **accounts**: Bank accounts with balances
-- **transactions**: Financial transactions
-- **cards**: Debit and credit cards
-- **transfers**: Money transfers
-- **fraud_alerts**: Fraud detection alerts
-- **disputes**: Transaction disputes
-
-See `database/README.md` for detailed database documentation.
-
-## Development
-
-### Running in Development
+Optional **non-production** demo data is loaded with:
 
 ```bash
-# Start with auto-reload
-npm run dev
-
-# Watch tests
-npm run test:watch
-
-# Lint code
-npm run lint
-
-# Fix lint issues
-npm run lint:fix
+./scripts/run-with-env.sh npm run db:seed -w services/banking-service
 ```
 
-### Project Structure
+Seeding requires empty business tables on its first run. The entire seed bundle
+runs in one transaction; a matching previously applied bundle is a no-op. A changed
+bundle or pre-existing business data is rejected. Production seeding is disabled.
+Do not use seeded sample accounts as enterprise identity provisioning.
 
-```
-poc-banking-service/
-├── config/                 # Configuration files
-├── controllers/            # Route controllers
-├── database/              # Database module
-│   ├── migrations/        # Flyway SQL migrations
-│   ├── seeds/            # Test data seeds
-│   ├── repositories/     # Data access layer
-│   └── scripts/          # Database scripts
-├── middleware/           # Express middleware
-├── routes/              # API routes
-├── utils/               # Helper utilities
-├── logs/                # Log files
-├── .env.example         # Environment template
-├── package.json         # Dependencies
-└── server.js            # Entry point
-```
+## Container startup
 
-## Testing
+[docker-entrypoint.sh](docker-entrypoint.sh) calls the Node
+[bootstrap runner](database/scripts/bootstrap.js). It validates production JWT
+configuration, waits for a bounded database connection, runs enabled migrations,
+and starts the application only after success. It needs neither `psql` nor `nc`.
 
-### Test Users
+| Setting | Default and behavior |
+| --- | --- |
+| `BANKING_RUN_MIGRATIONS` | `true`; set `false` only when a separate deployment migration job owns schema updates |
+| `BANKING_SEED_DEMO_DATA` | `false`; explicit `true` enables demo seed outside production only |
+| `BANKING_DB_READY_TIMEOUT_MS` | 30,000; accepted range 1,000–300,000 |
+| `PORT` | 3005 |
+| `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Explicit nonempty values required in production before any pool, migration, bootstrap, or server starts; development retains local defaults |
+| `DB_PORT` | PostgreSQL port; defaults to 5432 |
+| `DB_SSL` | `true` enables TLS with certificate verification |
+| `DB_SSL_CA_FILE` | Optional trusted CA certificate file |
+| `DB_SSL_REJECT_UNAUTHORIZED` | `false` is an explicit development/test exception and is rejected in production |
+| `JWT_SECRET` | Shared explicit signing/verification key; production rejects missing, known-placeholder, or shorter-than-32-character values |
+| `JWT_EXPIRES_IN` | Access-token lifetime; default `15m` |
+| `REFRESH_TOKEN_EXPIRES_IN` | Refresh JWT lifetime; default `7d` |
+| `DEPLOYMENT_TENANT_ID` | Deployment binding in issued access tokens |
+| `ALLOWED_ORIGINS` | Comma-separated browser origins |
 
-All test users have password: `Test123!`
+The current database pool reads `DB_*`, not `DATABASE_URL`. The latter appears in
+legacy Flyway metadata and other services; it does not replace banking pool
+settings. The committed environment example is a template, not production secrets.
+Production startup fails with the missing setting names when any required `DB_*`
+value is absent or blank; configured values and passwords are not included in that
+error.
 
-| Email | Accounts |
-|-------|----------|
-| john.doe@example.com | Checking, Savings, Credit |
-| jane.smith@example.com | Checking, Savings |
-| bob.johnson@example.com | Checking, Savings |
-| alice.williams@example.com | Checking, Investment |
-| charlie.brown@example.com | Checking |
-
-### Run Tests
+## Health and API boundaries
 
 ```bash
-# Run all tests
-npm test
-
-# Run specific test file
-npm test -- accounts.test.js
-
-# Watch mode
-npm run test:watch
+curl --fail http://localhost:3005/health/live
+curl --fail http://localhost:3005/health/ready
 ```
 
-## Security
+`/health/ready` returns 503 when the database is unhealthy. `/health` includes a
+database status object but may still return 200 when that object is unhealthy;
+use the readiness endpoint for deployment gating. Banking health does not test
+LLM providers, voice, chat, or the full serving path.
 
-- **Authentication**: JWT-based authentication required for all API endpoints
-- **Encryption**: Sensitive data (cards, SSNs) encrypted at rest
-- **Rate Limiting**: Configurable rate limits per endpoint
-- **Input Validation**: All inputs validated with Joi
-- **SQL Injection**: Parameterized queries throughout
-- **CORS**: Configurable allowed origins
-- **Helmet**: Security headers enabled
-- **HTTPS**: Recommended for production
+Mounted business prefixes are `/api/v1/accounts`, `/transactions`, `/cards`,
+`/transfers`, `/fraud`, and `/disputes`, each beneath `/api/v1`. Authentication is
+under `/api/v1/auth`. Customer/KYC tables exist, but the older `/customers` and
+customer-KYC APIs in historical documents are not mounted by this server.
+The served `openapi.yaml` retains older paths/ports and is not a complete current
+route contract. See [API documentation](API-DOCUMENTATION.md).
 
-## Monitoring
+## Servicing roles and model boundary
 
-### Health Checks
+An empty production database needs an explicitly provisioned administrator before
+OIDC mappings can be managed. After migrations, use the one-shot
+[administrator bootstrap CLI](database/scripts/bootstrap-admin.js). Configure
+`BANKING_ADMIN_EMAIL`, optional `BANKING_ADMIN_USERNAME`, and
+`BANKING_ADMIN_TENANT_ID` equal to the explicit `DEPLOYMENT_TENANT_ID` in the
+selected deployment environment. Select the intended file through `APP_ENV_FILE`;
+do not rely on a development environment fallback for production.
+Host bootstrap requires explicit `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`
+for a database reachable from that host, plus `DB_PORT` when it differs from 5432.
+The root production template's servicing URLs do not supply these banking settings.
+Alternatively, execute the CLI inside the configured banking container, where
+Compose already supplies its private database settings.
 
 ```bash
-# Basic health check
-curl http://localhost:3005/health
-
-# Readiness probe (Kubernetes)
-curl http://localhost:3005/health/ready
-
-# Liveness probe (Kubernetes)
-curl http://localhost:3005/health/live
+npm run platform:bootstrap -- --password-stdin
 ```
 
-### Logs
-
-Logs are written to:
-- Console (stdout)
-- `logs/banking-service.log`
-
-Log levels: `error`, `warn`, `info`, `debug`
-
-Configure via `LOG_LEVEL` environment variable.
-
-## Production Deployment
-
-### Build & Deploy
+For a running production Compose banking container, use the same completed
+`APP_ENV_FILE`; export the administrator email and tenant confirmation from your
+approved deployment configuration before running:
 
 ```bash
-# Install production dependencies only
-npm install --production
-
-# Set environment
-export NODE_ENV=production
-
-# Run migrations
-npm run db:migrate
-
-# Start service
-npm start
+./scripts/run-with-env.sh docker compose \
+  -f docker/docker-compose-full-stack.yml -f docker/docker-compose.production.yml \
+  exec -T -e BANKING_ADMIN_EMAIL -e BANKING_ADMIN_TENANT_ID banking-service \
+  node database/scripts/bootstrap-admin.js --password-stdin
 ```
 
-### Docker
+This container command inherits the deployed `DEPLOYMENT_TENANT_ID` and banking
+`DB_*` settings. It does not expose the database port or change its configuration.
+
+Supply the password through standard input from an approved secret source, or
+use `BANKING_ADMIN_PASSWORD` in the process environment. Never put it in command
+arguments. New users require a 16–72 byte password containing upper/lowercase,
+a number, and a symbol; it is hashed with bcrypt. `--existing-only` grants the
+role to an existing active, unlocked account with a username and requires no
+password. An existing password is never changed by this command.
+
+The CLI grants only `CONTROL_PLANE_ADMIN`, records the change transactionally
+with actor `platform-bootstrap-cli`, and is idempotent. It does not pretend to
+identify a human approver, create customer accounts, grant banking `ADMIN`, or
+enable public registration. Tenant confirmation checks configuration agreement;
+operators must still select the correct dedicated banking database.
+
+[V9](database/migrations/V9__control_plane_roles.sql) defines administrator,
+editor, operator, and viewer roles for the control plane without assigning them
+to existing customers. Authentication signs database roles and the deployment
+tenant into access tokens; refresh re-reads those roles. The gateway remains the
+authority for control-plane permissions. A servicing role does not automatically
+grant banking administrator actions.
+
+Models do not run in this service. See [Servicing Studio](../frontend/OPERATIONS-CONSOLE.md),
+[control plane](../../docs/guides/control-plane.md),
+[operations](../../docs/guides/servicing-operations.md), and
+[model providers](../../docs/guides/llm-providers.md).
+
+## Tests and remaining boundaries
 
 ```bash
-# Build image
-docker build -t poc-banking-service .
-
-# Run container
-docker run -p 3005:3005 \
-  -e DATABASE_URL=postgresql://user:pass@host:5432/db \
-  poc-banking-service
+npm test -w services/banking-service -- --runInBand
 ```
 
-### Environment Checklist
-
-- [ ] Set `NODE_ENV=production`
-- [ ] Use strong `JWT_SECRET`
-- [ ] Enable database SSL (`DB_SSL=true`)
-- [ ] Configure proper `ALLOWED_ORIGINS`
-- [ ] Set up database backups
-- [ ] Configure log rotation
-- [ ] Set up monitoring/alerting
-- [ ] Use connection pooling
-- [ ] Enable rate limiting
-- [ ] Review security headers
-
-## Troubleshooting
-
-### Database Connection Issues
-
-```bash
-# Check PostgreSQL is running
-pg_isready -h localhost -p 5432
-
-# Test connection
-node database/scripts/check-connection.js
-
-# Check logs
-tail -f logs/banking-service.log
-```
-
-### Migration Failures
-
-```bash
-# Check migration status
-psql -d poc_banking -c "SELECT * FROM flyway_schema_history;"
-
-# Reset and retry
-npm run db:reset
-npm run db:setup
-```
-
-### Service Won't Start
-
-1. Check port 3005 is available
-2. Verify database is accessible
-3. Check environment variables are set
-4. Review logs for errors
-
-## Performance
-
-### Optimization Tips
-
-- Connection pooling configured (2-10 connections)
-- Indexes on frequently queried columns
-- Pagination on all list endpoints
-- Caching for static/reference data
-- Async/await for non-blocking I/O
-
-### Benchmarks
-
-- Average response time: < 50ms
-- Throughput: 1000+ req/sec
-- Database query time: < 10ms (indexed)
-
-## Contributing
-
-1. Create feature branch
-2. Make changes
-3. Add/update tests
-4. Run lint: `npm run lint:fix`
-5. Run tests: `npm test`
-6. Submit pull request
-
-## License
-
-ISC
-
-## Support
-
-For issues or questions:
-- Check logs: `logs/banking-service.log`
-- Review database: `node database/scripts/check-connection.js`
-- API docs: `GET http://localhost:3005/api/docs`
-
----
-
-**POC Banking Service** - Enterprise-grade banking microservice with complete database integration
+[Testing instructions](README-TESTING.md) separate mocked unit tests, opt-in
+PostgreSQL bootstrap tests, and older customer-service harnesses. Completion
+reports and benchmark numbers in historical files are not current deployment
+certification. The current bank data model is deployment-scoped; this service
+does not provide isolation for multiple enterprises sharing one banking database.

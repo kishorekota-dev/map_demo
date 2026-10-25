@@ -1,268 +1,61 @@
-# POC MCP Service
+# Banking tool adapter (MCP service)
 
-**Model Context Protocol Host Microservice** for banking operations.
+The service on port **3004** exposes the implemented banking-tool catalog through HTTP and the repository's JSON-RPC WebSocket adapter. Both transports call the same tool definitions/handlers and the authoritative banking API. It is not a general plugin marketplace, model host, or proof of interoperability with every MCP client.
 
-## Overview
+## Current references
 
-Standalone microservice that provides banking tool execution through:
-- **MCP Protocol** (WebSocket JSON-RPC 2.0)
-- **HTTP REST API** (for simple integration)
+- [Source organization and extension boundary](MODULAR-ORGANIZATION.md)
+- [Deployment and verification](DEPLOYMENT.md)
+- [Orchestrator transport integration](../ai-orchestrator/MCP-INTEGRATION-README.md)
+- [Published execution/reconciliation contract](../ai-orchestrator/CONTROL-PLANE-RUNTIME.md)
 
-## Features
+Older implementation-complete, banking-update, and test-report documents are historical records.
 
-✅ **24 Banking Operations** across 7 categories  
-✅ **Dual Protocol Support** (WebSocket + HTTP)  
-✅ **Tool Discovery & Validation**  
-✅ **Batch Execution**  
-✅ **Production-Ready** (health checks, logging, monitoring)  
-✅ **Docker Support** (containerized deployment)  
+## Runtime contract
 
-## Quick Start
+The active entry point is [src/server.js](src/server.js), which loads [src/config/config.js](src/config/config.js). The older top-level `config/` surface is not the canonical server configuration. `MCP_SERVICE_PORT` controls the listener (default 3004). `BANKING_SERVICE_URL` is normalized by the tool implementation to a single `/api/v1` suffix; pass a service origin or an already normalized base.
 
-### Option 1: Local Development
+The current [tool catalog](src/tools/completeBankingTools.js) contains 29 definitions across authentication, accounts, transactions, transfers, cards, fraud, and disputes. Use discovery to obtain exact names and schemas rather than relying on old counts or shortened aliases. Examples include `banking_get_accounts`, `banking_get_balance`, `banking_create_transfer`, `banking_activate_card`, and `banking_verify_transaction`.
 
-```bash
-# Install dependencies
-npm install
+Tool arguments are validated before dispatch. Domain bearer credentials are supplied as `parameters.authToken` and forwarded to the banking API; the bank enforces customer ownership and business rules. The internal servicing-service credential authenticates the calling service and must not be forwarded to banking or a model provider. Published intent/confirmation/ledger controls live in the orchestrator; invoking this lower-level adapter is not equivalent to running that workflow.
 
-# Start service
-npm start
+## HTTP endpoints
 
-# Service running at http://localhost:3004
-```
+| Method | Direct service path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Minimal process health |
+| GET | `/api` | Service/protocol description |
+| GET | `/api/mcp/health` | Adapter health |
+| GET | `/api/mcp/tools` | Tool discovery |
+| GET | `/api/mcp/tools/:toolName` | One tool schema |
+| GET | `/api/mcp/categories` | Catalog categories |
+| POST | `/api/mcp/validate` | Validate `{tool,parameters}` without dispatch |
+| POST | `/api/mcp/execute` | Execute `{tool,parameters,sessionId?}` |
+| POST | `/api/mcp/execute-batch` | Execute `{tools:[{tool,parameters}],sessionId?}` sequentially |
 
-### Option 2: Docker
+Batch execution is not a database transaction and does not replace workflow idempotency. The canonical prefix is `/api/mcp`; gateway routing must preserve it.
 
-```bash
-# Start service
-./docker.sh up -d
-
-# Check health
-./docker.sh health
-
-# View logs
-./docker.sh logs
-```
-
-## Banking Operations
-
-**24 tools across 7 categories:**
-
-- **Authentication** (2): authenticate, refresh_token
-- **Accounts** (3): get_accounts, get_account, get_statement
-- **Transactions** (3): get_transactions, get_transaction, verify
-- **Transfers** (3): create_transfer, get_transfers, get_transfer
-- **Cards** (4): get_cards, get_card, block, unblock
-- **Fraud** (3): create_alert, get_alerts, get_alert
-- **Disputes** (5): create, get_disputes, get_dispute, add_evidence, withdraw
-
-## API Endpoints
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/health` | GET | Health check |
-| `/api` | GET | Service info |
-| `/api/mcp/tools` | GET | List all tools |
-| `/api/mcp/categories` | GET | Tools by category |
-| `/api/mcp/execute` | POST | Execute tool |
-| `/api/mcp/execute-batch` | POST | Batch execution |
-| `/api/mcp/validate` | POST | Validate parameters |
-
-## Configuration
-
-### Local (.env.development)
+Read-only internal example:
 
 ```bash
-PORT=3004
-NODE_ENV=development
-BANKING_SERVICE_URL=http://localhost:3005/api/v1
-LOG_LEVEL=debug
+curl http://localhost:3004/api/mcp/tools \
+  -H "X-Servicing-Service-Token: $SERVICING_SERVICE_TOKEN"
 ```
 
-### Docker (.env)
+In production or when `INTERNAL_SERVICE_AUTH_REQUIRED=true`, internal HTTP/upgrade requests require the server service token. Health remains public and safe. Development compatibility without the gate is not a production security configuration. Keep this service private to trusted callers and use the gateway/orchestrator rather than exposing it as a public banking workflow API.
+
+## WebSocket adapter
+
+The advertised address is `ws://host:3004/mcp`. The implementation handles JSON-RPC `initialize`, `notifications/initialized`, `tools/list`, `tools/call`, `resources/list`, `prompts/list`, `logging/setLevel`, and `ping`. The server advertises protocol version `2024-11-05`; this describes its implementation, not a claim that it supports every contemporary MCP transport, client, or extension. No runnable stdio or Streamable HTTP entry point is established by the current server.
+
+Supply the servicing-service header during the authenticated upgrade; query-string credentials are not accepted. Tool calls still need the domain credentials declared by their input schemas.
+
+## Run and verify
 
 ```bash
-NODE_ENV=production
-MCP_PORT=3004
-BANKING_SERVICE_URL=http://host.docker.internal:3005/api/v1
-MCP_JWT_SECRET=your-secret-change-me
+# Repository root, after environment/dependency configuration
+npm run dev:mcp
+npm test -w services/mcp-service -- --runInBand
 ```
 
-## Testing
-
-```bash
-# Health check
-curl http://localhost:3004/health
-
-# Get available tools
-curl http://localhost:3004/api/mcp/tools
-
-# Get tool categories
-curl http://localhost:3004/api/mcp/categories
-
-# Execute a tool
-curl -X POST http://localhost:3004/api/mcp/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "banking_get_accounts",
-    "parameters": {"authToken": "your-token"}
-  }'
-```
-
-## Directory Structure
-
-```
-services/mcp-service/
-├── src/
-│   ├── mcp/
-│   │   └── mcpProtocolServer.js   # WebSocket MCP protocol
-│   ├── routes/
-│   │   └── mcpApi.routes.js       # HTTP REST API
-│   ├── tools/
-│   │   └── completeBankingTools.js # 24 banking operations
-│   ├── utils/
-│   │   └── logger.js              # Logging utility
-│   └── server.js                  # Main server
-├── config/                        # Configuration files
-├── logs/                          # Log files
-├── Dockerfile                     # Docker image
-├── docker-compose.yml             # Docker Compose
-├── docker.sh                      # Docker manager
-├── start.sh                       # Local startup
-├── package.json                   # Dependencies
-└── DEPLOYMENT.md                  # Deployment guide
-```
-
-## Management Scripts
-
-### Local Development
-
-```bash
-./start.sh              # Start service
-npm start               # Alternative start
-npm test                # Run tests
-```
-
-### Docker
-
-```bash
-./docker.sh up -d       # Start in background
-./docker.sh logs        # View logs
-./docker.sh health      # Check health
-./docker.sh test        # Run tests
-./docker.sh restart     # Restart
-./docker.sh stop        # Stop
-./docker.sh clean       # Remove all
-./docker.sh shell       # Open shell
-```
-
-## Integration
-
-### AI Orchestrator
-
-Configure AI Orchestrator to use this service:
-
-```bash
-# In services/ai-orchestrator/.env
-MCP_SERVICE_URL=http://localhost:3004
-```
-
-### Test Integration
-
-```bash
-# From AI Orchestrator directory
-cd ../ai-orchestrator
-node test-mcp-integration.js
-```
-
-## Architecture
-
-```
-┌─────────────────────────┐
-│   MCP Service (3004)    │
-│  ┌───────────────────┐  │
-│  │ WebSocket (MCP)   │  │ ← True MCP Protocol
-│  ├───────────────────┤  │
-│  │ HTTP REST API     │  │ ← Simple integration
-│  ├───────────────────┤  │
-│  │ Banking Tools     │  │ ← 24 operations
-│  └─────────┬─────────┘  │
-└────────────┼────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│ Banking Service (3005)  │
-└─────────────────────────┘
-```
-
-## Monitoring
-
-### Health Checks
-
-```bash
-# Using script
-./docker.sh health
-
-# Direct
-curl http://localhost:3004/health
-```
-
-### Logs
-
-```bash
-# Local
-tail -f logs/combined.log
-
-# Docker
-./docker.sh logs
-docker logs -f mcp-service
-```
-
-## Production
-
-For production deployment:
-
-1. **Change secrets** in `.env`
-2. **Set environment**:
-   ```bash
-   NODE_ENV=production
-   LOG_LEVEL=info
-   ```
-3. **Enable security**:
-   ```bash
-   WS_AUTH_REQUIRED=true
-   ```
-4. **Configure CORS** properly
-5. **Set up monitoring** (Prometheus/Grafana)
-6. **Configure backups**
-
-## Documentation
-
-- **Deployment Guide**: [`DEPLOYMENT.md`](./DEPLOYMENT.md)
-- **Implementation Details**: [`MCP-SERVICE-IMPLEMENTATION-COMPLETE.md`](./MCP-SERVICE-IMPLEMENTATION-COMPLETE.md)
-- **API Tests**: [`test-http-api.js`](./test-http-api.js)
-
-## Dependencies
-
-**Runtime:**
-- Node.js 22+
-- Banking Service (required)
-
-**Docker:**
-- Docker Desktop
-- Docker Compose
-
-## Support
-
-**Service Info**: http://localhost:3004/api (when running)  
-**Health Check**: http://localhost:3004/health  
-**Protocol Version**: MCP 2024-11-05  
-
----
-
-**Quick Commands**:
-```bash
-./docker.sh up -d && ./docker.sh health    # Start & verify
-curl http://localhost:3004/api/mcp/tools   # Get tools
-./docker.sh logs                           # Monitor
-```
+Use Node 22 and the supported [root Compose deployment](../../docker/docker-compose-full-stack.yml). Configure `MCP_SERVICE_PORT`, `BANKING_SERVICE_URL`, `API_TIMEOUT`, internal service authentication, and network access. `GET /health` does not verify a real bank integration or financial recovery. Tool-contract tests are evidence of argument/handler compatibility, not production certification; no financial mutation is needed for basic discovery/health verification.

@@ -1,4 +1,6 @@
 require('dotenv').config();
+const { assertProductionConfiguration } = require('./platform/configuration');
+assertProductionConfiguration();
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -23,6 +25,8 @@ const { ControlPlaneStore } = require('./control-plane/store');
 const { PostgresControlPlaneStore } = require('./control-plane/postgres-store');
 const { createOperationsRouter } = require('./operations');
 const { createIdentityRouter } = require('./identity');
+const { PlatformReadiness } = require('./platform/readiness');
+const { createPlatformRouter } = require('./platform');
 
 // Import services. These modules export factory singletons via getInstance(),
 // so instantiate them here. Constructing the registry kicks off health checks;
@@ -134,7 +138,8 @@ app.get('/api', (req, res) => {
       orchestrator: '/api/orchestrator/*',
       controlPlane: '/api/control-plane/*',
       operations: '/api/operations/*',
-      identity: '/api/identity/*'
+      identity: '/api/identity/*',
+      platform: '/api/platform/*'
     },
     authentication: 'JWT Bearer Token required for protected endpoints',
     documentation: '/api/docs',
@@ -152,8 +157,12 @@ const controlPlaneStore = process.env.CONTROL_PLANE_DATABASE_URL
 const controlPlaneRouter = createControlPlaneRouter({ store: controlPlaneStore });
 app.use('/api/control-plane', controlPlaneRouter);
 const operationsRouter = createOperationsRouter({ configStore: controlPlaneStore });
+const platformReadiness = new PlatformReadiness({ configStore: controlPlaneStore, operationsStore: operationsRouter.store,
+  redisStatus: rateLimitMiddleware.readiness });
+app.locals.platformReadiness = platformReadiness;
 app.use('/api/operations', operationsRouter);
 app.use('/api/identity', rateLimitMiddleware.authLimiter, createIdentityRouter({ store: operationsRouter.store }));
+app.use('/api/platform', createPlatformRouter({ configStore: controlPlaneStore, readiness: platformReadiness }));
 
 // Chat Backend compatibility routes used by the frontend.
 // Service names below match the registry's standardized names (chat-backend,
@@ -231,7 +240,7 @@ app.use('/api/mcp',
   authMiddleware,
   createServiceProxy({
     serviceName: 'mcp',
-    pathRewrite: { '^/api/mcp': '/api' },
+    pathRewrite: { '^/api/mcp': '/api/mcp' },
     changeOrigin: true
   })
 );
@@ -294,7 +303,8 @@ app.use('*', (req, res) => {
       orchestrator: '/api/orchestrator',
       controlPlane: '/api/control-plane',
       operations: '/api/operations',
-      identity: '/api/identity'
+      identity: '/api/identity',
+      platform: '/api/platform'
     }
   });
 });
@@ -319,10 +329,11 @@ function initializeServices() {
 // The registry exposes cleanup() (which stops its health-check timer and clears
 // state); the load balancer holds no external resources, so we just reset its
 // in-memory counters.
+let server;
 const gracefulShutdown = (signal) => {
   logger.info(`${signal} received, shutting down API Gateway gracefully`);
 
-  server.close(async () => {
+  const close = async () => {
     try {
       serviceRegistry.cleanup();
       loadBalancer.resetStatistics();
@@ -335,14 +346,23 @@ const gracefulShutdown = (signal) => {
       logger.error('Error during shutdown', { error: error.message });
       process.exit(1);
     }
-  });
+  };
+  if (server) server.close(close);
+  else void close();
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Start server
-const server = app.listen(PORT, () => {
+// Production validates its own durable dependencies before accepting traffic.
+// Downstream readiness is separate so dependency startup order remains safe.
+async function start() {
+  if (process.env.NODE_ENV === 'production') {
+    await controlPlaneStore.read();
+    await controlPlaneStore.pool.query('SELECT tenant_id,kind,id FROM servicing_control_plane_records LIMIT 0');
+    await operationsRouter.store.initialize();
+  }
+  server = app.listen(PORT, () => {
   logger.info(`POC API Gateway running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Gateway endpoints available at http://localhost:${PORT}/api`);
@@ -350,6 +370,15 @@ const server = app.listen(PORT, () => {
 
   // Confirm services are initialized after server starts
   initializeServices();
+  });
+  return server;
+}
+if (require.main === module) start().catch(async () => {
+  logger.error('Gateway startup failed: verify durable storage, schema migrations and deployment configuration.');
+  serviceRegistry.cleanup();
+  await Promise.allSettled([controlPlaneRouter.close(), operationsRouter.close(), rateLimitMiddleware.cleanup()]);
+  process.exitCode = 1;
 });
 
 module.exports = app;
+module.exports.start = start;

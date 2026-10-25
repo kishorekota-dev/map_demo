@@ -146,7 +146,10 @@ Legacy LangChain usage metadata, its tokenUsage fields, and normalized plugin us
 | `CONTROL_PLANE_ENVIRONMENT` | Default `development`; use the governed target environment in production. |
 | `OPERATIONS_URL` | Default `http://localhost:3001/api/operations`. |
 | `JWT_SECRET`, `DEPLOYMENT_TENANT_ID` | Shared verified access-token contract; default deployment tenant is `default-enterprise`. |
-| `SERVICING_SERVICE_TOKEN` | Shared server-only credential for authoritative operations and handoff. |
+| `SERVICING_SERVICE_TOKEN` | Shared server-only credential for authoritative operations, handoff, and internal NLU/MCP requests. |
+| `DB_SSL=true`, `DB_SSL_CA_FILE` | Verified PostgreSQL TLS for model, ledger, and grant connections; optional enterprise CA file. Production rejects `DB_SSL_REJECT_UNAUTHORIZED=false`. Explicit DB_SSL settings override URL TLS parameters. |
+| `DATABASE_MANAGE_SCHEMA=false` | Verify all Sequelize model tables/columns at startup without DDL (default in production; true in development). |
+| `INTERNAL_SERVICE_AUTH_REQUIRED=true` | NLU/MCP require the service header; production always enables this gate. Secret must be at least 32 bytes and not an obvious placeholder. |
 | `WORKFLOW_DURABLE_EXECUTION=true` | Enable PostgreSQL locks and ledger; defaults enabled in production. |
 | `WORKFLOW_DATABASE_URL` | Ledger/coordination database; falls back to orchestrator `DB_*` configuration. |
 | `WORKFLOW_SCHEMA_AUTO_MIGRATE=false` | Verify preinstalled ledger schema instead of application DDL. |
@@ -156,7 +159,9 @@ Legacy LangChain usage metadata, its tokenUsage fields, and normalized plugin us
 | `LLM_PROVIDERS_FILE`, `LLM_PROVIDERS_JSON` | Server-only plugin registry; file takes precedence. Relative file paths use the service root. |
 | `LLM_OLLAMA_BASE_URL` | Actual separate Mac Studio endpoint when referenced by registry `baseUrlRef`. |
 
-Install `migrations/V1__servicing_tool_operations.sql` in the workflow database and `../chat-backend/migrations/V6__servicing_resume_grants.sql` in the chat database before disabling automatic migrations. Use the established session/database migrations as well. Application DDL is serialized by advisory transaction locks. Existing database TLS settings apply. Restrict application database privileges and manage retention of completed ledger records and expired grant hashes according to enterprise requirements; do not delete unresolved operations or active idempotency records prematurely.
+Apply [AI V0 and V1](migrations/) in the workflow database and [chat V1–V6](../chat-backend/migrations/) in the chat database through the controlled deployment migration job. The SQL is repeatable; the ledger migration also adds context/resolution to earlier ledgers and preserves their records. Set `DATABASE_MANAGE_SCHEMA=false`, `WORKFLOW_SCHEMA_AUTO_MIGRATE=false`, and `HANDOFF_SCHEMA_AUTO_MIGRATE=false` after migration. Required model columns are verified without startup DDL; missing columns block startup. Existing legacy column types are not automatically rewritten by creation SQL, so assess upgrades from older schemas separately.
+
+Application-managed ledger/grant DDL uses advisory transaction locks. Restrict application database privileges and manage retention of completed ledger records and expired grant hashes according to enterprise requirements; do not delete unresolved operations or active idempotency records prematurely. Safe NLU/MCP health routes remain public; all other HTTP APIs and MCP WebSocket upgrades require the header when the internal gate is active. Gateway and application callers inject their own service credential, never a browser-supplied token, and do not forward it to banking or model providers.
 
 `WORKFLOW_DURABLE_EXECUTION=false` uses an in-memory development ledger. `HANDOFF_STORAGE=memory` is accepted only outside production. These modes do not provide restart or cross-worker guarantees. Production operation also requires real enterprise identity verification, configured external adapters, appropriate secret management, and tested provider reconciliation; stub adapter tests do not certify an external provider.
 

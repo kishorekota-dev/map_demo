@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     error_info JSONB,
     parent_message_id UUID,
     sequence_number INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
     -- Foreign key constraint
     CONSTRAINT fk_chat_messages_session 
@@ -60,18 +60,24 @@ COMMENT ON COLUMN chat_messages.parent_message_id IS 'Reference to parent messag
 COMMENT ON COLUMN chat_messages.sequence_number IS 'Sequence number within the session for ordering';
 
 -- Create indexes for performance
-CREATE INDEX idx_chat_message_session_id ON chat_messages(session_id);
-CREATE INDEX idx_chat_message_session_sequence ON chat_messages(session_id, sequence_number);
-CREATE INDEX idx_chat_message_user_id ON chat_messages(user_id);
-CREATE INDEX idx_chat_message_user_created ON chat_messages(user_id, created_at);
-CREATE INDEX idx_chat_message_direction ON chat_messages(direction);
-CREATE INDEX idx_chat_message_intent ON chat_messages(intent);
-CREATE INDEX idx_chat_message_created_at ON chat_messages(created_at);
-CREATE INDEX idx_chat_message_parent ON chat_messages(parent_message_id);
+CREATE INDEX IF NOT EXISTS idx_chat_message_session_id ON chat_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_message_session_sequence ON chat_messages(session_id, sequence_number);
+CREATE INDEX IF NOT EXISTS idx_chat_message_user_id ON chat_messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_message_user_created ON chat_messages(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_message_direction ON chat_messages(direction);
+CREATE INDEX IF NOT EXISTS idx_chat_message_intent ON chat_messages(intent);
+CREATE INDEX IF NOT EXISTS idx_chat_message_created_at ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_message_parent ON chat_messages(parent_message_id);
 
 -- Add constraints to ensure valid values
-ALTER TABLE chat_messages ADD CONSTRAINT chat_messages_direction_check 
-    CHECK (direction IN ('incoming', 'outgoing'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_messages_direction_check' AND conrelid = 'chat_messages'::regclass) THEN
+    ALTER TABLE chat_messages ADD CONSTRAINT chat_messages_direction_check CHECK (direction IN ('incoming', 'outgoing'));
+  END IF;
+END $$;
 
-ALTER TABLE chat_messages ADD CONSTRAINT chat_messages_confidence_check 
-    CHECK (confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_messages_confidence_check' AND conrelid = 'chat_messages'::regclass) THEN
+    ALTER TABLE chat_messages ADD CONSTRAINT chat_messages_confidence_check CHECK (confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1));
+  END IF;
+END $$;

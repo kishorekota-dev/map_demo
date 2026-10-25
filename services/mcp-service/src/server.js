@@ -17,12 +17,14 @@ const mcpApiRoutes = require('./routes/mcpApi.routes'); // New HTTP API routes
 const MCPProtocolServer = require('./mcp/mcpProtocolServer'); // Updated true MCP protocol server
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandlers');
 const config = require('./config/config');
+const internalServiceAuth = require('./middleware/internalServiceAuth');
 
 class MCPService {
   constructor() {
+    internalServiceAuth.validateConfiguration();
     this.app = express();
     this.server = http.createServer(this.app);
-    this.wss = new WebSocket.Server({ server: this.server });
+    this.wss = new WebSocket.Server({ server: this.server, verifyClient: internalServiceAuth.verifyClient });
     this.port = config.port;
     
     this.mcpProtocolServer = new MCPProtocolServer(); // MCP protocol server
@@ -56,28 +58,24 @@ class MCPService {
     this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Logging
-    this.app.use(morgan('combined', {
+    this.app.use(morgan((tokens, req, res) => `${tokens.method(req, res)} ${req.originalUrl.split('?')[0]} ${tokens.status(req, res)} ${tokens['response-time'](req, res)} ms`, {
       stream: { write: (message) => logger.info(message.trim()) }
     }));
 
     // Health check
-    this.app.get('/health', (req, res) => {
+    this.app.get(['/health', '/api/mcp/health'], (req, res) => {
       res.json({
         service: 'poc-mcp-service',
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        version: require('../package.json').version,
-        mcp: {
-          protocolVersion: '2024-11-05',
-          connectedClients: this.wss.clients.size,
-          activeConnections: this.mcpProtocolServer.getConnectionCount()
-        }
+        version: require('../package.json').version
       });
     });
   }
 
   setupRoutes() {
+    this.app.use('/api', internalServiceAuth.authenticate);
     // New HTTP API routes for tool execution
     this.app.use('/api/mcp', mcpApiRoutes);
     
@@ -171,6 +169,6 @@ class MCPService {
 
 // Start the service
 const mcpService = new MCPService();
-mcpService.start();
+if (require.main === module) mcpService.start();
 
 module.exports = mcpService;

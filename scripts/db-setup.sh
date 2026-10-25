@@ -19,9 +19,14 @@ echo -e "${BLUE}  POC Banking Chat - Database Setup     ${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# Load environment
-if [[ -f "$ROOT_DIR/.env.development" ]]; then
-  source "$ROOT_DIR/.env.development"
+# Re-enter through the data-only environment loader; never execute env values.
+if [[ "${APP_ENV_LOADED:-}" != "true" ]]; then
+  exec "$ROOT_DIR/scripts/run-with-env.sh" bash "$ROOT_DIR/scripts/db-setup.sh" "$@"
+fi
+
+if [[ "${NODE_ENV:-development}" == "production" ]]; then
+  echo "Use an approved production migration job; db:setup is a development bootstrap." >&2
+  exit 1
 fi
 
 # Default values
@@ -55,7 +60,7 @@ echo -e "${YELLOW}Running migrations...${NC}"
 if [[ -d "$ROOT_DIR/services/banking-service/database" ]]; then
   echo "Running banking service migrations..."
   cd "$ROOT_DIR/services/banking-service"
-  npm run db:migrate 2>/dev/null || echo "  Migration script not available, skipping..."
+  npm run db:migrate
 fi
 
 # AI Orchestrator migrations

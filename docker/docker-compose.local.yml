@@ -42,6 +42,7 @@ services:
       PORT: 3005
       DB_HOST: postgres
       DB_PORT: 5432
+      BANKING_SEED_DEMO_DATA: "true"
       DB_NAME: poc_banking
       DB_USER: poc_user
       DB_PASSWORD: poc_password
@@ -72,6 +73,8 @@ services:
     environment:
       NODE_ENV: development
       NLU_SERVICE_PORT: 3003
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       CORS_ORIGIN: http://localhost:3000,http://localhost:3006
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
@@ -97,6 +100,8 @@ services:
     environment:
       NODE_ENV: development
       MCP_SERVICE_PORT: 3004
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
       NLU_SERVICE_URL: http://nlu-service:3003
@@ -201,6 +206,7 @@ services:
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3006,http://localhost:8081
       REDIS_URL: redis://redis:6379
       AGENT_FALLBACK_ENABLED: "true"
+      NLU_REQUEST_TIMEOUT_MS: ${NLU_REQUEST_TIMEOUT_MS:-5000}
       AGENT_RESPONSE_TIMEOUT: ${AGENT_RESPONSE_TIMEOUT:-400000}
     ports:
       - "3006:3006"

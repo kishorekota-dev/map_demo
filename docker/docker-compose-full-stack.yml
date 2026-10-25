@@ -37,8 +37,10 @@ services:
     build:
       context: ../services/nlu-service
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       NLU_SERVICE_PORT: 3003
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       CORS_ORIGIN: http://localhost:3000,http://localhost:3001,http://localhost:8081
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
@@ -63,7 +65,7 @@ services:
       context: ../services/banking-service
     environment:
       DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3005
       DB_HOST: postgres
       DB_PORT: 5432
@@ -95,8 +97,10 @@ services:
     build:
       context: ../services/mcp-service
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       MCP_SERVICE_PORT: 3004
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:-}
+      INTERNAL_SERVICE_AUTH_REQUIRED: "${INTERNAL_SERVICE_AUTH_REQUIRED:-false}"
       BANKING_SERVICE_URL: http://banking-service:3005
       NLP_SERVICE_URL: http://nlu-service:3003
       NLU_SERVICE_URL: http://nlu-service:3003
@@ -137,7 +141,7 @@ services:
       RECOGNITION_PROVIDER_TOKEN: ${RECOGNITION_PROVIDER_TOKEN:-}
       CONTROL_PLANE_ENVIRONMENT: ${CONTROL_PLANE_ENVIRONMENT:-development}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3007
       DB_HOST: postgres
       DB_PORT: 5432
@@ -182,7 +186,7 @@ services:
       HANDOFF_STORAGE: postgres
       HANDOFF_DATABASE_URL: ${HANDOFF_DATABASE_URL:-}
       HANDOFF_SCHEMA_AUTO_MIGRATE: "${HANDOFF_SCHEMA_AUTO_MIGRATE:-true}"
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3006
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       DB_HOST: postgres
@@ -201,6 +205,7 @@ services:
       AI_ORCHESTRATOR_URL: http://ai-orchestrator:3007
       REDIS_URL: redis://redis:6379
       AGENT_FALLBACK_ENABLED: "true"
+      NLU_REQUEST_TIMEOUT_MS: ${NLU_REQUEST_TIMEOUT_MS:-5000}
       AGENT_RESPONSE_TIMEOUT: ${AGENT_RESPONSE_TIMEOUT:-400000}
     ports:
       - "3006:3006"
@@ -253,7 +258,7 @@ services:
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       OIDC_CLIENT_SECRET_REF: ${OIDC_CLIENT_SECRET_REF:-}
       CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:-postgresql://poc_user:poc_password@postgres:5432/poc_banking}
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8081
@@ -292,7 +297,7 @@ services:
     build:
       context: ../services/agent-ui
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 8081
       REDIS_HOST: redis
       REDIS_PORT: 6379

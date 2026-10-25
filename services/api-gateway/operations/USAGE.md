@@ -35,9 +35,12 @@ be at most 200 unique provider/service/metric combinations. All identifiers use
 lowercase letters, numbers, underscores or hyphens. Currency is a three-letter
 uppercase label; the service does not convert currencies.
 
-The runtime currently emits measured `input_tokens`/`output_tokens` for
-`openai/generation`, `slm/extraction` and `recognition/intent_recognition` when the
-provider actually returns those usage fields. Executed MCP adapter calls emit
+Published model profiles emit measured `input_tokens`/`output_tokens` using the
+configured provider ID, with service `generation`, `extraction` or
+`recognition`, when the provider actually returns those fields. Configure
+rates for those exact provider IDs, such as `mac-studio-qwen`, rather than assuming
+the plugin type is the provider ID. Legacy configuration can still emit
+`openai/generation`, `slm/extraction` or `recognition/intent_recognition`. Executed MCP adapter calls emit
 `mcp/tool_execution/calls`; ledger replay does not increment the call count.
 
 The runtime submits:

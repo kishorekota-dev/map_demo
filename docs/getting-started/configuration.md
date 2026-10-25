@@ -1,227 +1,116 @@
-# Configuration Guide
+# Configuration
 
-This guide covers all configuration options for POC Banking Chat.
+Configuration has three owners: deployment settings and secrets belong to the service environment; prompts, intents, channels and model profiles belong to governed control-plane releases; public branding/endpoints belong to the frontend runtime configuration. This guide covers the settings needed to run the current implementation, not every legacy option.
 
-## Environment Files
+## Loading configuration
 
-| File | Purpose |
-|------|---------|
-| `.env.example` | Template with all variables |
-| `.env.development` | Local development |
-| `.env.production` | Production deployment |
-| `.env.test` | Test environment |
-
-## Quick Setup
+`npm run dev`, individual root `dev:*`/`start:*` commands, Docker npm scripts and `llm:probe` use [`scripts/run-with-env.sh`](../../scripts/run-with-env.sh). It reads `.env.development` from the repository root as dotenv data, exports its assignments, then runs the command without shell evaluation. If that file is absent it warns and falls back to `.env.example`.
 
 ```bash
-# Copy example file
-cp .env.example .env.development
-
-# Edit with your values
-nano .env.development
+# Create only when absent; preserve existing settings.
+test -f .env.development || cp .env.example .env.development
+# Select a different dotenv environment file.
+APP_ENV_FILE=/absolute/path/deployment.env ./scripts/run-with-env.sh npm run start:gateway
 ```
 
-## Configuration Reference
+Quote values containing spaces. Shell expressions and variable interpolation are not executed; generate secrets separately and store their actual values in the protected file. Assignments in the file override inherited environment variables. Service-level `dotenv` loads a working-directory `.env` without overriding already-exported values. Avoid contradictory root/service configurations. `.env.production` and `.env.test` are not selected automatically by `NODE_ENV`.
 
-### General Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NODE_ENV` | Environment mode | `development` |
-| `LOG_LEVEL` | Logging verbosity | `info` |
-
-### Database
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | Full PostgreSQL connection URL | Yes |
-| `DB_HOST` | Database host | `localhost` |
-| `DB_PORT` | Database port | `5432` |
-| `DB_USER` | Database user | `postgres` |
-| `DB_PASSWORD` | Database password | Yes |
-| `DB_NAME` | Database name | `poc_banking` |
-
-**Example:**
-```env
-DATABASE_URL=postgresql://postgres:password@localhost:5432/poc_banking
-```
-
-### Redis
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
-
-### Security
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `JWT_SECRET` | JWT signing secret | Yes |
-| `JWT_EXPIRES_IN` | Token expiration | `24h` |
-| `BCRYPT_ROUNDS` | Password hash rounds | `10` |
-
-⚠️ **Important:** Change `JWT_SECRET` in production!
-
-```env
-# Generate secure secret
-JWT_SECRET=$(openssl rand -hex 64)
-```
-
-### Service URLs
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `API_GATEWAY_URL` | API Gateway URL | `http://localhost:3001` |
-| `CHAT_BACKEND_URL` | Chat service URL | `http://localhost:3006` |
-| `NLP_SERVICE_URL` | Legacy NLP-compatible endpoint hosted by NLU | `http://localhost:3003` |
-| `BANKING_SERVICE_URL` | Banking API URL | `http://localhost:3005` |
-| `NLU_SERVICE_URL` | NLU service URL | `http://localhost:3003` |
-| `MCP_SERVICE_URL` | MCP service URL | `http://localhost:3004` |
-| `AI_ORCHESTRATOR_URL` | AI service URL | `http://localhost:3007` |
-
-### AI Services
-
-#### OpenAI (AI Orchestrator)
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OPENAI_ENABLED` | Enable remote generation for no-tool intents | No; default `false` |
-| `OPENAI_API_KEY` | OpenAI API key | Only when `OPENAI_ENABLED=true` |
-| `OPENAI_MODEL` | Model to use | `gpt-4` |
-| `SLM_ENABLED` | Enable remote structured extraction | No; default `false` |
-| `SLM_BASE_URL` | Local OpenAI-compatible extractor URL; setting it enables local extraction without a key | No |
-| `SLM_API_KEY` | Separate key for remote extraction | Only for opted-in remote extraction if no OpenAI key is used |
-
-Get your API key at: https://platform.openai.com/api-keys
-
-Tool-backed banking responses never use the response model; they are formatted
-from authoritative tool data. A key by itself does not enable any remote call.
-
-#### DialogFlow (NLU Service)
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DIALOGFLOW_PROJECT_ID` | GCP project ID | For NLU |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Service account path | For NLU |
-
-Setup steps:
-1. Create GCP project
-2. Enable DialogFlow API
-3. Create service account
-4. Download JSON credentials
-5. Set path in environment
-
-```env
-DIALOGFLOW_PROJECT_ID=my-project-id
-GOOGLE_APPLICATION_CREDENTIALS=./credentials/dialogflow.json
-```
-
-### CORS
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ALLOWED_ORIGINS` | Comma-separated origins | `http://localhost:3000` |
-
-```env
-# Multiple origins
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8081,https://app.example.com
-```
-
-### Rate Limiting
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `RATE_LIMIT_WINDOW_MS` | Window in milliseconds | `900000` (15 min) |
-| `RATE_LIMIT_MAX_REQUESTS` | Max requests per window | `100` |
-
-## Service-Specific Configuration
-
-Each service can have its own `.env` file with service-specific settings.
-
-### Frontend (`services/frontend/.env`)
-
-```env
-VITE_API_BASE_URL=http://localhost:3001/api
-VITE_BANKING_SERVICE_URL=http://localhost:3005/api/v1
-```
-
-### Banking Service (`services/banking-service/.env`)
-
-```env
-PORT=3005
-DATABASE_URL=postgresql://postgres:password@localhost:5432/poc_banking
-JWT_SECRET=your-secret
-DAILY_TRANSFER_LIMIT=10000
-FRAUD_THRESHOLD_AMOUNT=5000
-```
-
-### AI Orchestrator (`services/ai-orchestrator/.env`)
-
-```env
-PORT=3007
-OPENAI_ENABLED=false
-OPENAI_API_KEY=sk-...
-SLM_ENABLED=false
-SLM_BASE_URL=
-DATABASE_URL=postgresql://postgres:password@localhost:5432/poc_ai_orchestrator
-MCP_SERVICE_URL=http://localhost:3004
-```
-
-## Docker Configuration
-
-When using Docker, environment variables are set in:
-- `docker/docker-compose.local.yml` - local developer stack
-- `docker/docker-compose-full-stack.yml` - full monorepo stack
-- `.env` file in project root - referenced with `${VARIABLE}`
-
-```yaml
-# docker-compose.local.yml
-services:
-  banking-service:
-    environment:
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/poc_banking
-      - JWT_SECRET=${JWT_SECRET}  # From .env file
-```
-
-## Production Checklist
-
-- [ ] Set strong `JWT_SECRET`
-- [ ] Configure proper database credentials
-- [ ] Set `NODE_ENV=production`
-- [ ] Configure appropriate rate limits
-- [ ] Set up SSL/TLS
-- [ ] Configure CORS for production domains
-- [ ] Set up logging aggregation
-- [ ] Configure monitoring
-
-## Troubleshooting
-
-### Database Connection Failed
+Root `db:migrate` and `db:seed` do not use the wrapper themselves:
 
 ```bash
-# Check PostgreSQL is running
-pg_isready -h localhost -p 5432
-
-# Test connection
-psql $DATABASE_URL -c "SELECT 1"
+./scripts/run-with-env.sh npm run db:migrate
+./scripts/run-with-env.sh npm run db:seed
 ```
 
-### JWT Secret Issues
+`db:setup` uses the same safe environment loader, stops on migration failure and rejects production mode; it is a local convenience bootstrap, not an enterprise migration runner. `npm run validate` checks toolchain and basic environment structure, not complete production readiness. To select another file for that validator use `npm run validate -- /absolute/path/deployment.env`.
+
+Compose receives only variables referenced in its `environment`/interpolation definitions. A variable present in the host file is not automatically passed into a container. Validate without dumping resolved secrets:
 
 ```bash
-# Verify JWT_SECRET is set
-echo $JWT_SECRET
-
-# Generate new secret
-openssl rand -hex 64
+./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml config --quiet
 ```
 
-### Service Cannot Connect
+## Service addresses
 
-```bash
-# Check service is running
-curl http://localhost:3005/health
+| Service | Host development address | Container service name |
+| --- | --- | --- |
+| Frontend | `http://localhost:3000` | `frontend` |
+| Gateway | `http://localhost:3001` | `api-gateway:3001` |
+| NLU / legacy NLP compatibility | `http://localhost:3003` | `nlu-service:3003` |
+| MCP | `http://localhost:3004` | `mcp-service:3004` |
+| Banking | `http://localhost:3005` | `banking-service:3005` |
+| Chat | `http://localhost:3006` | `chat-backend:3006` |
+| Orchestrator | `http://localhost:3007` | `ai-orchestrator:3007` |
+| Agent UI | `http://localhost:8081` | `agent-ui:8081` |
 
-# Check firewall/network
-nc -zv localhost 3005
-```
+Configure `API_GATEWAY_URL`, `BANKING_SERVICE_URL`, `CHAT_BACKEND_URL`, `NLU_SERVICE_URL`, `NLP_SERVICE_URL`, `MCP_SERVICE_URL` and `AI_ORCHESTRATOR_URL` for the caller's network. Browser URLs must be browser-reachable; Docker DNS names are for container-to-container traffic. Service base URLs normally omit API paths; `CONTROL_PLANE_URL` ends in `/api/control-plane`, and `OPERATIONS_URL` in `/api/operations`.
+
+## Databases and persistence
+
+PostgreSQL 15 is the reference database. Core banking, chat and orchestrator clients use `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` and service-specific `DB_NAME`; setting a shared `DATABASE_URL` is not a universal replacement. The host development defaults choose database names per service; do not set one root `DB_NAME` for all services.
+
+| Data | Settings / default behavior |
+| --- | --- |
+| Banking | `DB_NAME=poc_banking`; versioned migrations under `services/banking-service/database/migrations` |
+| Chat sessions/messages | `DB_NAME=poc_chat`; requires `CHAT_PERSISTENCE_ENABLED=true`; fails startup if enabled database is unavailable |
+| Orchestrator sessions/workflows | `DB_NAME=ai_orchestrator`; model initialization requires PostgreSQL |
+| Control-plane releases/drafts | `CONTROL_PLANE_DATABASE_URL` selects PostgreSQL; otherwise `CONTROL_PLANE_DATA_FILE` selects a file |
+| Operations/jobs/identity/evidence | `OPERATIONS_DATABASE_URL`, then `CONTROL_PLANE_DATABASE_URL`, then `DATABASE_URL`; PostgreSQL required |
+| Financial dispatch ledger | `WORKFLOW_DURABLE_EXECUTION=true`; `WORKFLOW_DATABASE_URL` or orchestrator `DB_*` configuration |
+| Cross-channel grants | `HANDOFF_STORAGE=postgres`; `HANDOFF_DATABASE_URL` or chat `DB_*` configuration |
+
+Both Compose stacks and the root environment templates enable persistent chat. Keep `CHAT_PERSISTENCE_ENABLED=true` for host development as well. `HANDOFF_STORAGE=memory` is a development-only mode and does not make chat sessions durable. The financial ledger defaults to durable in production; explicitly disabling it removes that guarantee.
+
+Production gateway startup requires PostgreSQL configuration storage. File mode is available for development using `CONTROL_PLANE_DATA_FILE` with exactly one writer; operations still require PostgreSQL. `CONTROL_PLANE_SINGLE_WRITER=true` does not replace production PostgreSQL requirements. Keep `DEPLOYMENT_TENANT_ID` consistent across gateway, chat and orchestrator; browser `tenantId` is display configuration, not authorization.
+
+Schema flags are `CONTROL_PLANE_MANAGE_SCHEMA`, `OPERATIONS_MANAGE_SCHEMA`, `WORKFLOW_SCHEMA_AUTO_MIGRATE` and `HANDOFF_SCHEMA_AUTO_MIGRATE`. Set them to `false` only after the owning migration process applies the corresponding schema. See [deployment schema ownership](../guides/deployment.md#database-initialization-and-upgrades). Chat/orchestrator base models use `DATABASE_MANAGE_SCHEMA`; production defaults to verification without synchronization. The production overlay disables all runtime schema management and requires explicit migrations.
+
+`REDIS_URL` is used by several services; orchestrator and agent integrations also use `REDIS_HOST`/`REDIS_PORT`. Compose sets internal names. Verify the settings consumed by each service rather than assuming one URL changes every client. Database TLS behavior also differs between clients; test certificate validation with the deployed driver configuration.
+
+## Identity and internal credentials
+
+| Setting | Purpose |
+| --- | --- |
+| `JWT_SECRET` | Shared signing/verification key for local access tokens; replace all sample values together |
+| `SERVICING_SERVICE_TOKEN` | Separate internal credential shared by gateway, chat and orchestrator; never put it in browser config |
+| `DEPLOYMENT_TENANT_ID` | Server-side deployment tenant binding |
+| `ALLOWED_ORIGINS` | Exact comma-separated browser origins for gateway/chat CORS |
+| `FRONTEND_URL` | Fixed browser origin for enterprise login redirect |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID` | Expected provider issuer and client audience |
+| `OIDC_AUTHORIZATION_ENDPOINT`, `OIDC_TOKEN_ENDPOINT`, `OIDC_JWKS_URI` | Explicit HTTPS provider endpoints |
+| `OIDC_REDIRECT_URI` | Registered callback ending in `/api/identity/callback` |
+| `OIDC_CLIENT_SECRET_REF` | Optional confidential-client secret reference, resolved by the gateway |
+
+OIDC uses an authorization-code/PKCE broker and local mappings of exact issuer/subject to banking users and permitted roles. External group strings do not grant privileges. `AUTH_PROVIDER=oidc` or `OIDC_AUDIENCE` alone does not configure the broker. The profile generator accepts `saml` as metadata, but no SAML broker is implemented. `OIDC_ALLOW_LOCAL=true` permits localhost HTTP only outside production. Browser sessions use same-site cookies; deploy frontend/API accordingly.
+
+Connector credentials use `env:NAME` or files beneath `CONNECTOR_SECRET_ROOT`. Inject the referenced variables or mount files into the gateway explicitly; a reference does not supply its value. `CONNECTOR_ALLOWED_HOSTS` and `CONNECTOR_PRIVATE_HOSTS` control approved destinations. See [Servicing operations](../guides/servicing-operations.md) for connector, identity and audit settings.
+
+## Model providers and recognition
+
+Use [Model providers](../guides/llm-providers.md) as the authoritative setup guide. `LLM_PROVIDERS_FILE` selects a server-owned registry; a relative path resolves from `services/ai-orchestrator`, regardless of launch directory. A configured file takes precedence over `LLM_PROVIDERS_JSON`. With Compose set `LLM_PROVIDERS_FILE=` explicitly to use inline JSON.
+
+The supplied registry enables a `mac-qwen` Ollama adapter at an example separate-host address. `LLM_OLLAMA_BASE_URL` overrides that address. Cloud entries remain disabled until configured. `LLM_OPENAI_API_KEY` and `LLM_GEMINI_API_KEY` are explicit credential references; Vertex uses ADC or a configured bearer-token reference. Custom registry files, ADC files and connector secrets require explicit container mounts; Compose does not mount arbitrary host paths for you.
+
+Registry availability and published `llm.enabled` are separate. Publish profiles and task routes in Studio to use models for generation, extraction and/or recognition. `llm.enabled:false` disables plugin and legacy model calls; omitted `llm` retains compatibility behavior for old releases. Configured provider failure never silently switches to cloud. Legacy `OPENAI_ENABLED`, `SLM_ENABLED` and `SLM_BASE_URL` are compatibility settings, not the preferred product configuration.
+
+For deterministic local NLU, set `MOCK_DIALOGFLOW=true` and `MOCK_EXTERNAL_AI_SERVICES=true`. Live Dialogflow requires its project and service credentials; adding them does not configure the separate LLM registry. A semantic recognizer can use server-owned `RECOGNITION_PROVIDER_URL`/`RECOGNITION_PROVIDER_TOKEN`; publish its recognition policy separately.
+
+## Timeout budgets
+
+| Layer | Setting | Default | Accepted range |
+| --- | --- | --- | --- |
+| Model task | Published profile `timeoutMs` | Profile-specific | 1,000–120,000 ms |
+| Optional legacy NLU | `NLU_REQUEST_TIMEOUT_MS` | 5,000 ms | 1,000–120,000 ms |
+| Chat → orchestrator | `AGENT_RESPONSE_TIMEOUT` | 400,000 ms | 1,000–590,000 ms |
+| Gateway servicing routes | `SERVICING_REQUEST_TIMEOUT_MS` | 410,000 ms | 1,000–600,000 ms |
+| Browser chat send | Runtime `chatRequestTimeoutMs` / `VITE_CHAT_REQUEST_TIMEOUT_MS` | 420,000 ms | 1,000–600,000 ms |
+
+Only gateway `/api/chat` and `/api/orchestrator` use the servicing budget. Ordinary proxy/browser requests retain their normal 30-second budget. Backend numeric bounds clamp valid integers; invalid strings use defaults. Frontend out-of-range values use its default. Tune all layers and ingress deadlines together, leaving room for NLU and up to three sequential model stages. These cold-model allowances are not IVR latency targets. Timeouts do not prove that a downstream action stopped and must not trigger blind financial retries.
+
+Both supported Compose files pass the NLU, workflow and servicing settings. The gateway budget must cover NLU plus workflow plus overhead; the production preflight checks at least 1000ms of overhead.
+
+## Frontend runtime configuration
+
+The frontend fetches `/runtime-config.json` before rendering. Public fields include `tenantId`, `productName`, `tagline`, `supportEmail`, `apiBaseUrl`, `authBaseUrl`, `chatRequestTimeoutMs` and `features.allowTokenAuth`. They override Vite build-time defaults. The production Docker image serves this file from `/app/dist/runtime-config.json`; the development image uses `/app/public/runtime-config.json`.
+
+`apiBaseUrl` normally ends in `/api`; `authBaseUrl` must reach the banking login API base: `/api/banking/v1` through the canonical gateway, `/api/v1` when connecting directly to banking, or an explicitly configured ingress rewrite with the same routes. The client appends `/auth/login` to this base. Do not put keys, database URLs, internal service tokens or connector credentials in this file. Hiding token login is a UI setting and does not replace server-side authorization.

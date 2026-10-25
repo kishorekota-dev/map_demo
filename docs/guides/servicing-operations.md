@@ -11,7 +11,7 @@ are contracts; they do not imply that a commercial provider is connected.
 | `OPERATIONS_DATABASE_URL` | PostgreSQL for operational records/jobs/events; defaults to `CONTROL_PLANE_DATABASE_URL`, then `DATABASE_URL`; missing configuration returns 503 |
 | `OPERATIONS_MANAGE_SCHEMA` | `false` when a migration owner applies `services/api-gateway/operations/schema.sql` |
 | `FULFILLMENT_WORKER_ENABLED` | `true` starts two-second job/SLA processing and a thirty-second rollout monitor; PostgreSQL serializes replicas |
-| `SERVICING_SERVICE_TOKEN` | Separate high-entropy internal credential on gateway, chat and orchestrator; never expose in browser runtime config |
+| `SERVICING_SERVICE_TOKEN` | Separate high-entropy internal credential on gateway, chat, orchestrator, MCP and NLU; never expose in browser runtime config |
 | `OPERATIONS_URL` | Orchestrator's internal gateway `/api/operations` URL |
 | `CONTROL_PLANE_INTERNAL_URL` | Gateway loopback/internal `/api/control-plane` URL for knowledge import and rollout observations |
 | `CONNECTOR_ALLOWED_HOSTS` | Exact connector hostname allowlist, comma-separated; no wildcards |
@@ -293,3 +293,24 @@ capacity. A separate local `pg_dump`/`pg_restore` smoke check restored the servi
 tables into an empty database and verified the restored evidence chain. Repeat
 with representative enterprise data, distributed service backups and real
 provider reconciliation to establish recovery objectives.
+
+## Platform startup and diagnostics
+
+Production uses the [dedicated deployment lifecycle](deployment.md): static
+preflight, private infrastructure, explicit banking/servicing migrations, offline
+administrator bootstrap, then application startup with automatic schema mutation
+disabled. Migration errors are fatal. DB TLS certificate verification remains
+enabled when TLS is configured; `DB_SSL_CA_FILE` supplies an approved CA for
+banking/chat/orchestrator connections. URL-based gateway stores use their URL TLS
+configuration.
+
+Production MCP/NLU HTTP and MCP WebSocket ingress require the separate trusted
+service token. Gateway strips user-supplied service credentials and injects its
+own only on the registered internal NLU/MCP hops; chat and orchestrator attach
+their trusted token directly. Banking continues to require customer authorization.
+
+Read `/api/platform/readiness` as a signed operator or use **Platform & solutions**
+for sanitized diagnostic export. Public health probes expose only liveness or
+aggregate readiness. Reports cover checked storage/service contracts, with no
+live model/connector/identity acceptance claim. Solution packages share the same
+draft/release lifecycle; see the [platform guide](platform-readiness.md).

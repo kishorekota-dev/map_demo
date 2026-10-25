@@ -1,13 +1,5 @@
 const { Client } = require('@modelcontextprotocol/sdk/client');
-const NodeWebSocket = require('ws');
-
-// The SDK's WebSocket transport targets browser-style runtimes and expects a
-// global implementation. Node 18/20 do not provide one consistently.
-if (typeof globalThis.WebSocket === 'undefined') {
-  globalThis.WebSocket = NodeWebSocket;
-}
-
-const { WebSocketClientTransport } = require('@modelcontextprotocol/sdk/client/websocket.js');
+const ServiceWebSocketTransport = require('./serviceWebSocketTransport');
 const config = require('../../config');
 const logger = require('../utils/logger');
 
@@ -62,7 +54,7 @@ class TrueMCPClient {
       );
 
       // Create the transport used by the MCP service's /mcp endpoint.
-      this.transport = new WebSocketClientTransport(
+      this.transport = new ServiceWebSocketTransport(
         new URL(this.serverUrl)
       );
 

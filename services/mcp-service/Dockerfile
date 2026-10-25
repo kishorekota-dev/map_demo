@@ -14,7 +14,7 @@ RUN npm ci --omit=dev
 COPY . .
 
 # Create logs directory
-RUN mkdir -p logs
+RUN mkdir -p logs && chown node:node logs
 
 # Expose port
 EXPOSE 3004

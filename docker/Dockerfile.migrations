@@ -1,0 +1,12 @@
+FROM node:22-alpine
+WORKDIR /app
+COPY services/api-gateway/package*.json ./
+RUN npm ci --omit=dev
+COPY deployment-scripts/migrate-servicing.cjs ./deployment-scripts/migrate-servicing.cjs
+COPY deployment-scripts/lib/environment.cjs ./deployment-scripts/lib/environment.cjs
+COPY services/api-gateway/control-plane/schema.sql ./services/api-gateway/control-plane/schema.sql
+COPY services/api-gateway/operations/schema.sql ./services/api-gateway/operations/schema.sql
+COPY services/ai-orchestrator/migrations ./services/ai-orchestrator/migrations
+COPY services/chat-backend/migrations ./services/chat-backend/migrations
+USER node
+ENTRYPOINT ["node", "deployment-scripts/migrate-servicing.cjs"]

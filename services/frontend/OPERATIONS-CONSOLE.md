@@ -1,5 +1,9 @@
 # Servicing Studio operator guide
 
+Current sources: [documentation index](../../docs/README.md),
+[frontend setup](SETUP-GUIDE.md), [control-plane contract](../../docs/guides/control-plane.md),
+and [LLM provider setup](../../docs/guides/llm-providers.md).
+
 Servicing Studio is available at `/control-plane` in the existing React frontend.
 It uses the configured API gateway and the deployment's authenticated identity.
 The console is designed for a dedicated enterprise deployment. It does not claim
@@ -23,6 +27,12 @@ The server may additionally require scopes for sensitive operation/context APIs.
 Financial ledger reads require `servicing:operations:read`, reconciliation requires
 `servicing:operations:reconcile`, and privileged session context requires
 `servicing:context:read` (or the wildcard scope).
+
+For a newly migrated production database without demo users, an authorized
+deployment operator can provision the first studio administrator using the
+[banking administrator bootstrap](../banking-service/README.md#servicing-roles-and-model-boundary).
+The browser does not provide public administrator registration or grant itself
+privileges from locally edited profile data.
 
 If `GET /api/identity/config` reports enabled enterprise identity, the sign-in page
 offers **Continue with enterprise identity**. The server performs the identity
@@ -251,6 +261,22 @@ an erasure preview, and application of that reviewed request. The API rejects
 erasure while unresolved cases or active calls exist and preserves minimal replay
 protection. Inspect the returned batch metadata when reviewing a large subject
 record set.
+
+## Platform diagnostics and solution packages
+
+The platform workspace shows server-observed infrastructure checks and gateway
+configuration checks. It also exports diagnostic evidence. These checks describe
+connectivity, schema availability, and selected deployment settings; they do not
+qualify live-provider behavior, capacity, restore objectives, or customer acceptance.
+
+Built-in or imported solution packages contain bounded servicing configuration,
+not executable plugins or credentials. Save local configuration edits first,
+preview the package, review its differences and conflicts, and explicitly allow
+overwrites where appropriate. Applying a package updates the saved draft only.
+Evaluation, approval, publication, environment promotion, and existing-session
+pinning continue to apply. Package digests detect content changes; they are not
+author signatures. See the [platform guide](../../docs/guides/platform-readiness.md)
+for the package contract and deployment qualification boundary.
 
 ## Validation
 

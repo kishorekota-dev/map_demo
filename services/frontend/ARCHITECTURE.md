@@ -1,381 +1,106 @@
-# POC Frontend Architecture & Integration
+# Frontend architecture
 
-## Complete System Architecture
+This describes the current implementation. See the
+[documentation index](../../docs/README.md) for system architecture and
+[operator guide](OPERATIONS-CONSOLE.md) for console flows.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Frontend Application                     │
-│                   (React + TypeScript)                       │
-│                    Port: 3000                                │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              Authentication Layer                   │    │
-│  │  - authService (login, token mgmt)                 │    │
-│  │  - authStore (Zustand)                             │    │
-│  │  - ProtectedRoute (route guard)                    │    │
-│  └────────────────────────────────────────────────────┘    │
-│                         │                                    │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              API Integration Layer                  │    │
-│  │  - apiService (HTTP client)                        │    │
-│  │  - JWT interceptor                                 │    │
-│  │  - Token refresh handler                           │    │
-│  │  - Session management                              │    │
-│  └────────────────────────────────────────────────────┘    │
-│                         │                                    │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              Business Logic Layer                   │    │
-│  │  - useChat hook                                    │    │
-│  │  - Session state management                        │    │
-│  │  - Message handling                                │    │
-│  └────────────────────────────────────────────────────┘    │
-│                         │                                    │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              Presentation Layer                     │    │
-│  │  - Pages (AuthPage, ChatPage)                      │    │
-│  │  - Organisms (LoginForm, ChatContainer)            │    │
-│  │  - Molecules (SessionList, ChatMessage)            │    │
-│  │  - Atoms (Button, Input, LoadingSpinner)           │    │
-│  └────────────────────────────────────────────────────┘    │
-│                                                              │
-└───────┬──────────────────────────────────────┬─────────────┘
-        │                                      │
-        │ Login Only                           │ All Chat Operations
-        │ (Unauthenticated)                    │ (Authenticated)
-        ↓                                      ↓
-┌────────────────────┐              ┌────────────────────────┐
-│  Banking Service   │              │    Chat Backend        │
-│    Port: 3010      │              │      Port: 3006        │
-├────────────────────┤              ├────────────────────────┤
-│                    │              │                        │
-│ • POST /auth/login │              │ • Session Management   │
-│ • POST /auth/      │              │   - Create             │
-│        refresh     │              │   - Resume             │
-│                    │              │   - End/Resolve        │
-│ Returns:           │              │                        │
-│ - JWT tokens       │              │ • Message Operations   │
-│ - User profile     │              │   - Send               │
-│ - Roles/Perms      │              │   - History            │
-└────────────────────┘              │                        │
-                                    │ • Agent Orchestration  │
-                                    │   - Intent detection   │
-                                    │   - Multi-agent routing│
-                                    │                        │
-                                    │ • Database Persistence │
-                                    │   - Sessions           │
-                                    │   - Messages           │
-                                    │   - Chat history       │
-                                    └────────────────────────┘
+## Bootstrap and routing
+
+[main.tsx](src/main.tsx) fetches runtime configuration before dynamically importing
+[App.tsx](src/App.tsx). This ensures clients read deployment-specific endpoints
+and tenant storage names on construction. `BrowserRouter` exposes `/auth`, `/chat`,
+and `/control-plane`; protected routes use the authentication store. Unknown paths
+redirect according to authentication state. The web host must support SPA fallback.
+
+```mermaid
+flowchart LR
+  UI[React application] --> GW[API gateway :3001]
+  UI -->|default password authentication| Bank[Banking service :3005]
+  GW --> Chat[Chat backend :3006]
+  Chat --> Runtime[Orchestrator :3007]
+  GW --> CP[Control-plane and operations APIs]
+  GW -->|sanitized model registry and tests| Runtime
+  Runtime --> Providers[Server-configured model providers]
 ```
 
-## Authentication Flow
+The configured authentication base may be deployed behind a gateway instead of the
+local direct-bank default. Enterprise identity uses gateway identity routes and
+an HttpOnly server session. This diagram does not imply direct browser access to
+banking tools, provider credentials, or model hosts.
 
-```
-┌──────────┐                                              ┌──────────────┐
-│  User    │                                              │   Banking    │
-│  Browser │                                              │   Service    │
-└────┬─────┘                                              └───────┬──────┘
-     │                                                            │
-     │ 1. Navigate to /                                          │
-     ├──────────────────────────────────────────────────┐        │
-     │                                                   │        │
-     │ 2. Redirect to /auth (not authenticated)         │        │
-     │◄──────────────────────────────────────────────────┘       │
-     │                                                            │
-     │ 3. Enter credentials + Submit                             │
-     │                                                            │
-     │ 4. POST /api/v1/auth/login                                │
-     ├───────────────────────────────────────────────────────────>
-     │                                                            │
-     │ 5. Return JWT + User Profile                              │
-     │◄───────────────────────────────────────────────────────────┤
-     │                                                            │
-     │ 6. Store in localStorage                                   │
-     │ - poc_access_token                                         │
-     │ - poc_refresh_token                                        │
-     │ - poc_user_profile                                         │
-     │                                                            │
-     │ 7. Update authStore                                        │
-     │                                                            │
-     │ 8. Redirect to /chat                                       │
-     ├──────────────────────────────────────────────────┐        │
-     │                                                   │        │
-     │ 9. ChatPage renders (authenticated)              │        │
-     │◄──────────────────────────────────────────────────┘       │
-     │                                                            │
-```
+## Authentication boundary
 
-## Chat & Session Flow
+[authService.ts](src/services/authService.ts) stores access tokens and normalized
+profiles in tenant-prefixed browser storage. Password login also stores the
+returned refresh token. Enterprise session handoff clears a previous password
+refresh token and uses credentialed session refresh instead. Sign-out clears local
+authentication and requests enterprise-session invalidation where applicable.
 
-```
-┌──────────┐                                    ┌────────────────┐
-│  User    │                                    │  Chat Backend  │
-│  Browser │                                    │   + Database   │
-└────┬─────┘                                    └───────┬────────┘
-     │                                                  │
-     │ 1. Load ChatPage                                │
-     │    - useChat hook initializes                   │
-     │                                                  │
-     │ 2. GET /api/users/:userId/sessions?type=unresolved
-     ├─────────────────────────────────────────────────>
-     │                                                  │
-     │ 3. Return unresolved sessions                   │
-     │◄─────────────────────────────────────────────────┤
-     │    Display in sidebar                            │
-     │                                                  │
-     │ 4. User types message + Send                    │
-     │                                                  │
-     │ 5. POST /api/chat/message                       │
-     │    Headers: Authorization: Bearer <token>       │
-     │    Body: { content, userId }                    │
-     ├─────────────────────────────────────────────────>
-     │                                                  │
-     │    Backend:                                      │
-     │    - Auto-create session (if none)              │
-     │    - Store message in DB                        │
-     │    - Route to appropriate agent                 │
-     │    - Generate response                          │
-     │    - Store response in DB                       │
-     │                                                  │
-     │ 6. Return response + sessionId                  │
-     │◄─────────────────────────────────────────────────┤
-     │                                                  │
-     │ 7. Display response in chat                     │
-     │    - Update session state                        │
-     │    - Show intent detection                       │
-     │                                                  │
-     │ 8. User clicks "Resume" on old session          │
-     │                                                  │
-     │ 9. POST /api/sessions/:id/resume                │
-     ├─────────────────────────────────────────────────>
-     │                                                  │
-     │    Backend:                                      │
-     │    - Load session from DB                        │
-     │    - Load all messages                           │
-     │    - Reactivate session                          │
-     │                                                  │
-     │ 10. Return session + full history               │
-     │◄─────────────────────────────────────────────────┤
-     │                                                  │
-     │ 11. Display all previous messages               │
-     │     Continue conversation                        │
-     │                                                  │
-```
+[authStore.ts](src/stores/authStore.ts) supplies authentication state to the route
+guard and header. A servicing-role check controls the studio navigation link;
+the gateway independently verifies tokens, roles, tenant binding, and scopes.
+Browser role labels are never the authorization authority.
 
-## Component Architecture
+## Customer chat and sessions
 
-```
-┌────────────────────────────────────────────────────────┐
-│                       App.tsx                          │
-│                                                        │
-│  Route:                                                │
-│  - / → Navigate to /chat                              │
-│  - /auth → AuthPage                                   │
-│  - /chat → ProtectedRoute → ChatPage                  │
-└────────────────────────────────────────────────────────┘
-           │                           │
-           │                           │
-    ┌──────┴──────┐           ┌───────┴────────┐
-    │             │           │                │
-┌───▼─────────┐   │   ┌──────▼──────────────┐ │
-│  AuthPage   │   │   │     ChatPage        │ │
-│             │   │   │  (Protected)        │ │
-├─────────────┤   │   ├─────────────────────┤ │
-│             │   │   │                     │ │
-│ ┌─────────┐ │   │   │  Header:            │ │
-│ │  Tabs   │ │   │   │  - Branding         │ │
-│ │ Sign In │ │   │   │  - Session ID       │ │
-│ │   Use   │ │   │   │  - User + Logout    │ │
-│ │  Token  │ │   │   │                     │ │
-│ └─────────┘ │   │   │  ┌────────────────┐ │ │
-│      │      │   │   │  │ ChatContainer  │ │ │
-│      │      │   │   │  │                │ │ │
-│  ┌───┴────┐ │   │   │  │ ┌────────────┐ │ │ │
-│  │Login   │ │   │   │  │ │ Session Bar│ │ │ │
-│  │Form    │ │   │   │  │ │ Controls   │ │ │ │
-│  │        │ │   │   │  │ └────────────┘ │ │ │
-│  │- Input │ │   │   │  │                │ │ │
-│  │- Button│ │   │   │  │ ┌────────────┐ │ │ │
-│  └────────┘ │   │   │  │ │ Messages   │ │ │ │
-│      or     │   │   │  │ │ - User msg │ │ │ │
-│  ┌────────┐ │   │   │  │ │ - Bot msg  │ │ │ │
-│  │Token   │ │   │   │  │ │ - Intents  │ │ │ │
-│  │Input   │ │   │   │  │ └────────────┘ │ │ │
-│  │        │ │   │   │  │                │ │ │
-│  │- Token │ │   │   │  │ ┌────────────┐ │ │ │
-│  │- User  │ │   │   │  │ │ Chat Input │ │ │ │
-│  │  Info  │ │   │   │  │ │ - Textarea │ │ │ │
-│  │- Button│ │   │   │  │ │ - Send Btn │ │ │ │
-│  └────────┘ │   │   │  │ └────────────┘ │ │ │
-└─────────────┘   │   │  │                │ │ │
-                  │   │  │ Sidebar:       │ │ │
-                  │   │  │ ┌────────────┐ │ │ │
-                  │   │  │ │ Unresolved │ │ │ │
-                  │   │  │ │ Sessions   │ │ │ │
-                  │   │  │ │ - Resume   │ │ │ │
-                  │   │  │ └────────────┘ │ │ │
-                  │   │  │ ┌────────────┐ │ │ │
-                  │   │  │ │ Intent     │ │ │ │
-                  │   │  │ │ Display    │ │ │ │
-                  │   │  │ └────────────┘ │ │ │
-                  │   │  └────────────────┘ │ │
-                  │   └─────────────────────┘ │
-                  └───────────────────────────┘
-```
+[api.ts](src/services/api.ts) creates one canonical backend session, sharing an
+in-flight creation promise. Chat messages use that session ID. Starting a new
+conversation requests deletion of the prior backend session before creating a new
+one; failure to delete an expired session does not block creation.
 
-## State Management
+[useChat.tsx](src/hooks/useChat.tsx) manages conversation UI state and normalizes
+history responses. The current transport sends complete HTTP requests and receives
+complete responses; it does not stream tokens. Axios attaches access/session/request
+headers and retries a rejected 401 once after successful authentication refresh.
+An unrecoverable authentication failure updates the store through `auth:logout`.
 
-```
-┌──────────────────────────────────────────────────────┐
-│            Global State (Zustand)                     │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  authStore:                                           │
-│  ├─ isAuthenticated: boolean                         │
-│  ├─ user: UserProfile | null                         │
-│  ├─ isLoading: boolean                               │
-│  ├─ error: string | null                             │
-│  └─ actions:                                          │
-│     ├─ login(credentials)                            │
-│     ├─ setManualToken(token, userInfo)               │
-│     ├─ logout()                                       │
-│     ├─ checkAuth()                                    │
-│     └─ clearError()                                   │
-│                                                       │
-└──────────────────────────────────────────────────────┘
+`sendMessage` uses the runtime `chatRequestTimeoutMs` budget, default 420,000 ms,
+to accommodate multiple model stages. Other calls keep the client default of
+30 seconds. Timeout does not itself establish that a backend mutation was cancelled;
+uncertain operation outcomes belong in the server reconciliation workflow.
 
-┌──────────────────────────────────────────────────────┐
-│        Component State (React Hooks)                  │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  useChat():                                           │
-│  ├─ messages: ChatMessage[]                          │
-│  ├─ loading: boolean                                 │
-│  ├─ intent: IntentAnalysis | undefined               │
-│  ├─ session: SessionDetail | null                    │
-│  ├─ unresolvedSessions: SessionDetail[]              │
-│  └─ actions:                                          │
-│     ├─ sendMessage(text)                             │
-│     ├─ resumeSession(sessionId)                      │
-│     ├─ endSession(reason)                            │
-│     ├─ resolveSession(notes)                         │
-│     └─ createNewSession()                            │
-│                                                       │
-└──────────────────────────────────────────────────────┘
+## Servicing Studio
 
-┌──────────────────────────────────────────────────────┐
-│         Persistent State (localStorage)               │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  Keys:                                                │
-│  ├─ poc_access_token: JWT access token               │
-│  ├─ poc_refresh_token: JWT refresh token             │
-│  └─ poc_user_profile: User profile JSON              │
-│                                                       │
-└──────────────────────────────────────────────────────┘
-```
+[ControlPlanePage.tsx](src/pages/ControlPlanePage.tsx) owns the local draft and
+loaded server state. [Typed configuration](src/types/controlPlane.ts) includes
+channels, intents, prompts, journeys, queues, recognition, and model profiles.
+The advanced JSON editor exposes the complete configuration contract.
 
-## Data Flow
+Focused modules in [components/control-plane](src/components/control-plane)
+provide model discovery, evaluations, knowledge, connections, operations, release
+comparison, and governance. Local form edits use React state; persisted resources
+use server revisions. Save local configuration changes before studio mutations;
+save a module form before leaving that module. A conflict preserves local edits
+and requires reconciliation with the latest server revision.
 
-```
-User Action
-    │
-    ↓
-Component
-    │
-    ↓
-Hook (useChat)
-    │
-    ↓
-API Service
-    │
-    ├─→ Add Auth Header (Bearer token)
-    ├─→ Add Session Header (X-Session-ID)
-    └─→ Add Request ID (X-Request-ID)
-    │
-    ↓
-HTTP Request
-    │
-    ↓
-Backend Service
-    │
-    ├─→ Validate JWT
-    ├─→ Process Request
-    ├─→ Store in Database
-    └─→ Generate Response
-    │
-    ↓
-HTTP Response
-    │
-    ├─→ Success: Update State
-    └─→ Error: Handle/Display
-    │
-    ↓
-Component Re-render
-    │
-    ↓
-UI Update
-```
+[controlPlaneService.ts](src/services/controlPlaneService.ts) authenticates gateway
+requests, reports structured errors, refreshes authentication once for a 401, and
+rejects successful responses containing HTML instead of API JSON. It does not
+retry ambiguous network failures. Publication and environment promotion remain
+separate server-controlled operations; the browser never executes a release.
 
-## File Structure
+## Models, evaluation, and provider boundaries
 
-```
-poc-frontend/
-├── public/
-├── src/
-│   ├── components/
-│   │   ├── atoms/
-│   │   │   ├── Button/
-│   │   │   ├── Input/
-│   │   │   ├── Icon/
-│   │   │   ├── LoadingSpinner/
-│   │   │   └── TextArea/
-│   │   ├── molecules/
-│   │   │   ├── ChatMessage/
-│   │   │   ├── IntentDisplay/
-│   │   │   ├── SessionList/
-│   │   │   ├── Toast/
-│   │   │   └── TokenInput/
-│   │   ├── organisms/
-│   │   │   ├── ChatContainer/
-│   │   │   └── LoginForm/
-│   │   └── ProtectedRoute.tsx
-│   ├── hooks/
-│   │   └── useChat.tsx
-│   ├── pages/
-│   │   ├── AuthPage.tsx
-│   │   ├── AuthPage.css
-│   │   ├── ChatPage.tsx
-│   │   └── ChatPage.css
-│   ├── services/
-│   │   ├── api.ts
-│   │   └── authService.ts
-│   ├── stores/
-│   │   └── authStore.ts
-│   ├── styles/
-│   │   └── global.css
-│   ├── types/
-│   │   └── index.ts
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── vite-env.d.ts
-├── .env
-├── .env.example
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── README.md
-├── SETUP-GUIDE.md
-├── IMPLEMENTATION-SUMMARY.md
-├── QUICK-REFERENCE.md
-└── ARCHITECTURE.md (this file)
-```
+Model profiles are draft configuration. Provider URLs, credentials, allowlists,
+and adapter implementations are server-owned. The browser sees only a sanitized
+registry and can request discovery or a fixed synthetic test according to role.
+An unavailable provider is displayed as unavailable, without implicit cloud fallback.
 
-This architecture provides:
-- ✅ Clear separation of concerns
-- ✅ Scalable component structure
-- ✅ Proper authentication flow
-- ✅ Session management
-- ✅ Type safety throughout
-- ✅ Easy to maintain and extend
+Per-intent model overrides affect generation; extraction and recognition use their
+shared routes. Model-based recognition also requires its recognition policy.
+Contract simulation reports configured profile references but does not run models
+or judge generated quality. Knowledge retrieval respects server-authorized roles,
+publication status, and expiry. See [LLM providers](../../docs/guides/llm-providers.md)
+and [control-plane contract](../../docs/guides/control-plane.md).
+
+## Structure and verification
+
+The application retains atoms/molecules/organisms for chat UI, page components for
+routes, and dedicated control-plane components. Styles are regular CSS imports.
+Authentication uses Zustand; chat and console editing use hooks/component state.
+
+The [package scripts](package.json) provide typecheck, ESLint, Vitest, and production
+build checks. Unit tests verify authentication, request contracts, conflicts,
+structured errors, and timeout bounds. Live integration, model quality, recovery,
+capacity, and deployment readiness require separate evidence; historical completion
+reports do not establish those properties.

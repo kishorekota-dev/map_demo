@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_resolved BOOLEAN NOT NULL DEFAULT FALSE,
     status VARCHAR(50) NOT NULL DEFAULT 'active',
-    last_activity TIMESTAMP NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMP,
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,
     message_count INTEGER NOT NULL DEFAULT 0,
     metadata JSONB DEFAULT '{}',
     conversation_context JSONB DEFAULT '{}',
@@ -20,10 +20,10 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     statistics JSONB DEFAULT '{}',
     security JSONB DEFAULT '{}',
     resolution_notes TEXT,
-    ended_at TIMESTAMP,
+    ended_at TIMESTAMPTZ,
     ended_reason VARCHAR(255),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Add comments to table and columns
@@ -46,13 +46,16 @@ COMMENT ON COLUMN chat_sessions.ended_at IS 'When the session was ended';
 COMMENT ON COLUMN chat_sessions.ended_reason IS 'Reason for session termination';
 
 -- Create indexes for performance
-CREATE INDEX idx_chat_session_user_id ON chat_sessions(user_id);
-CREATE INDEX idx_chat_session_user_active ON chat_sessions(user_id, is_active);
-CREATE INDEX idx_chat_session_user_unresolved ON chat_sessions(user_id, is_resolved, is_active);
-CREATE INDEX idx_chat_session_status ON chat_sessions(status);
-CREATE INDEX idx_chat_session_last_activity ON chat_sessions(last_activity);
-CREATE INDEX idx_chat_session_created_at ON chat_sessions(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_session_user_id ON chat_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_user_active ON chat_sessions(user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_chat_session_user_unresolved ON chat_sessions(user_id, is_resolved, is_active);
+CREATE INDEX IF NOT EXISTS idx_chat_session_status ON chat_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_chat_session_last_activity ON chat_sessions(last_activity);
+CREATE INDEX IF NOT EXISTS idx_chat_session_created_at ON chat_sessions(created_at);
 
 -- Add constraint to ensure valid status values
-ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_status_check 
-    CHECK (status IN ('active', 'pending', 'resolved', 'expired', 'terminated'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_sessions_status_check' AND conrelid = 'chat_sessions'::regclass) THEN
+    ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_status_check CHECK (status IN ('active', 'pending', 'resolved', 'expired', 'terminated'));
+  END IF;
+END $$;

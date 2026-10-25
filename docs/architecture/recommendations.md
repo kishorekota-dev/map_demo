@@ -1,58 +1,27 @@
-# Architecture Recommendations
+# Architecture decisions and remaining work
 
-This document captures the highest-value follow-ups after reconciling the active runtime with the current repository layout.
+The baseline is a dedicated-enterprise deployment with a provider-neutral control plane and the banking reference domain. Preserve the existing chat/orchestrator/adapter architecture while closing verified gaps. This page is a follow-up list, not a statement that all items are already implemented.
 
-## What Was Corrected
+## Preserve these boundaries
 
-- The API gateway now proxies the chat and session REST endpoints that the frontend already expects.
-- The missing standalone NLP service is now covered by compatibility endpoints exposed from the NLU service.
-- The active Docker entry points were narrowed to `docker/docker-compose.local.yml` and `docker/docker-compose-full-stack.yml`.
+- Published behavior is separate from server-owned endpoint/credential registries.
+- Domain authorization and financial policy floors remain authoritative beneath editable intent settings.
+- Workflow continuations pin releases; retries retain operation identity; ambiguous side effects require reconciliation.
+- Model-provider choice does not authorize model-generated tools or arbitrary workflow code.
+- A configured adapter and passing fixtures do not prove a customer's actual provider is reachable or production validated.
 
-## Recommended Next Steps
+## Current follow-ups
 
-### 1. Collapse the ghost NLP service contract
+| Area | Evidence and next decision |
+| --- | --- |
+| Domain modularity | Canonical catalogs, workflow branches, validators, and formatters still contain banking logic. A platform/domain-pack contract should make those dependencies explicit before another domain is advertised. Generic case/knowledge intents are supported without creating arbitrary executable workflows. |
+| Internal ingress | NLU/MCP now enforce the production service-token gate, with authenticated caller/header tests. Verify private ingress/TLS in the target deployment. Keep internal services private; do not treat CORS as access control. |
+| Startup/readiness | Distinguish process liveness, configured capability, verified dependency readiness, and successful external-provider validation. Fail deployment preflight on missing required secrets/schemas rather than labeling a configured URL healthy. |
+| Persistence | The effect ledger and sessions are durable when configured; LangGraph `MemorySaver`, NLU context/cache, and socket routing state are still process-local. Test failover/recovery and document the scaling boundary. |
+| Provider compatibility | Verify the selected Mac Studio address/model and enterprise identity, voice, CRM, and cloud credentials in the target environment. The repo's WebSocket MCP adapter is not a blanket interoperability certification. |
+| Schema lifecycle | Controlled repeatable SQL and verification-only production startup now cover model tables, ledger, and grants. Use least-privilege application users and assess existing legacy column types before upgrades. |
+| Operational recovery | Exercise uncertain financial outcomes, outbox retries/dead letters, terminal-session write failures, and one-time handoff consumption before rollout. |
+| Deployment drift | Keep ports, route prefixes, environment variables, provider manifests, preflight checks, and the two supported root Compose paths aligned. Retire duplicate helper paths only after their callers move. |
+| Documentation | Maintain service entry-point docs and root guides; keep dated completion/review artifacts explicitly historical. Avoid copying old readiness claims into active instructions. |
 
-The codebase still carries `NLP_SERVICE_URL` across multiple services even though the monorepo only ships `nlu-service`. The compatibility endpoints remove the immediate runtime break, but the naming debt remains.
-
-Recommendation:
-- Standardize on `nlu-service` as the only natural-language runtime.
-- Remove `nlp` route names and environment variables after consumers are updated.
-
-### 2. Define a single browser ingress policy
-
-The current runtime is workable, but the split should be explicit:
-
-- Browser REST traffic should enter through the API gateway.
-- Browser WebSocket traffic should connect directly to the chat backend.
-- Direct browser calls to the banking service should be limited to authenticated flows that intentionally bypass the gateway.
-
-Recommendation:
-- Capture this contract in tests and environment templates.
-- Fail CI if the frontend default URLs no longer match the gateway and chat backend surfaces.
-
-### 3. Generate deployment config from one source of truth
-
-Port, service-name, and compose drift was the main source of operational breakage.
-
-Recommendation:
-- Keep a single machine-readable service manifest for names, ports, health paths, and dependencies.
-- Generate helper scripts, compose fragments, and documentation tables from that manifest.
-
-### 4. Add smoke tests for each supported startup path
-
-The repo supports multiple ways to run the platform, but they had diverged.
-
-Recommendation:
-- Add CI smoke checks for:
-  - `npm run dev` plus `npm run dev:frontend`
-  - `docker compose -f docker/docker-compose.local.yml up -d --build`
-  - `docker compose -f docker/docker-compose-full-stack.yml up -d --build`
-- Validate a minimal login, session creation, chat message, and health sweep in each path.
-
-### 5. Reduce active-doc sprawl
-
-The archive is useful for history, but active docs need clearer boundaries.
-
-Recommendation:
-- Treat `README.md` and `docs/` as the only actively maintained documentation surface.
-- Keep new status notes out of `docs/archive/` unless they are historical snapshots.
+The legacy `NLP_SERVICE_URL` compatibility name still points at the NLU service; there is no separate NLP service in the canonical monorepo. Browser REST traffic enters through the gateway and Socket.IO through chat. See [overview](overview.md), [runtime contracts](../../services/ai-orchestrator/CONTROL-PLANE-RUNTIME.md), and [model providers](../guides/llm-providers.md) for implemented behavior.

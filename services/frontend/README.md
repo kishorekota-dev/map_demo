@@ -1,210 +1,113 @@
-# Enterprise Conversational Platform - Frontend
+# Customer chat and Servicing Studio frontend
 
-A runtime-configurable React TypeScript frontend for the enterprise conversational platform, built using Atomic Design principles.
+This React application provides authenticated customer chat at `/chat` and the
+servicing control plane at `/control-plane`. Start with the repository
+[documentation index](../../docs/README.md) for the supported deployment path.
 
-## 🚀 Features
+## Start and verify
 
-- **React 18** with TypeScript for type safety
-- **Atomic Design** architecture for scalable UI components
-- **Vite** for fast development and building
-- **Modern CSS** with component-based styling
-- **Real-time chat** interface with intent analysis
-- **Responsive design** for mobile and desktop
-- **Error handling** and loading states
-- **API integration** with the Express backend
-
-## 📁 Project Structure
-
-```
-src/
-├── components/
-│   ├── atoms/           # Basic UI elements (Button, Icon, TextArea, etc.)
-│   ├── molecules/       # Component combinations (ChatMessage, Toast, etc.)
-│   ├── organisms/       # Complex UI sections (ChatContainer, Sidebar, etc.)
-│   ├── templates/       # Page layouts
-│   └── pages/          # Full pages
-├── hooks/              # Custom React hooks
-├── services/           # API and external service integrations
-├── utils/              # Utility functions
-├── types/              # TypeScript type definitions
-├── styles/             # Global styles and themes
-└── assets/             # Static assets
-```
-
-## 🛠 Technology Stack
-
-- **React 18** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool and dev server
-- **Axios** - HTTP client
-- **Date-fns** - Date utilities
-- **Zustand** - State management
-- **CSS Modules** - Component styling
-
-## 🚦 Getting Started
-
-### Prerequisites
-
-- Node.js 16+
-- npm 8+
-
-### Installation
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd services/frontend
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Create environment file:
-   ```bash
-   cp .env.example .env.local
-   ```
-
-4. Update environment variables:
-   ```env
-   VITE_API_BASE_URL=http://localhost:3001/api
-   VITE_BANKING_SERVICE_URL=http://localhost:3005/api/v1
-   VITE_AUTH_API_BASE_URL=http://localhost:3005/api/v1
-   VITE_APP_NAME=Enterprise Conversational Platform
-   VITE_APP_TAGLINE=Configurable AI assistants for secure enterprise workflows
-   VITE_APP_VERSION=1.0.0
-   ```
-
-5. Optional runtime branding:
-   Place a `runtime-config.json` file in `public/` or mount it at `/runtime-config.json` in production to override branding and endpoints without rebuilding the app.
-
-### Development
-
-Start the development server:
-```bash
-npm run dev
-```
-
-The application will be available at `http://localhost:3000`
-
-### Building
-
-Build for production:
-```bash
-npm run build
-```
-
-Preview production build:
-```bash
-npm run start
-```
-
-## 🧪 Testing
-
-Run tests:
-```bash
-npm test
-```
-
-Run tests with coverage:
-```bash
-npm run test:coverage
-```
-
-## 🔧 Development Tools
-
-### Code Quality
-
-- **ESLint** - Code linting
-- **Prettier** - Code formatting
-- **TypeScript** - Type checking
-
-Run linting:
-```bash
-npm run lint
-npm run lint:fix
-```
-
-Format code:
-```bash
-npm run format
-```
-
-Type checking:
-```bash
-npm run type-check
-```
-
-## 🎨 Atomic Design Structure
-
-### Atoms
-Basic building blocks of the UI:
-- `Button` - Various button styles and states
-- `Icon` - FontAwesome icon wrapper
-- `TextArea` - Enhanced textarea with validation
-- `LoadingSpinner` - Loading states
-
-### Molecules
-Combinations of atoms:
-- `ChatMessage` - Individual chat message with metadata
-- `Toast` - Notification system
-- `IntentDisplay` - Intent analysis visualization
-
-### Organisms
-Complex UI sections:
-- `ChatContainer` - Complete chat interface
-- `Sidebar` - Intent analysis and history panel
-- `Header` - Application navigation and status
-
-## 🔗 API Integration
-
-The frontend communicates with the Express backend through:
-
-- **Base URL**: `http://localhost:3001/api` when the API gateway is running
-- **Authentication**: Direct login against the banking service at `http://localhost:3005/api/v1`
-- **Real-time**: Chat and session REST APIs are proxied by the gateway to the chat backend
-
-### Key Services
-
-- `ApiService` - Core API communication
-- `ChatService` - Chat-specific operations
-- `IntentService` - Intent analysis features
-
-## 🚀 Deployment
-
-### Environment Variables
-
-Production environment variables:
-```env
-VITE_API_BASE_URL=https://api.yourbackend.com/api
-VITE_BANKING_SERVICE_URL=https://banking.yourbackend.com/api/v1
-VITE_AUTH_API_BASE_URL=https://identity.yourbackend.com/api/v1
-VITE_APP_NAME=Enterprise Conversational Platform
-VITE_APP_VERSION=1.0.0
-```
-
-For enterprise deployments, prefer a generated `runtime-config.json` over build-time branding variables. See the root-level `deployment-scripts/` directory and `docs/guides/productization.md`.
-
-### Build Commands
+Run these commands from the repository root with Node.js 22+ and npm 10+:
 
 ```bash
-# Production build
-npm run build
-
-# Serve the production build locally
-npm run start
+npm ci
+npm run dev:frontend
 ```
 
-If you are running the lightweight Docker stack in `docker/docker-compose.local.yml`, the frontend container is wired directly to `http://localhost:3006/api` instead of the API gateway.
+The root development command loads `.env.development` through
+[run-with-env.sh](../../scripts/run-with-env.sh). Vite listens on port **3000**
+by default and refuses to silently switch ports. The frontend alone does not
+start the gateway, banking database, chat backend, or model providers. Follow
+[setup](SETUP-GUIDE.md) to connect those services.
 
-## 🤝 Contributing
+```bash
+npm run typecheck -w services/frontend
+npm run lint -w services/frontend
+npm run test -w services/frontend
+npm run build -w services/frontend
+npm run preview -w services/frontend
+```
 
-1. Follow the Atomic Design principles
-2. Use TypeScript for all new components
-3. Write tests for complex logic
-4. Follow the existing naming conventions
-5. Update documentation for new features
+Build output is `services/frontend/dist`; preview serves that existing build on
+port 3000. Vite preview is a local verification server. A deployed static host
+must route `/auth`, `/chat`, and `/control-plane` back to `index.html` and serve
+`/runtime-config.json` without replacing it with the HTML fallback.
 
-## 📝 License
+## Application surfaces
 
-MIT License - see LICENSE file for details
+| Surface | Behavior |
+| --- | --- |
+| `/auth` | Password login, optional access-token entry, or configured enterprise identity |
+| `/chat` | HTTP chat requests, canonical backend sessions, history, and new-conversation controls |
+| `/control-plane` | Channels, every configured intent and prompt, model profiles, journeys, fulfillment, releases, provider connections, evaluations, knowledge, traces, environments, identity, operations, and platform diagnostics/solution packages |
+
+The studio link is shown for servicing roles. API authorization is enforced on
+the server; route visibility and locally stored user profiles do not grant access.
+The interface shows actual configured/tested/unavailable states. Enabling IVR
+policy does not connect a telephony provider, and naming a model does not install
+or verify it.
+
+## Runtime configuration
+
+[main.tsx](src/main.tsx) loads runtime configuration before importing the app.
+[RuntimeConfig](src/config/runtimeConfig.ts) supplies defaults and merges the
+served JSON. A typical local configuration is:
+
+```json
+{
+  "tenantId": "default-enterprise",
+  "productName": "Servicing Studio",
+  "tagline": "Customer servicing",
+  "supportEmail": "support@example.com",
+  "apiBaseUrl": "http://localhost:3001/api",
+  "authBaseUrl": "http://localhost:3005/api/v1",
+  "chatRequestTimeoutMs": 420000,
+  "features": { "allowTokenAuth": false }
+}
+```
+
+The API base includes `/api`; the banking authentication base includes `/api/v1`.
+Use browser-reachable origins, not internal Docker service names. Runtime JSON
+contains public settings only. Provider URLs and credentials belong in server
+configuration. The chat timeout accepts 1,000–600,000 milliseconds; omitted or
+invalid values use the configured fallback, normally 420,000. Ordinary Axios API
+requests retain their 30-second timeout.
+
+Build-time fallbacks include `VITE_TENANT_ID`, `VITE_APP_NAME`,
+`VITE_APP_TAGLINE`, `VITE_SUPPORT_EMAIL`, `VITE_API_BASE_URL`,
+`VITE_AUTH_API_BASE_URL`, `VITE_ALLOW_TOKEN_AUTH`, and
+`VITE_CHAT_REQUEST_TIMEOUT_MS`. `VITE_BANKING_SERVICE_URL` is a compatibility
+fallback for the authentication base. Runtime JSON takes precedence. See the
+[enterprise generator guide](../../docs/guides/productization.md).
+
+## Code map and boundaries
+
+| Source | Responsibility |
+| --- | --- |
+| [App.tsx](src/App.tsx) | Browser routes and header navigation |
+| [authService.ts](src/services/authService.ts) | Password/token login, enterprise session handoff, refresh, and logout |
+| [api.ts](src/services/api.ts) | Customer chat, sessions, history, and NLU requests |
+| [useChat.tsx](src/hooks/useChat.tsx) | Customer conversation state |
+| [ControlPlanePage.tsx](src/pages/ControlPlanePage.tsx) | Configuration workspace and shared draft lifecycle |
+| [control-plane components](src/components/control-plane) | Design, model, and operational modules |
+| [controlPlaneService.ts](src/services/controlPlaneService.ts) | Authenticated gateway requests and conflict errors |
+| [modelProviderService.ts](src/services/modelProviderService.ts) | Sanitized provider discovery and synthetic checks |
+
+The app uses React 18, TypeScript, Vite, React Router, Zustand for authentication,
+and regular imported CSS. Chat state is maintained by the chat hook; the console
+uses component state and backend revisions. This frontend does not stream model
+tokens or execute banking tools in the browser.
+
+## Guides
+
+- [Setup and troubleshooting](SETUP-GUIDE.md)
+- [Frontend architecture](ARCHITECTURE.md)
+- [Command and endpoint quick reference](QUICK-REFERENCE.md)
+- [Servicing Studio operator guide](OPERATIONS-CONSOLE.md)
+- [Control-plane contract](../../docs/guides/control-plane.md)
+- [Operations and provider adapters](../../docs/guides/servicing-operations.md)
+- [Platform readiness and solution packages](../../docs/guides/platform-readiness.md)
+- [LLM provider configuration and remote Mac Studio setup](../../docs/guides/llm-providers.md)
+
+`README.old.md`, `IMPLEMENTATION-SUMMARY.md`, and `FIX-SUMMARY.md` are historical
+records. Their old ports, screenshots, completion claims, and dependency versions
+are not the current setup contract.

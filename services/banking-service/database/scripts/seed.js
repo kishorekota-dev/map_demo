@@ -1,45 +1,39 @@
 #!/usr/bin/env node
-
-const { Pool } = require('pg');
-const fs = require('fs');
+const fs = require('fs/promises');
 const path = require('path');
-const config = require('../config');
+const { createHash } = require('crypto');
+const { withLockedClient } = require('./maintenance');
+const BUSINESS_TABLES = ['users', 'customers', 'accounts', 'transactions', 'cards', 'transfers', 'fraud_alerts', 'disputes'];
 
-async function runSeeds() {
-  const pool = new Pool(config.database);
-
-  try {
-    console.log('Starting database seeding...');
-
-    // Get all seed files
-    const seedsDir = path.join(__dirname, '../seeds');
-    const seedFiles = fs.readdirSync(seedsDir)
-      .filter(file => file.endsWith('.sql'))
-      .sort(); // Ensure they run in order
-
-    console.log(`Found ${seedFiles.length} seed files`);
-
-    for (const seedFile of seedFiles) {
-      console.log(`\nRunning seed: ${seedFile}`);
-      
-      const seedPath = path.join(seedsDir, seedFile);
-      const seedSQL = fs.readFileSync(seedPath, 'utf8');
-
-      await pool.query(seedSQL);
-      
-      console.log(`✓ ${seedFile} completed`);
+async function runSeeds(options = {}) {
+  if ((options.env || process.env).NODE_ENV === 'production') throw new Error('Demo seeding is disabled in production.');
+  const directory = options.directory || path.join(__dirname, '../seeds');
+  const files = (await fs.readdir(directory)).filter(file => file.endsWith('.sql')).sort();
+  if (!files.length) throw new Error('The demo seed directory contains no SQL files.');
+  const sources = await Promise.all(files.map(async file => ({ file, sql: await fs.readFile(path.join(directory, file), 'utf8') })));
+  const checksum = createHash('sha256').update(JSON.stringify(sources)).digest('hex');
+  return withLockedClient(options, async client => {
+    await client.query('BEGIN');
+    try {
+      await client.query('CREATE TABLE IF NOT EXISTS banking_demo_seed_history (id INTEGER PRIMARY KEY CHECK (id = 1), checksum_sha256 TEXT NOT NULL, seeded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
+      const previous = await client.query('SELECT checksum_sha256 FROM banking_demo_seed_history WHERE id = 1');
+      if (previous.rowCount) {
+        if (previous.rows[0].checksum_sha256 !== checksum) throw new Error('The demo seed bundle changed after this database was seeded. Use a new disposable database or an explicit data migration.');
+        await client.query('COMMIT');
+        return { applied: false, files: files.length };
+      }
+      for (const table of BUSINESS_TABLES) {
+        if ((await client.query(`SELECT 1 FROM ${table} LIMIT 1`)).rowCount) throw new Error('Demo seeding requires an empty banking database. Existing data was preserved.');
+      }
+      for (const source of sources) await client.query(source.sql);
+      await client.query('INSERT INTO banking_demo_seed_history (id, checksum_sha256) VALUES (1, $1)', [checksum]);
+      await client.query('COMMIT');
+      return { applied: true, files: files.length };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
     }
-
-    console.log('\n✓ Database seeding completed successfully');
-    
-    await pool.end();
-    process.exit(0);
-  } catch (error) {
-    console.error('\n✗ Seeding failed:', error.message);
-    console.error(error);
-    await pool.end();
-    process.exit(1);
-  }
+  });
 }
-
-runSeeds();
+if (require.main === module) runSeeds().then(result => console.log(result.applied ? `Demo seeds applied atomically: ${result.files} files.` : 'Matching demo seed bundle already applied; no data changed.')).catch(error => { console.error(error.message); process.exitCode = 1; });
+module.exports = { runSeeds };

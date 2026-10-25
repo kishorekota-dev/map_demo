@@ -68,7 +68,7 @@ const standardLimiter = rateLimit({
   passOnStoreError: process.env.NODE_ENV !== 'production',
   skip: (req) => {
     // Skip rate limiting for health checks
-    return req.path === '/health' || req.path === '/health/live';
+    return req.path === '/health' || req.path.startsWith('/health/');
   },
   handler: (req, res) => {
     logger.warn('Rate limit exceeded', {
@@ -196,3 +196,4 @@ module.exports.authLimiter = authLimiter;
 module.exports.publicLimiter = publicLimiter;
 module.exports.createUserLimiter = createUserLimiter;
 module.exports.cleanup = cleanup;
+module.exports.readiness = () => ({ configured: !!redisClient, connected: redisClient?.isReady === true });

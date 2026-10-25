@@ -1,120 +1,72 @@
-# Productization Guide
+# Enterprise product packaging
 
-This repository can now be positioned as an enterprise conversational platform with a banking accelerator, but it is not yet a drop-in multi-tenant SaaS product. The first supported model is a dedicated enterprise deployment with provider-neutral adapters. The [implementation matrix](servicing-product-implementation.md) records current capabilities, differentiation and remaining deployment qualification.
+The first supported offering is a dedicated enterprise servicing deployment with
+provider-neutral adapters and a banking accelerator. The product now includes a
+configuration/control plane, operator workspaces, reusable solutions, durable
+execution, identity, fulfillment and deployment tooling. The [implementation
+record](servicing-product-implementation.md) distinguishes delivered mechanisms
+from customer qualification and commercial work.
 
-## What Was Added
+## Delivered platform mechanisms
 
-- A working [customer servicing control plane](control-plane.md) at `/control-plane`, with signed operator roles, PostgreSQL persistence, versioned configuration and immutable releases
-- Editors for every canonical intent's system/user prompts, shared extraction prompts, recognition phrases, required/optional entities, permitted tools and confirmation settings
-- Digital, AVA and signed provider-neutral IVR ingress, cross-channel one-time resume grants, case adapters, durable fulfillment, SLA escalation and reconciliation
-- Custom typed intents, governed knowledge, evaluation gates, independent approval, environment promotion, canaries, rollout monitoring, operational traces and measured costs
-- Published runtime configuration consumed by the existing orchestrator, with request-scoped prompts and release snapshots pinned across confirmation/data collection
+| Area | Product behavior |
+| --- | --- |
+| Authoring | Every canonical intent/prompt, typed custom intents, shared prompts, recognition, journeys, channels, queues and model routing |
+| Governance | Immutable releases, exact-content contract evaluation, independent approval, environments, canaries, observed rollback and pinned continuations |
+| Reuse | Validated solution catalog/import/export, semantic diff, reviewed conflicts, optimistic draft application and package provenance |
+| Integrations | Server-owned model registry and provider-neutral case, voice and knowledge adapters, secret references and trusted networking |
+| Operations | Cases, leased fulfillment, SLA/reconciliation, evidence, retention/privacy, measured usage and configured costs |
+| Identity | Signed tenant roles, OIDC authorization code/PKCE, local mappings, revocable browser sessions and offline first-administrator bootstrap |
+| Deployment | Safe environment parser, production preflight, private Compose overlay, explicit migrations, verification-only runtime schemas, readiness and sanitized diagnostic export |
 
-- Runtime enterprise branding and endpoint configuration for the frontend via `services/frontend/public/runtime-config.json`
-- A tenant profile template at `config/product/enterprise-profile.example.json`
-- An enterprise asset generator at `deployment-scripts/generate-enterprise-assets.mjs`
-- Updated root environment templates and a current `scripts/validate-env.sh`
+These controls are deployment-scoped. Banking remains embedded in canonical
+intent validation, tools, response formatting and authorization; generic service
+and knowledge journeys are supported. A new industry action still needs reviewed
+code and authenticated source-system contracts. A configuration package cannot
+install executable integrations or transform the app into a new domain alone.
 
-These changes support enterprise packaging and runtime servicing configuration without rebuilding the UI. The control plane is deployment-scoped. Provider-neutral voice/case/knowledge contracts and OIDC sign-in are implemented; actual provider connections and shared SaaS tenancy have separate qualification requirements.
+## Package an enterprise deployment
 
-## Product Boundary
+1. Copy [enterprise profile](../../config/product/enterprise-profile.example.json)
+   and choose the tenant, branding, endpoints and identity mode. The generator
+   accepts `jwt` or `oidc`; native SAML is not implemented. Federate SAML through
+   an enterprise OIDC broker when appropriate.
+2. Validate/generate with `npm run product:validate` and
+   `npm run product:generate`. CLI `--profile` and `--output` select explicit paths.
+   Generated files contain defaults, not provisioned production secrets.
+3. Complete a protected copy of [production environment](../../.env.production.example).
+   Mount the generated public runtime JSON read-only, set exact HTTPS endpoints,
+   disable browser token entry and supply private secret/model registry mounts.
+4. Run static preflight and explicit banking/servicing migration jobs. Bootstrap
+   the initial operator against the intended database and configure authoritative
+   identity mappings. Start the production overlay behind controlled TLS ingress.
+5. Inspect authenticated runtime readiness, install a reviewed solution draft,
+   then evaluate, approve and publish it. Configure live connectors only after
+   provider sandbox tests and customer identity/authorization mappings pass.
+6. Record representative journey, capacity, outage and backup/restore evidence
+   before live activation; archive the relevant signed operational exports.
 
-To serve any enterprise, the system should be treated as two layers:
+Follow [Deployment](deployment.md) for executable commands and
+[Platform operations](platform-readiness.md) for diagnostics, administrator
+bootstrap and reusable packages. Environment files are data, with no shell
+substitution/interpolation. Public runtime JSON must never contain credentials.
 
-1. Platform core
-   - `frontend`
-   - `api-gateway`
-   - `chat-backend`
-   - `nlu-service`
-   - `mcp-service`
-   - `ai-orchestrator`
-   - `agent-ui`
+## Product and operational boundaries
 
-2. Domain accelerators
-   - `banking-service` today
-   - future CRM, HR, ITSM, insurance, healthcare, and operations adapters
+| Boundary | Current scope / remaining work |
+| --- | --- |
+| Tenancy | Signed deployment tenant and tenant-scoped operational/control records; banking/chat isolated by dedicated deployment, without pooled SaaS tenancy |
+| Domain portability | Reviewed registered tools and adapters; banking-specific code remains, with no arbitrary workflow-code marketplace |
+| Identity | OIDC/local JWT implemented; customer IdP registration/mappings required, SCIM and native SAML absent |
+| Voice | Signed normalized turn/action contract; actual media, ASR/TTS, DTMF timing and contact-center transfer require a provider adapter |
+| Model portability | Protocol fixtures and governed profiles verified; separate Mac Studio/cloud reachability, quality and latency require target testing |
+| Reliability | Durable records, leases, unknown-outcome handling and readiness; some graph/socket/cache state is process-local, and throughput/SLO/RPO/RTO remain unmeasured |
+| Deployment | Supported dedicated Compose overlay and explicit schema lifecycle; no generated production Helm/Terraform installer or universal rolling-upgrade compatibility guarantee |
+| Assurance | Operational ACL/retention/evidence mechanisms; customer legal policy, immutable archival, full data lifecycle and regulatory certification remain external |
+| Commercial | Measured usage/configured costs; no licensing, entitlement enforcement, subscriptions, invoicing or commercial support contract |
 
-The platform core should remain domain-neutral. Industry-specific business logic should live behind adapter contracts, tool registries, or domain services.
-
-## What Still Needs To Change
-
-### 1. Identity and Enterprise Access
-
-OIDC authorization-code sign-in with PKCE, nonce/state verification, pinned issuer/
-audience/JWKS, local identity mappings and short-lived signed role tokens is
-implemented. Configure the IdP client and exact callback, then map authoritative
-issuer/subject identities to local users in Servicing Studio. Local JWT sign-in
-remains available for the established application.
-
-SCIM provisioning and native SAML are not included. A SAML-based enterprise can
-federate through its OIDC broker or supply a reviewed identity adapter. The asset
-generator's legacy SAML profile option does not activate native SAML validation.
-See the [identity runbook](servicing-operations.md#enterprise-identity).
-
-### 2. Multi-Tenant Isolation
-
-The control plane now enforces signed deployment tenant claims and stores tenant-scoped configuration and audit records. Existing banking/chat data remains deployment-scoped, not fully multi-tenant. To become a reusable SaaS product you still need:
-
-- tenant registry and tenant metadata store
-- per-tenant secrets and model credentials
-- tenant-aware database schema or isolated databases
-- tenant-aware audit trails, rate limits, and feature flags
-
-### 3. Domain Adapter Contracts
-
-`banking-service` is still embedded as the primary business domain. To support any enterprise:
-
-- define a domain adapter interface for authenticated actions, retrieval, workflow execution, and case updates
-- move banking-specific prompts and tool mappings behind a banking package or adapter
-- allow `ai-orchestrator` and `mcp-service` to load domain-specific tool bundles by tenant or deployment profile
-
-### 4. Knowledge and Integration Layer
-
-The implemented connector registry supports case, voice and governed text-knowledge
-contracts with secret references, trusted hosts, deadlines, real health checks,
-signed callbacks and deterministic replay protection. Configure enterprise
-providers behind those contracts and qualify them in their sandboxes. Provider
-adapters own source-system extraction and permission mapping.
-
-### 5. Governance, Trust, and Compliance
-
-Versioned prompts/policy, exact-content evaluations, independent approval,
-environment promotion, canary observation, restricted context, operational
-retention/privacy and signed evidence export are implemented. Configure customer
-retention/legal holds, immutable external archival and appropriate data residency.
-The existing policy engine and bounded operational redaction do not establish
-regulatory certification or universal PII detection.
-
-### 6. Deployment and Operations
-
-Enterprises need repeatable rollout artifacts:
-
-- Helm charts or Terraform modules
-- secrets-management integration
-- SLOs, dashboards, tracing, and alerting
-- smoke tests per supported topology
-- release channels and upgrade runbooks
-
-### 7. Commercial Product Concerns
-
-To ship this as a product rather than a project, add:
-
-- feature licensing and entitlements
-- commercial billing/entitlement integration over measured usage
-- support diagnostics bundle export
-- commercial packaging around the existing servicing admin console
-- documented upgrade compatibility matrix
-
-## How To Package A New Enterprise Deployment
-
-1. Copy `config/product/enterprise-profile.example.json` and create a tenant-specific profile.
-2. Run `npm run product:validate` to validate the profile schema.
-3. Run `npm run product:generate` or call the generator directly with `--profile` and `--output`.
-4. Mount the generated `frontend-runtime-config.json` as `/runtime-config.json` in the frontend deployment.
-5. Load `.env.enterprise.generated` into your deployment environment, secret manager, or Helm values.
-6. Replace demo endpoints with enterprise ingress, private service addresses, and real identity settings.
-7. Validate the profile with `npm run product:validate`; verify environment configuration, health checks, login and a scripted chat smoke test.
-
-## Recommended Next Engineering Slice
-
-Provider-neutral voice, case, knowledge and identity contracts, durable multi-replica coordination, custom typed intents, evaluated releases, approvals/canaries and operational evidence are implemented. Qualify enterprise provider adapters and run representative customer/load/recovery tests before live activation. See the [implementation matrix](servicing-product-implementation.md), [control plane guide](control-plane.md) and [operations runbook](servicing-operations.md) for exact capabilities and deployment boundaries.
+A health report and passing fixtures are useful operational evidence; a customer
+pilot establishes whether the deployment meets its service objectives. See
+[architecture recommendations](../architecture/recommendations.md) for technical
+limits and [market comparison](market-comparison.md) for the differentiation
+assessment and dated primary-source references.

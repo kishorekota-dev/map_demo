@@ -1,3 +1,7 @@
+> **Historical / superseded reference.** This file preserves an earlier implementation, deployment, example, or test record. Its readiness claims, commands, ports, screenshots, and test counts are not evidence for the current deployment. Use the [current service README](README.md) and [current architecture](../../docs/architecture/overview.md) for supported behavior. Historical content follows unchanged.
+
+---
+
 # MCP Service Implementation Complete
 
 ## Overview

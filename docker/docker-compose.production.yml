@@ -1,0 +1,204 @@
+# Dedicated deployment overlay. Requires Docker Compose >=2.24.4.
+# Always combine with docker-compose-full-stack.yml; run production:preflight first.
+x-runtime: &runtime
+  init: true
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 256
+  cpus: 1.0
+  mem_limit: 768m
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  servicing-migrations:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.migrations
+    profiles: [migration]
+    restart: "no"
+    environment:
+      CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:?}
+      OPERATIONS_DATABASE_URL: ${OPERATIONS_DATABASE_URL:?}
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?}
+      HANDOFF_DATABASE_URL: ${HANDOFF_DATABASE_URL:?}
+    depends_on:
+      postgres: {condition: service_healthy}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 512m
+
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Supply a strong database password}
+    ports: !reset []
+    cpus: 2.0
+    mem_limit: 2g
+    shm_size: 256m
+    security_opt: [no-new-privileges:true]
+
+  redis:
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Supply a strong Redis password}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Supply a strong Redis password}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    ports: !reset []
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+    cpus: 1.0
+    mem_limit: 512m
+    security_opt: [no-new-privileges:true]
+
+  banking-service:
+    <<: *runtime
+    user: node
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:?Choose a deployment tenant}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Supply a strong database password}
+      DATABASE_URL: postgresql://poc_user:${POSTGRES_PASSWORD:?}@postgres:5432/poc_banking
+      JWT_SECRET: ${JWT_SECRET:?Supply a strong JWT secret}
+      BANKING_RUN_MIGRATIONS: "${BANKING_RUN_MIGRATIONS:-false}"
+      BANKING_SEED_DEMO_DATA: "false"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set exact HTTPS browser origins}
+    ports: !reset []
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get('http://localhost:3005/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+
+  nlu-service:
+    <<: *runtime
+    user: node
+    environment:
+      NODE_ENV: production
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply a strong internal service credential}
+      CORS_ORIGIN: ${ALLOWED_ORIGINS:?}
+      MOCK_DIALOGFLOW: "${MOCK_DIALOGFLOW:-true}"
+      MOCK_EXTERNAL_AI_SERVICES: "${MOCK_EXTERNAL_AI_SERVICES:-true}"
+    ports: !reset []
+
+  mcp-service:
+    <<: *runtime
+    user: node
+    environment:
+      NODE_ENV: production
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply a strong internal service credential}
+    ports: !reset []
+
+  ai-orchestrator:
+    <<: *runtime
+    mem_limit: 1g
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:?}
+      CONTROL_PLANE_ENABLED: "true"
+      CONTROL_PLANE_ENVIRONMENT: production
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?}
+      DATABASE_MANAGE_SCHEMA: "false"
+      WORKFLOW_DURABLE_EXECUTION: "true"
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?Configure durable workflow storage}
+      WORKFLOW_SCHEMA_AUTO_MIGRATE: "${WORKFLOW_SCHEMA_AUTO_MIGRATE:-false}"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      REDIS_URL: ${REDIS_URL:?Configure authenticated Redis URL}
+      LLM_PROVIDERS_FILE: /run/config/llm-providers.json
+      LLM_PROVIDERS_JSON: ""
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?}
+    volumes:
+      - type: bind
+        source: ${LLM_PROVIDERS_HOST_FILE:?Supply an absolute server registry host file}
+        target: /run/config/llm-providers.json
+        read_only: true
+        bind: {create_host_path: false}
+    ports: !reset []
+
+  chat-backend:
+    <<: *runtime
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:?}
+      CONTROL_PLANE_ENABLED: "true"
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?}
+      DATABASE_MANAGE_SCHEMA: "false"
+      CHAT_PERSISTENCE_ENABLED: "true"
+      HANDOFF_STORAGE: postgres
+      HANDOFF_DATABASE_URL: ${HANDOFF_DATABASE_URL:?Configure durable handoff storage}
+      HANDOFF_SCHEMA_AUTO_MIGRATE: "${HANDOFF_SCHEMA_AUTO_MIGRATE:-false}"
+      REDIS_URL: ${REDIS_URL:?}
+      NLU_REQUEST_TIMEOUT_MS: ${NLU_REQUEST_TIMEOUT_MS:-5000}
+      AGENT_RESPONSE_TIMEOUT: ${AGENT_RESPONSE_TIMEOUT:-400000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?}
+    ports: !reset []
+
+  api-gateway:
+    <<: *runtime
+    user: node
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:?}
+      CONTROL_PLANE_ENABLED: "true"
+      CONTROL_PLANE_ENVIRONMENT: production
+      JWT_SECRET: ${JWT_SECRET:?}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?}
+      INTERNAL_SERVICE_AUTH_REQUIRED: "true"
+      CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:?Configure PostgreSQL control-plane storage}
+      OPERATIONS_DATABASE_URL: ${OPERATIONS_DATABASE_URL:?Configure PostgreSQL operations storage}
+      CONTROL_PLANE_MANAGE_SCHEMA: "${CONTROL_PLANE_MANAGE_SCHEMA:-false}"
+      OPERATIONS_MANAGE_SCHEMA: "${OPERATIONS_MANAGE_SCHEMA:-false}"
+      FULFILLMENT_WORKER_ENABLED: "true"
+      WORKFLOW_DURABLE_EXECUTION: "true"
+      HANDOFF_STORAGE: postgres
+      REDIS_URL: ${REDIS_URL:?}
+      AUDIT_ACTOR_HASH_KEY: ${AUDIT_ACTOR_HASH_KEY:?Supply a separate audit pseudonym key}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?}
+      FRONTEND_URL: ${FRONTEND_URL:?Set public HTTPS frontend origin}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      CONNECTOR_ALLOW_LOCAL: "false"
+      OIDC_ALLOW_LOCAL: "false"
+      CONNECTOR_SECRET_ROOT: /run/servicing-secrets
+      SERVICING_REQUEST_TIMEOUT_MS: ${SERVICING_REQUEST_TIMEOUT_MS:-410000}
+    volumes:
+      - type: bind
+        source: ${CONNECTOR_SECRET_HOST_DIR:?Supply an absolute secret directory, which may be empty}
+        target: /run/servicing-secrets
+        read_only: true
+        bind: {create_host_path: false}
+    ports: !override ["127.0.0.1:3001:3001"]
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get('http://localhost:3001/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+
+  agent-ui:
+    <<: *runtime
+    user: node
+    environment:
+      NODE_ENV: production
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      SESSION_SECRET: ${SESSION_SECRET:?Supply a separate browser session secret}
+      CORS_ORIGIN: ${ALLOWED_ORIGINS:?}
+    ports: !reset []
+
+  frontend:
+    <<: *runtime
+    user: node
+    mem_limit: 256m
+    build:
+      target: production
+    volumes:
+      - type: bind
+        source: ${FRONTEND_RUNTIME_CONFIG_FILE:?Supply an absolute public frontend runtime config file}
+        target: /app/dist/runtime-config.json
+        read_only: true
+        bind: {create_host_path: false}
+    ports: !override ["127.0.0.1:3000:3000"]

@@ -1,0 +1,17 @@
+{
+  "name": "servicing-frontend-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked static frontend runtime, independent of development/build dependencies",
+  "dependencies": {
+    "serve": "14.2.6"
+  },
+  "overrides": {
+    "serve": {
+      "compression": "1.8.2"
+    }
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

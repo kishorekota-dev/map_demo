@@ -3,6 +3,7 @@ const Session = require('./Session');
 const WorkflowExecution = require('./WorkflowExecution');
 const HumanFeedback = require('./HumanFeedback');
 const logger = require('../utils/logger');
+const { initializeModelSchema } = require('./schema');
 
 // Define relationships
 Session.hasMany(WorkflowExecution, { foreignKey: 'sessionId', sourceKey: 'sessionId' });
@@ -20,9 +21,8 @@ async function initializeDatabase() {
     await sequelize.authenticate();
     logger.info('Database connection established');
 
-    // Sync models (create tables if they don't exist)
-    await sequelize.sync({ alter: false }); // Use alter: true in development if needed
-    logger.info('Database models synchronized');
+    await initializeModelSchema(sequelize);
+    logger.info('Database model schema verified');
 
     return true;
   } catch (error) {

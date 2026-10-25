@@ -1,35 +1,65 @@
-# Documentation
+# Documentation index
 
-This directory contains all project documentation organized by category.
+Reviewed against the canonical `services/*` implementation on October 24, 2026.
+Start here for current instructions. Service routes, configuration validators and
+executable migration scripts resolve conflicts with old implementation reports.
 
-## Structure
+## Start and operate
 
-```
-docs/
-├── getting-started/       # Setup and configuration
-│   ├── configuration.md
-│   └── quick-start.md
-├── architecture/          # System architecture
-│   ├── overview.md
-│   ├── recommendations.md
-│   └── diagrams/
-├── api/                   # API entry points and specs
-│   ├── README.md
-│   └── openapi/
-├── guides/                # How-to guides
-│   ├── development.md
-│   └── deployment.md
-├── reference/             # Reference materials
-│   └── troubleshooting.md
-└── archive/               # Legacy documentation
-```
+| Task | Current guide |
+| --- | --- |
+| Run the app locally | [Quick start](getting-started/quick-start.md) |
+| Configure services and credentials | [Configuration](getting-started/configuration.md) |
+| Prepare a dedicated production deployment | [Deployment](guides/deployment.md) |
+| Check platform health and reuse solution packages | [Platform readiness and solutions](guides/platform-readiness.md) |
+| Connect Qwen on the separate Mac Studio | [Model providers](guides/llm-providers.md) |
+| Investigate a failed startup or request | [Troubleshooting](reference/troubleshooting.md) |
+| Develop and verify changes | [Development](guides/development.md) |
 
-## Quick Links
+## Product and architecture
 
-- [Quick Start](getting-started/quick-start.md)
-- [Architecture Overview](architecture/overview.md)
-- [Architecture Recommendations](architecture/recommendations.md)
-- [Productization Guide](guides/productization.md)
-- [API Overview](api/README.md)
-- [Development Guide](guides/development.md)
-- [Deployment Guide](guides/deployment.md)
+| Topic | Current source |
+| --- | --- |
+| System boundaries and data flow | [Architecture overview](architecture/overview.md) |
+| Deterministic banking contracts and model limits | [Determinism](architecture/determinism.md) |
+| Prompt/intent/channel authoring and release governance | [Control plane](guides/control-plane.md) |
+| Operator workflows and permissions | [Studio guide](../services/frontend/OPERATIONS-CONSOLE.md) |
+| Fulfillment, OIDC, evidence, privacy and recovery | [Operations runbook](guides/servicing-operations.md) |
+| Model plugin protocol and credentials | [Plugin contract](../services/ai-orchestrator/src/llm/README.md) |
+| Pinned runtime behavior and durable effect records | [Runtime reference](../services/ai-orchestrator/CONTROL-PLANE-RUNTIME.md) |
+| Enterprise packaging and supported boundaries | [Productization](guides/productization.md) |
+| Delivered market gaps and verification evidence | [Implementation record](guides/servicing-product-implementation.md) |
+| Vendor comparison and differentiation | [Market review](guides/market-comparison.md) |
+| Dependency audit and runtime/build-tool scope | [Dependency review](architecture/dependency-audit.md) |
+| Remaining architecture work | [Recommendations](architecture/recommendations.md) |
+
+## API and service references
+
+The [API overview](api/README.md) distinguishes external ingress, internal service
+contracts and historical OpenAPI artifacts. Detailed references are owned by the
+[control plane](../services/api-gateway/control-plane/README.md),
+[platform](../services/api-gateway/platform/README.md),
+[banking service](../services/banking-service/API-DOCUMENTATION.md),
+[chat service](../services/chat-backend/README.md),
+[orchestrator](../services/ai-orchestrator/README.md),
+[MCP service](../services/mcp-service/README.md) and
+[NLU service](../services/nlu-service/README.md).
+
+The [documentation review record](reference/documentation-review.md) describes
+the source-of-truth audit and automated local-link check.
+
+## Reading older documents
+
+`docs/archive/`, `README.old.md`, old completion/review/test reports and historical
+diagrams preserve earlier engineering records. A historical banner points to
+current guides; old counts, ports, credentials, endpoint lists and readiness
+claims are not present-day acceptance evidence. Historical content is retained
+for context, rather than silently rewritten as if it described the current app.
+The two pre-existing white-paper review drafts are outside this implementation.
+
+The canonical deployment uses `services/*`. The `packages/*` tree and
+`docker-compose-enterprise.yml` are legacy/experimental. The supported dedicated
+Compose path combines the full-stack manifest with the production overlay and
+requires explicit secrets, migrations, TLS ingress and customer qualification.
+A passing unit suite or static preflight alone does not establish a production
+SLA, compliance certification, live IVR readiness or measured model quality.

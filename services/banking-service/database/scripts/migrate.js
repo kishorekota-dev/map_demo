@@ -1,107 +1,61 @@
 #!/usr/bin/env node
-
-const { Pool } = require('pg');
-const fs = require('fs');
+const fs = require('fs/promises');
 const path = require('path');
-const config = require('../config');
+const { createHash } = require('crypto');
+const { withLockedClient } = require('./maintenance');
 
-async function runMigrations() {
-  const pool = new Pool(config.database);
+async function runMigrations(options = {}) {
+  const directory = options.directory || path.join(__dirname, '../migrations');
+  const log = options.log || console.log;
+  const files = (await fs.readdir(directory)).filter(file => /^V\d+__.+\.sql$/.test(file));
+  if (!files.length) throw new Error('No versioned banking migrations were found.');
+  const migrations = files.map(file => {
+    const [, rawVersion, description] = file.match(/^V(\d+)__(.+)\.sql$/);
+    return { file, version: BigInt(rawVersion).toString(), description: description.replace(/_/g, ' ') };
+  }).sort((a, b) => BigInt(a.version) < BigInt(b.version) ? -1 : BigInt(a.version) > BigInt(b.version) ? 1 : 0);
+  if (new Set(migrations.map(entry => entry.version)).size !== migrations.length) throw new Error('Duplicate banking migration versions are not allowed.');
 
-  try {
-    console.log('Starting database migrations...');
-    console.log(`Database: ${config.database.database}`);
-
-    // Create flyway_schema_history table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS flyway_schema_history (
-        installed_rank INT NOT NULL PRIMARY KEY,
-        version VARCHAR(50),
-        description VARCHAR(200) NOT NULL,
-        type VARCHAR(20) NOT NULL,
-        script VARCHAR(1000) NOT NULL,
-        checksum INT,
-        installed_by VARCHAR(100) NOT NULL,
-        installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        execution_time INT NOT NULL,
-        success BOOLEAN NOT NULL
-      )
-    `);
-
-    // Get all migration files
-    const migrationsDir = path.join(__dirname, '../migrations');
-    const migrationFiles = fs.readdirSync(migrationsDir)
-      .filter(file => file.endsWith('.sql') && file.match(/^V\d+__/))
-      .sort();
-
-    console.log(`Found ${migrationFiles.length} migration files`);
-
-    let appliedCount = 0;
-    
-    for (const migrationFile of migrationFiles) {
-      // Parse version and description from filename (e.g., V1__create_users_table.sql)
-      const match = migrationFile.match(/^V(\d+)__(.+)\.sql$/);
-      if (!match) continue;
-      
-      const version = match[1];
-      const description = match[2].replace(/_/g, ' ');
-      
-      // Check if migration already applied
-      const result = await pool.query(
-        'SELECT 1 FROM flyway_schema_history WHERE version = $1 AND success = true',
-        [version]
-      );
-      
-      if (result.rowCount > 0) {
-        console.log(`  ⊘ V${version}: ${description} (already applied)`);
+  return withLockedClient(options, async client => {
+    await client.query(`CREATE TABLE IF NOT EXISTS flyway_schema_history (
+      installed_rank INT NOT NULL PRIMARY KEY, version VARCHAR(50), description VARCHAR(200) NOT NULL,
+      type VARCHAR(20) NOT NULL, script VARCHAR(1000) NOT NULL, checksum INT, installed_by VARCHAR(100) NOT NULL,
+      installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, execution_time INT NOT NULL, success BOOLEAN NOT NULL
+    )`);
+    await client.query('ALTER TABLE flyway_schema_history ADD COLUMN IF NOT EXISTS checksum_sha256 TEXT');
+    let applied = 0;
+    for (const migration of migrations) {
+      const sql = await fs.readFile(path.join(directory, migration.file), 'utf8');
+      const checksum = createHash('sha256').update(sql).digest('hex');
+      const previous = await client.query('SELECT checksum_sha256 FROM flyway_schema_history WHERE version = $1 AND success = true', [migration.version]);
+      if (previous.rowCount) {
+        if (previous.rows.some(row => row.checksum_sha256 && row.checksum_sha256 !== checksum)) throw new Error(`Applied migration ${migration.file} has changed; restore the original file and add a new migration.`);
+        log(`${migration.file}: already applied${previous.rows[0].checksum_sha256 ? '' : ' (legacy history has no source checksum)'}`);
         continue;
       }
-      
-      console.log(`  ▶ V${version}: ${description}`);
-      
-      const migrationPath = path.join(migrationsDir, migrationFile);
-      const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
-      
-      const startTime = Date.now();
-      
+      const started = Date.now();
+      await client.query('BEGIN');
       try {
-        await pool.query(migrationSQL);
-        const executionTime = Date.now() - startTime;
-        
-        // Record successful migration
-        await pool.query(`
-          INSERT INTO flyway_schema_history 
-          (installed_rank, version, description, type, script, installed_by, execution_time, success)
-          VALUES ((SELECT COALESCE(MAX(installed_rank), 0) + 1 FROM flyway_schema_history), $1, $2, 'SQL', $3, $4, $5, true)
-        `, [version, description, migrationFile, process.env.USER || 'migration-script', executionTime]);
-        
-        console.log(`    ✓ Completed in ${executionTime}ms`);
-        appliedCount++;
+        await client.query(sql);
+        await client.query(`INSERT INTO flyway_schema_history
+          (installed_rank, version, description, type, script, installed_by, execution_time, success, checksum_sha256)
+          VALUES ((SELECT COALESCE(MAX(installed_rank), 0) + 1 FROM flyway_schema_history), $1, $2, 'SQL', $3, CURRENT_USER, $4, true, $5)`,
+        [migration.version, migration.description, migration.file, Date.now() - started, checksum]);
+        await client.query('COMMIT');
+        applied++;
+        log(`${migration.file}: applied`);
       } catch (error) {
-        console.error(`    ✗ Failed: ${error.message}`);
-        
-        // Record failed migration
-        await pool.query(`
-          INSERT INTO flyway_schema_history 
-          (installed_rank, version, description, type, script, installed_by, execution_time, success)
-          VALUES ((SELECT COALESCE(MAX(installed_rank), 0) + 1 FROM flyway_schema_history), $1, $2, 'SQL', $3, $4, 0, false)
-        `, [version, description, migrationFile, process.env.USER || 'migration-script']);
-        
-        throw error;
+        await client.query('ROLLBACK');
+        throw new Error(`${migration.file} failed and was rolled back: ${error.message}`);
       }
     }
-
-    console.log('\n✓ Migrations completed successfully');
-    console.log(`✓ Total migrations applied: ${appliedCount}`);
-    
-    await pool.end();
-    process.exit(0);
-  } catch (error) {
-    console.error('\n✗ Migration failed:', error.message);
-    console.error(error);
-    await pool.end();
-    process.exit(1);
-  }
+    return { applied, total: migrations.length };
+  });
 }
 
-runMigrations();
+if (require.main === module) {
+  if (process.argv.length > 2) {
+    console.error('Migration arguments and rollback are not supported. Use a reviewed forward migration or restore a database backup.');
+    process.exitCode = 1;
+  } else runMigrations().then(result => console.log(`Banking migrations complete: ${result.applied} applied.`)).catch(error => { console.error(error.message); process.exitCode = 1; });
+}
+module.exports = { runMigrations };

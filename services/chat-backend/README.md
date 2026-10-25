@@ -1,670 +1,76 @@
-# POC Chat Backend - Complete Implementation Guide
+# Chat backend
 
-## Overview
+The chat backend serves authenticated customer REST and Socket.IO conversations on port **3006**. It owns chat sessions/messages and pending-response context, forwards workflow requests to the AI orchestrator, and supports identity-bound one-time cross-channel handoff. It is not a second banking execution engine.
 
-The POC Chat Backend is a real-time chat processing service with agent orchestration, database persistence, and session management. It provides comprehensive chat history storage and the ability to resume unresolved conversations.
+## Current references
 
-## 🐳 Quick Start with Docker (Recommended)
+- [Architecture](ARCHITECTURE.md)
+- [REST and socket quick reference](QUICK-REFERENCE.md)
+- [Session resume and channel handoff](SESSION-RESUME-FLOW.md)
+- [Deployment](DOCKER-README.md)
+- [Documentation index](DOCUMENTATION-INDEX.md)
+- [Governed runtime](../ai-orchestrator/CONTROL-PLANE-RUNTIME.md)
 
-The easiest way to run the chat backend with all dependencies:
+Completion reports, old test results, and review summaries are historical snapshots, not current deployment evidence.
 
-```bash
-# Development mode (with hot reload)
-./docker-start.sh dev
+## Processing flow
 
-# Production mode
-./docker-start.sh prod
-```
+New customer messages follow the NLU-hint → AI-orchestrator pipeline. The enabled control plane performs authoritative published recognition in the orchestrator. Replies to pending field/confirmation requests go directly to `/api/orchestrator/feedback`, retaining the original release and action identity. Channel metadata is carried through REST and sockets.
 
-**See [DOCKER-README.md](./DOCKER-README.md) for complete Docker documentation.**
+The backend maps completion, data collection, confirmation, clarification, human handoff, policy blocks, citations/evidence, and reconciliation results into chat responses. Provider unavailability preserves pending feedback so the customer can retry safely. A timeout is not proof that a financial action failed; the orchestrator ledger governs recovery.
 
-## Features
+## Customer REST API
 
-✅ **Fully Implemented:**
-- ✅ Real-time messaging via WebSocket (Socket.IO)
-- ✅ Multi-agent orchestration (NLP, NLU, Banking, MCP)
-- ✅ JWT Authentication
-- ✅ Rate limiting and security
-- ✅ **Database persistence for chat history** (PostgreSQL + Sequelize)
-- ✅ **Session management with database storage**
-- ✅ **Resume unresolved chat sessions**
-- ✅ **Comprehensive OpenAPI 3.0 documentation**
-- ✅ **Docker support with PostgreSQL and Redis**
-- ✅ RESTful API endpoints
-- ✅ WebSocket event handlers
-- ✅ Graceful shutdown and error handling
+The gateway preserves `/api/chat` and `/api/sessions` prefixes. Protected endpoints require `Authorization: Bearer <access-token>` and enforce customer/tenant session ownership.
 
-## Architecture
+| Method | Path | Request/purpose |
+| --- | --- | --- |
+| POST | `/api/sessions` | Create a session; optional `{metadata:{channel:"digital"}}`, identity from JWT |
+| GET | `/api/sessions/:id` | Owned session information |
+| GET | `/api/sessions/:id/history` | Owned conversation history |
+| POST | `/api/sessions/:id/messages` | `{content,type?,attachments?,metadata?}` |
+| DELETE | `/api/sessions/:id` | End an owned session |
+| POST | `/api/chat/message` | Compatibility message endpoint; requires session ID |
+| GET | `/api/chat/history` | Compatibility history endpoint; requires session ID |
+| POST | `/api/sessions/:id/handoff` | `{targetChannel:"digital|ava|ivr"}` → short-lived grant |
+| POST | `/api/sessions/resume` | `{grant}` → resume the same authenticated customer's session/channel |
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  POC Chat Backend (3006)                │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ ChatService  │  │SessionManager│  │DatabaseSvc  │ │
-│  └──────────────┘  └──────────────┘  └─────────────┘ │
-│         │                  │                 │         │
-│  ┌──────────────────────────────────────────────────┐ │
-│  │        Agent Orchestrator                        │ │
-│  │  ┌──────┐ ┌──────┐ ┌────────┐ ┌──────┐         │ │
-│  │  │ NLP  │ │ NLU  │ │Banking │ │ MCP  │         │ │
-│  │  └──────┘ └──────┘ └────────┘ └──────┘         │ │
-│  └──────────────────────────────────────────────────┘ │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │  PostgreSQL Database  │
-              │                       │
-              │  - chat_sessions      │
-              │  - chat_messages      │
-              └───────────────────────┘
-```
-
-## Database Schema
-
-### chat_sessions Table
-Stores all chat sessions with full context and state.
-
-```sql
-CREATE TABLE chat_sessions (
-    session_id UUID PRIMARY KEY,
-    user_id VARCHAR(100) NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    is_resolved BOOLEAN DEFAULT FALSE,
-    status VARCHAR(50) DEFAULT 'active',
-    last_activity TIMESTAMP NOT NULL,
-    expires_at TIMESTAMP,
-    message_count INTEGER DEFAULT 0,
-    metadata JSONB,
-    conversation_context JSONB,
-    state JSONB,
-    statistics JSONB,
-    security JSONB,
-    resolution_notes TEXT,
-    ended_at TIMESTAMP,
-    ended_reason VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Indexes for fast queries
-CREATE INDEX idx_chat_session_user_active ON chat_sessions(user_id, is_active);
-CREATE INDEX idx_chat_session_user_unresolved ON chat_sessions(user_id, is_resolved, is_active);
-```
-
-### chat_messages Table
-Stores all messages with full processing metadata.
-
-```sql
-CREATE TABLE chat_messages (
-    message_id UUID PRIMARY KEY,
-    session_id UUID REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
-    user_id VARCHAR(100) NOT NULL,
-    direction VARCHAR(20) NOT NULL, -- 'incoming' or 'outgoing'
-    content TEXT NOT NULL,
-    message_type VARCHAR(50) DEFAULT 'text',
-    metadata JSONB,
-    processing JSONB,
-    agent_info JSONB,
-    intent VARCHAR(100),
-    entities JSONB,
-    sentiment VARCHAR(50),
-    confidence_score FLOAT,
-    processing_time_ms INTEGER,
-    error_info JSONB,
-    parent_message_id UUID,
-    sequence_number INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX idx_chat_message_session ON chat_messages(session_id, sequence_number);
-CREATE INDEX idx_chat_message_user ON chat_messages(user_id, created_at);
-```
-
-## Installation & Setup
-
-### Prerequisites
-
-- Node.js >= 22.0.0
-- PostgreSQL >= 12
-- npm or yarn
-
-### 1. Install Dependencies
+Direct service `/api/process` is a protected compatibility endpoint, not the preferred browser route. `/api/agents` exposes logical stage information, not dynamic multi-agent execution. Health endpoints are `/health`, `/health/metrics`, and `/health/status` (also mounted under `/api/health`); treat them as operational diagnostics, not production certification.
 
 ```bash
-cd poc-chat-backend
+curl http://localhost:3001/api/sessions \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"metadata":{"channel":"digital"}}'
+
+curl http://localhost:3001/api/sessions/OWNED_SESSION_ID/messages \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -H 'X-Interaction-ID: customer-turn-001' \
+  -d '{"content":"What can you help with?","type":"text"}'
+```
+
+Retain `X-Interaction-ID` when retrying the same new request. Do not reuse it for a different intended action.
+
+## Socket.IO
+
+Connect to the chat backend's `/socket.io` with `auth:{token:accessToken}`. This is Socket.IO, not a raw WebSocket JSON protocol. Key customer events are `createSession`, `joinSession`, `sendMessage`, `endSession`, `typing`, `stopTyping`, `requestHandoff`, and `resumeSession`. Use `clientMessageId` to retain a request's identity. Operator request-envelope events are separately authorized; a browser-supplied agent flag does not grant operator rights. See the [event reference](QUICK-REFERENCE.md).
+
+## Identity and persistence
+
+Use the gateway's enterprise identity exchange or domain login flow to obtain verified access tokens. Development token helpers under `/auth` are not an enterprise identity provider and are gated by deployment configuration. JWT roles and tenant identity come from the server; session ownership is checked independently.
+
+`CHAT_PERSISTENCE_ENABLED=true` enables PostgreSQL chat storage through the current database service. With `DATABASE_MANAGE_SCHEMA=false` (the production default), startup authenticates and verifies model tables/columns without DDL. Development defaults to non-altering sync followed by verification. Schemas are in [migrations](migrations/), including `chat_sessions`, `chat_messages`, and the handoff grant table. Session/cache/socket state also exists in process; do not infer cross-worker socket routing guarantees from persistent messages alone.
+
+Handoff grants use PostgreSQL by default, a five-minute lifetime, hashed storage, and atomic one-time consumption. They bind customer, tenant, session, and target channel; a phone number/session ID alone is not authorization. `HANDOFF_STORAGE=memory` is an explicit non-production test/development mode. See [handoff recovery semantics](SESSION-RESUME-FLOW.md).
+
+## Run and verify
+
+```bash
+# From repository root, with configured environment/dependencies
 npm install
+npm run dev:chat
+npm test -w services/chat-backend -- --runInBand
 ```
 
-New dependencies added:
-- `sequelize`: ^6.35.0 - ORM for database operations
-- `pg`: ^8.11.3 - PostgreSQL driver
-- `pg-hstore`: ^2.3.4 - Serialization for JSON/JSONB
+Use Node 22. Configure `JWT_SECRET`, `DEPLOYMENT_TENANT_ID`, `SERVICING_SERVICE_TOKEN`, `AI_ORCHESTRATOR_URL`, `NLU_SERVICE_URL`, persistence/database settings, and allowed origins. `AGENT_RESPONSE_TIMEOUT` defaults to a bounded 400000 ms orchestration budget; `NLU_REQUEST_TIMEOUT_MS` defaults to 5000 ms. Coordinate gateway/browser deadlines with the published provider budgets; do not turn a slow workflow into an automatic duplicate action.
 
-### 2. Database Setup
-
-Ensure PostgreSQL is running and create the database:
-
-```bash
-# Login to PostgreSQL
-psql -U postgres
-
-# Create database
-CREATE DATABASE poc_chat;
-
-# Exit
-\q
-```
-
-### 3. Environment Configuration
-
-Update `.env` with database credentials:
-
-```env
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=poc_chat
-DB_USER=postgres
-DB_PASSWORD=postgres
-CHAT_PERSISTENCE_ENABLED=true
-DB_POOL_MAX=10
-DB_POOL_MIN=2
-DB_IDLE_TIMEOUT=30000
-DB_CONNECTION_TIMEOUT=10000
-DB_SSL=false
-DB_LOGGING=true  # Set to false in production
-```
-
-### 4. Start the Service
-
-```bash
-# Development mode with auto-reload
-npm run dev
-
-# Production mode
-npm start
-
-# Custom port
-PORT=3006 npm start
-```
-
-The service will:
-1. Connect to PostgreSQL database
-2. Auto-create tables (chat_sessions, chat_messages)
-3. Start HTTP server on port 3006
-4. Enable WebSocket on /socket.io
-
-## API Documentation
-
-Full OpenAPI 3.0 specification is available in `openapi.yaml`.
-
-### Core Endpoints
-
-#### 1. Create Session
-```http
-POST /api/sessions
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "userId": "user_12345",
-  "metadata": {
-    "userAgent": "Mozilla/5.0...",
-    "ipAddress": "192.168.1.1"
-  }
-}
-```
-
-#### 2. Send Message
-```http
-POST /api/chat/message
-Authorization: Bearer <token>
-X-Session-ID: sess_abc123
-Content-Type: application/json
-
-{
-  "message": "What is my account balance?",
-  "type": "text"
-}
-```
-
-**Response:**
-```json
-{
-  "sessionId": "sess_abc123",
-  "message": {
-    "message_id": "msg_xyz789",
-    "content": "What is my account balance?",
-    "direction": "incoming"
-  },
-  "response": {
-    "message_id": "msg_xyz790",
-    "content": "Your account balance is $5,432.10",
-    "direction": "outgoing"
-  },
-  "agent": {
-    "type": "banking",
-    "confidence": 0.95,
-    "agentsInvolved": ["nlu", "banking"]
-  }
-}
-```
-
-#### 3. Get User's Unresolved Sessions
-```http
-GET /api/users/{userId}/sessions?type=unresolved
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "userId": "user_12345",
-  "type": "unresolved",
-  "count": 2,
-  "sessions": [
-    {
-      "sessionId": "sess_abc123",
-      "status": "active",
-      "isActive": true,
-      "isResolved": false,
-      "lastActivity": "2025-10-11T09:45:00.000Z",
-      "messageCount": 15,
-      "createdAt": "2025-10-11T09:00:00.000Z",
-      "recentMessages": [...]
-    }
-  ]
-}
-```
-
-#### 4. Resume Session
-```http
-POST /api/sessions/{sessionId}/resume
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "sessionId": "sess_abc123",
-  "session": {
-    "userId": "user_12345",
-    "isActive": true,
-    "messageCount": 15,
-    "conversationContext": {
-      "currentIntent": "account_balance",
-      "bankingContext": {
-        "accountId": "ACC123"
-      }
-    }
-  },
-  "history": [
-    {
-      "message_id": "msg_001",
-      "direction": "incoming",
-      "content": "What is my account balance?",
-      "created_at": "2025-10-11T09:00:00.000Z"
-    }
-  ],
-  "message": "Session resumed successfully. You can continue the conversation."
-}
-```
-
-#### 5. Mark Session as Resolved
-```http
-POST /api/sessions/{sessionId}/resolve
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "notes": "User query fully answered"
-}
-```
-
-#### 6. Get Conversation History
-```http
-GET /api/sessions/{sessionId}/history?limit=50&offset=0
-Authorization: Bearer <token>
-```
-
-### Session Query Types
-
-| Type | Endpoint | Description |
-|------|----------|-------------|
-| **Active** | `GET /api/users/{userId}/sessions?type=active` | Currently active sessions |
-| **Unresolved** | `GET /api/users/{userId}/sessions?type=unresolved` | Sessions with pending queries |
-| **Recent** | `GET /api/users/{userId}/sessions?type=recent&limit=10` | Most recent sessions |
-
-## WebSocket Events
-
-### Client → Server
-
-```javascript
-// Connect with authentication
-const socket = io('http://localhost:3006', {
-  auth: {
-    token: 'your-jwt-token'
-  }
-});
-
-// Send message
-socket.emit('chat:message', {
-  sessionId: 'sess_abc123',
-  content: 'Hello!',
-  type: 'text'
-});
-
-// Request history
-socket.emit('chat:history', {
-  sessionId: 'sess_abc123',
-  limit: 50
-});
-```
-
-### Server → Client
-
-```javascript
-// Receive response
-socket.on('chat:response', (data) => {
-  console.log('Bot response:', data.content);
-});
-
-// Receive history
-socket.on('chat:history', (data) => {
-  console.log('History:', data.messages);
-});
-
-// Connection errors
-socket.on('error', (error) => {
-  console.error('WebSocket error:', error);
-});
-```
-
-## Session Resume Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend
-    participant ChatBackend
-    participant Database
-    
-    User->>Frontend: Login
-    Frontend->>ChatBackend: GET /users/{userId}/sessions?type=unresolved
-    ChatBackend->>Database: Query unresolved sessions
-    Database-->>ChatBackend: Return sessions list
-    ChatBackend-->>Frontend: Unresolved sessions
-    
-    alt Has Unresolved Sessions
-        Frontend->>User: Show "Resume previous conversation?"
-        User->>Frontend: Click "Resume"
-        Frontend->>ChatBackend: POST /sessions/{sessionId}/resume
-        ChatBackend->>Database: Load session + messages
-        Database-->>ChatBackend: Session data + history
-        ChatBackend-->>Frontend: Session resumed with full history
-        Frontend->>User: Display conversation history
-        User->>Frontend: Continue conversation
-    else No Unresolved Sessions
-        Frontend->>ChatBackend: POST /sessions (new)
-        ChatBackend->>Database: Create new session
-    end
-```
-
-## Database Service Methods
-
-### DatabaseService Class
-
-```javascript
-// Create session
-await dbService.createSession({
-  sessionId: 'sess_abc123',
-  userId: 'user_12345',
-  metadata: {},
-  conversationContext: {}
-});
-
-// Save message
-await dbService.saveMessage({
-  id: 'msg_xyz789',
-  sessionId: 'sess_abc123',
-  userId: 'user_12345',
-  direction: 'incoming',
-  content: 'Hello',
-  type: 'text'
-});
-
-// Get conversation history
-const history = await dbService.getConversationHistory('sess_abc123', 50, 0);
-
-// Get user's unresolved sessions
-const unresolved = await dbService.getUserUnresolvedSessions('user_12345');
-
-// Resume session
-const session = await dbService.resumeSession('sess_abc123');
-
-// Mark as resolved
-await dbService.markSessionResolved('sess_abc123', 'Issue resolved');
-
-// End session
-await dbService.endSession('sess_abc123', 'user_request');
-```
-
-## Testing
-
-### Test Database Connection
-
-```bash
-# Test health endpoint
-curl http://localhost:3006/health
-
-# Expected response should include database status
-{
-  "status": "healthy",
-  "dependencies": {
-    "database": {
-      "status": "connected"
-    }
-  }
-}
-```
-
-### Test Session Creation
-
-```bash
-# Get auth token first
-TOKEN=$(curl -X POST http://localhost:3006/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"test123"}' | jq -r '.token')
-
-# Create session
-curl -X POST http://localhost:3006/api/sessions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"user_test"}'
-```
-
-### Test Message Sending
-
-```bash
-# Send message
-curl -X POST http://localhost:3006/api/chat/message \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Session-ID: <session_id>" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"What is my balance?","type":"text"}'
-```
-
-### Test Session Resume
-
-```bash
-# Get unresolved sessions
-curl http://localhost:3006/api/users/user_test/sessions?type=unresolved \
-  -H "Authorization: Bearer $TOKEN"
-
-# Resume a session
-curl -X POST http://localhost:3006/api/sessions/<session_id>/resume \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-## Logging
-
-Logs are stored in `logs/` directory:
-
-- `chat-backend.log`: General application logs
-- `chat-backend-error.log`: Error logs only
-
-Log levels:
-- `info`: General information
-- `warn`: Warnings (e.g., database failures fallback to memory)
-- `error`: Errors
-- `debug`: Detailed debugging (enable with `LOG_LEVEL=debug`)
-
-## Error Handling
-
-The service implements graceful fallbacks:
-
-1. **Database Connection Failure**: Falls back to in-memory storage
-2. **Database Write Failure**: Logs warning, continues with in-memory
-3. **Session Not Found**: Returns appropriate 404 error
-4. **Rate Limiting**: Returns 429 with retry information
-
-## Performance Considerations
-
-### Database Indexes
-
-Optimized indexes for common queries:
-- User's active sessions
-- User's unresolved sessions
-- Session history retrieval
-- Message sequence ordering
-
-### Connection Pooling
-
-PostgreSQL connection pool:
-- Max connections: 10 (development) / 20 (production)
-- Min connections: 2 (development) / 5 (production)
-- Idle timeout: 30 seconds
-
-### Caching Strategy
-
-Dual-layer caching:
-1. **In-memory**: Active sessions and recent messages
-2. **Database**: Full persistent storage
-
-## Security Features
-
-- ✅ JWT Authentication
-- ✅ Rate limiting (60 messages/minute per session)
-- ✅ SQL injection prevention (Sequelize ORM)
-- ✅ Input validation
-- ✅ Helmet.js security headers
-- ✅ CORS configuration
-- ✅ Connection encryption support (SSL/TLS)
-
-## Deployment
-
-### Environment Variables
-
-```env
-# Production settings
-NODE_ENV=production
-PORT=3006
-LOG_LEVEL=info
-DB_LOGGING=false
-DB_SSL=true
-DB_POOL_MAX=20
-DB_POOL_MIN=5
-JWT_SECRET=<secure-secret-key>
-```
-
-### Docker Support
-
-```dockerfile
-FROM node:22-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3006
-CMD ["npm", "start"]
-```
-
-## Monitoring
-
-Health check endpoint: `GET /health`
-
-Returns:
-- Service status
-- Database connectivity
-- Uptime
-- Memory usage
-- Active connections
-
-## Troubleshooting
-
-### Database Connection Issues
-
-```bash
-# Check PostgreSQL is running
-pg_isready -h localhost -p 5432
-
-# Check database exists
-psql -U postgres -l | grep poc_banking
-
-# Test connection
-psql -U postgres -d poc_banking -c "SELECT NOW();"
-```
-
-### Port Already in Use
-
-```bash
-# Find process using port 3006
-lsof -i :3006
-
-# Kill the process
-kill -9 <PID>
-```
-
-### Tables Not Created
-
-Tables are auto-created on first start. If issues occur:
-
-```bash
-# Manual table creation (if needed)
-node -e "require('./database').syncDatabase()"
-```
-
-## API Testing with OpenAPI
-
-View the OpenAPI spec:
-1. Open `openapi.yaml` in VS Code
-2. Install "OpenAPI (Swagger) Editor" extension
-3. Preview the API documentation
-4. Test endpoints directly from the UI
-
-## Future Enhancements
-
-- [ ] Redis caching layer
-- [ ] Message encryption at rest
-- [ ] Full-text search on message content
-- [ ] Analytics and reporting
-- [ ] Export conversation history
-- [ ] Multi-language support
-- [ ] Voice message support
-
-## Support
-
-For issues or questions:
-- Check logs in `logs/` directory
-- Review `DEBUG_GUIDE.md`
-- Contact: support@poc-banking.example.com
-
-## License
-
-ISC License - POC Development Team
+The supported deployment entry points are the root [local Compose](../../docker/docker-compose.local.yml) and [full-stack Compose](../../docker/docker-compose-full-stack.yml). Set `RUNTIME_TEST_DATABASE_URL` to an isolated PostgreSQL database for real grant replay/concurrency tests. Historical test counts and “production-ready” documents do not apply automatically to the current code or deployment.

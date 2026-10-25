@@ -1580,3 +1580,8 @@
     display: none;
   }
 }
+.cp-platform-checks { display: grid; gap: 0.65rem; margin: 1rem 0 1.5rem; }
+.cp-platform-check { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 0.7rem; padding: 1rem; border: 1px solid var(--cp-line, #dce6e2); border-radius: 10px; }
+.cp-platform-check > div { flex: 1 1 220px; min-width: 0; }
+.cp-platform-check p { margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--cp-muted, #6a7d76); }
+.cp-platform-check strong, .cp-platform-check span { overflow-wrap: anywhere; }

@@ -12,3 +12,10 @@ CREATE TABLE IF NOT EXISTS servicing_tool_operations (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS servicing_tool_operations_tenant_status ON servicing_tool_operations(tenant_id,status,created_at DESC);
+
+-- Upgrade early ledgers before verification-only startup. Existing operations are preserved.
+ALTER TABLE servicing_tool_operations ADD COLUMN IF NOT EXISTS resolution JSONB;
+ALTER TABLE servicing_tool_operations ADD COLUMN IF NOT EXISTS context JSONB;
+ALTER TABLE servicing_tool_operations DROP CONSTRAINT IF EXISTS servicing_tool_operations_status_check;
+ALTER TABLE servicing_tool_operations ADD CONSTRAINT servicing_tool_operations_status_check
+  CHECK(status IN ('dispatched','succeeded','reconciliation_required','failed'));

@@ -1,3 +1,10 @@
+> **Historical record — not current operating instructions.** The original report
+> below is preserved for context. Its old ports, commands, links, completion claims,
+> test counts, timings, and readiness statements describe an earlier implementation.
+> Use the [current banking README](README.md), [API inventory](API-QUICK-REFERENCE.md), [database operations](database/README.md), and [testing guide](README-TESTING.md)
+> for current behavior, starting from the [documentation index](../../docs/README.md).
+> Original links below may refer to removed or superseded artifacts.
+
 # POC Banking Service - Complete Setup with Flyway Migrations
 
 ## ✅ System Successfully Deployed

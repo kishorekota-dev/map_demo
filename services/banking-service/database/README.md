@@ -1,388 +1,131 @@
-# POC Banking Service - Database Module
+# Banking database operations
 
-Complete database integration for the POC Banking Service with PostgreSQL, Flyway migrations, and comprehensive test data.
+This module uses `pg` and versioned SQL files. The migration runner is Node code;
+it is **not the Flyway CLI**, despite the compatible history-table name
+`flyway_schema_history`. See the [banking README](../README.md) and
+[documentation index](../../../docs/README.md).
 
-## Overview
+## Connection and commands
 
-This module provides:
-- **Database Schema**: Complete banking schema with users, accounts, transactions, cards, transfers, fraud alerts, and disputes
-- **Migrations**: Flyway-based migrations for schema versioning
-- **Seed Data**: Realistic test data for development and testing
-- **Repositories**: Data access layer with comprehensive CRUD operations
-- **Transaction Support**: ACID-compliant transaction handling
-
-## Database Schema
-
-### Tables
-
-1. **users** - Customer information and authentication
-2. **accounts** - Bank accounts (checking, savings, credit, etc.)
-3. **transactions** - Financial transactions
-4. **cards** - Debit and credit cards
-5. **transfers** - Money transfers between accounts
-6. **fraud_alerts** - Fraud detection alerts
-7. **disputes** - Transaction disputes and chargebacks
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js >= 22.0.0
-- PostgreSQL >= 12.0
-- npm or yarn
-
-### Installation
-
-1. **Install dependencies**:
-   ```bash
-   cd poc-banking-service
-   npm install
-   cd database
-   npm install
-   ```
-
-2. **Configure environment variables**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your database credentials
-   ```
-
-3. **Create PostgreSQL database**:
-   ```sql
-   CREATE DATABASE poc_banking;
-   ```
-
-4. **Run migrations and seed data**:
-   ```bash
-   npm run db:setup
-   ```
-
-## Database Commands
-
-From the `poc-banking-service` root directory:
+Use Node.js 22+ and run from the repository root. Provision the database before
+running migrations; the runner does not create it.
 
 ```bash
-# Check database connection
-node database/scripts/check-connection.js
-
-# Run migrations only
-npm run db:migrate
-
-# Seed data only
-npm run db:seed
-
-# Run migrations + seeds
-npm run db:setup
-
-# Reset database (drops all tables)
-npm run db:reset
+./scripts/run-with-env.sh node services/banking-service/database/scripts/check-connection.js
+./scripts/run-with-env.sh npm run db:migrate -w services/banking-service
 ```
 
-## Environment Variables
+The wrapper exports `.env.development` before npm changes working directories.
+Set `APP_ENV_FILE` for another reviewed environment. `database/config.js` reads
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`. Development defaults
+are localhost, 5432, `poc_banking`, and the development PostgreSQL user/password.
+Production requires explicit nonempty `DB_HOST`, `DB_NAME`, `DB_USER`, and
+`DB_PASSWORD`; only the port may default to 5432. Missing or blank settings stop
+configuration loading before a pool or any migration/bootstrap/server starts.
+Set them for the intended database. Pool limits use `DB_POOL_MIN`, `DB_POOL_MAX`,
+`DB_IDLE_TIMEOUT`, and `DB_CONNECTION_TIMEOUT`. `DATABASE_URL` is not the banking
+pool's connection source. Host administrative commands must supply the banking
+`DB_*` values separately from the root production template's servicing URLs, or
+run inside the configured banking container using the
+[administrator instructions](../README.md#servicing-roles-and-model-boundary).
 
-### Required Variables
+`DB_SSL=true` enables certificate verification. Set `DB_SSL_CA_FILE` to a trusted
+CA PEM file where needed. `DB_SSL_REJECT_UNAUTHORIZED=false` is permitted only
+outside production; it is rejected in production rather than silently weakening
+TLS. `DB_SSL=false` disables TLS and must be chosen only for an appropriate
+network/deployment configuration.
+
+## Migration contract
+
+[scripts/migrate.js](scripts/migrate.js) discovers `V<number>__<description>.sql`,
+orders versions numerically, and rejects duplicate versions. A shared PostgreSQL
+advisory lock serializes migration, seed, and reset maintenance. Each migration
+and its history insertion run in one transaction. Failure rolls back that
+migration and exits unsuccessfully; container startup then stops.
+
+New records include a SHA-256 source checksum. Changing an applied migration is
+rejected: add a new version instead. Older successful history rows without a
+checksum are reported as legacy records; their original source cannot be verified
+retroactively. Already-applied migrations are skipped.
+
+| Version | Schema area |
+| --- | --- |
+| V1 | Users and update timestamp function |
+| V2 | Accounts and account-number function |
+| V3 | Transactions and reference-number function |
+| V4 | Cards |
+| V5 | Transfers |
+| V6 | Fraud alerts |
+| V7 | Disputes and case-number function |
+| V8 | Roles, permissions, refresh tokens, audit, customer tables, and authentication columns |
+| V9 | Control-plane role definitions; no automatic grants to customers |
+
+The migrations are in [migrations](migrations). Back up persistent databases and
+review DDL before deployment. `migrate:undo` is a legacy package-script name: its
+argument is explicitly rejected, because reverse migration is not implemented.
+Use a reviewed forward migration or tested backup restoration.
+
+## Optional demo seeds
 
 ```bash
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=poc_banking
-DB_USER=postgres
-DB_PASSWORD=your_password
-
-# Connection Pool
-DB_POOL_MIN=2
-DB_POOL_MAX=10
-DB_IDLE_TIMEOUT=30000
-DB_CONNECTION_TIMEOUT=10000
-
-# Optional
-DB_SSL=false
+./scripts/run-with-env.sh npm run db:seed -w services/banking-service
 ```
 
-### Full Configuration
+[scripts/seed.js](scripts/seed.js) rejects production mode, checks for an empty set
+of banking business tables, and applies all bundled SQL in one transaction. Seed
+filenames are sorted: `000` system roles/permissions, `001` customers, `002`
+authentication users, `003` their accounts, then the `01`–`06` banking fixtures.
+V8 supplies the customer and authentication columns these seeds require.
 
-See `.env.example` for all available configuration options including:
-- Server configuration
-- Security settings
-- Banking business rules
-- External service URLs
-- Rate limiting
-- Logging
+A checksum marker in `banking_demo_seed_history` makes a repeat of the identical
+bundle a no-op, preserving balances and other later changes. A changed bundle or
+an unmarked database containing business data is rejected. This avoids partially
+seeding existing installations. Do not insert a marker manually to bypass review.
+The fixtures contain sample identities and documented demo password hashes; they
+are not production provisioning.
 
-## Database API
+For an initial production operator, use the
+[administrator bootstrap procedure](../README.md#servicing-roles-and-model-boundary).
+It works without demo seeds, confirms the deployment tenant, creates a strong
+bcrypt-backed identity or grants an existing active identity, and records only
+the explicit control-plane role change. Passwords are accepted from environment
+or standard input and never reset for an existing user.
 
-### Connection Pool
+Container startup never seeds by default. `BANKING_SEED_DEMO_DATA=true` opts into
+this same guarded operation outside production. The service-level `db:setup`
+script runs migrations **and** seeds; the repository root `db:setup` is a separate
+infrastructure helper. Prefer explicit commands so the intended effects are clear.
 
-```javascript
-const db = require('./database');
+## Reset and recovery
 
-// Execute query
-const result = await db.query('SELECT * FROM accounts WHERE user_id = $1', [userId]);
+Reset is destructive and intended only for disposable development/test databases.
+The CLI requires `BANKING_ALLOW_DATABASE_RESET=true` and a typed `yes`, or an
+explicit `--yes` argument. It refuses production mode. From the database directory,
+the existing `npm run reset` command invokes [scripts/reset.js](scripts/reset.js).
+The root workspace alias is `npm run db:reset -w services/banking-service`.
 
-// Transaction
-const result = await db.transaction(async (client) => {
-  await client.query('UPDATE accounts SET balance = balance - $1 WHERE account_id = $2', [amount, fromAccount]);
-  await client.query('UPDATE accounts SET balance = balance + $1 WHERE account_id = $2', [amount, toAccount]);
-  return { success: true };
-});
+The reset transaction removes all banking-owned tables, including V8 authentication
+and customer tables, seed/history tables, and the four helper functions. It does
+not recreate or seed them. Run migrations afterward. Restore persistent data from
+an approved backup instead of using reset as a migration-repair procedure.
 
-// Health check
-const health = await db.healthCheck();
+Inspect migration evidence with:
 
-// Graceful shutdown
-await db.close();
+```sql
+SELECT version, script, installed_on, success, checksum_sha256
+FROM flyway_schema_history ORDER BY installed_rank;
 ```
 
-### Repositories
+If a legacy installation has partial DDL or an untrusted history, inspect and
+repair it deliberately; deleting history and replaying SQL is not a safe shortcut.
+The old [setup-banking-tables.sql](setup-banking-tables.sql) is a historical manual
+schema path and does not replace the versioned runner.
 
-```javascript
-const { 
-  AccountRepository, 
-  TransactionRepository, 
-  CardRepository,
-  TransferRepository,
-  FraudRepository,
-  DisputeRepository 
-} = require('./database/repositories');
+## Verification
 
-// Get user accounts
-const accounts = await AccountRepository.findByUserId(userId);
-
-// Create transaction
-const transaction = await TransactionRepository.create({
-  accountId,
-  transactionType: 'purchase',
-  amount: -99.99,
-  description: 'Coffee Shop',
-  category: 'dining'
-});
-
-// Get fraud alerts
-const alerts = await FraudRepository.findPending({ severity: 'high' });
-```
-
-## Test Data
-
-The seed scripts create:
-- **5 test users** with various account types
-- **10 accounts** across different types (checking, savings, credit, investment)
-- **20+ transactions** including deposits, withdrawals, purchases
-- **9 cards** with different statuses
-- **9 transfers** in various states
-- **6 fraud alerts** with different severities
-- **6 disputes** at different stages
-
-### Test User Credentials
-
-All test users have the password: `Test123!` (bcrypt hashed)
-
-| Email | Name | Accounts |
-|-------|------|----------|
-| john.doe@example.com | John Doe | Checking, Savings, Credit |
-| jane.smith@example.com | Jane Smith | Checking, Savings |
-| bob.johnson@example.com | Bob Johnson | Checking, Savings |
-| alice.williams@example.com | Alice Williams | Checking, Investment |
-| charlie.brown@example.com | Charlie Brown | Checking |
-
-## Migrations
-
-### Migration Files
-
-Located in `database/migrations/`:
-
-- `V1__create_users_table.sql`
-- `V2__create_accounts_table.sql`
-- `V3__create_transactions_table.sql`
-- `V4__create_cards_table.sql`
-- `V5__create_transfers_table.sql`
-- `V6__create_fraud_alerts_table.sql`
-- `V7__create_disputes_table.sql`
-
-### Migration Naming Convention
-
-```
-V{version}__{description}.sql
-
-Example: V1__create_users_table.sql
-```
-
-### Creating New Migrations
-
-1. Create new file in `database/migrations/`
-2. Follow naming convention with next version number
-3. Write idempotent SQL (use IF NOT EXISTS, etc.)
-4. Run `npm run db:migrate`
-
-## Repository Pattern
-
-Each entity has a dedicated repository with methods for:
-
-- **CRUD Operations**: Create, Read, Update, Delete
-- **Search & Filter**: Complex queries with multiple criteria
-- **Statistics**: Aggregations and analytics
-- **Business Logic**: Domain-specific operations
-
-### Example: AccountRepository
-
-```javascript
-// Find operations
-await AccountRepository.findById(accountId);
-await AccountRepository.findByUserId(userId, { limit, offset });
-await AccountRepository.findByAccountNumber(accountNumber);
-
-// Create/Update
-await AccountRepository.create(accountData);
-await AccountRepository.update(accountId, updateData);
-await AccountRepository.updateBalance(accountId, amount);
-
-// Business operations
-await AccountRepository.hasSufficientFunds(accountId, amount);
-await AccountRepository.getStatistics(accountId, startDate, endDate);
-await AccountRepository.close(accountId);
-```
-
-## Transaction Handling
-
-The database module supports ACID transactions:
-
-```javascript
-const db = require('./database');
-
-try {
-  const result = await db.transaction(async (client) => {
-    // All queries use the same client
-    const debit = await client.query(
-      'UPDATE accounts SET balance = balance - $1 WHERE account_id = $2 RETURNING *',
-      [amount, fromAccountId]
-    );
-    
-    const credit = await client.query(
-      'UPDATE accounts SET balance = balance + $1 WHERE account_id = $2 RETURNING *',
-      [amount, toAccountId]
-    );
-    
-    // If any query fails, entire transaction rolls back
-    return { debit: debit.rows[0], credit: credit.rows[0] };
-  });
-  
-  console.log('Transfer completed:', result);
-} catch (error) {
-  console.error('Transfer failed and rolled back:', error);
-}
-```
-
-## Security Considerations
-
-- **Sensitive Data**: Card numbers, CVVs, and PINs are encrypted in the database
-- **SQL Injection**: All queries use parameterized statements
-- **Connection Pooling**: Limited connections prevent resource exhaustion
-- **Prepared Statements**: Better performance and security
-
-## Performance Optimization
-
-### Indexes
-
-Strategic indexes are created on:
-- Primary keys (automatic)
-- Foreign keys
-- Frequently queried columns (email, account_number, status)
-- Timestamp columns for date range queries
-
-### Connection Pooling
-
-Default pool configuration:
-- Min: 2 connections
-- Max: 10 connections
-- Idle timeout: 30 seconds
-- Connection timeout: 10 seconds
-
-Adjust based on your load in `.env`:
-```bash
-DB_POOL_MIN=5
-DB_POOL_MAX=20
-```
-
-## Troubleshooting
-
-### Cannot connect to database
-
-```bash
-# Check PostgreSQL is running
-pg_isready
-
-# Verify connection settings
-node database/scripts/check-connection.js
-
-# Check PostgreSQL logs
-tail -f /var/log/postgresql/postgresql-*.log
-```
-
-### Migration failed
-
-```bash
-# Check migration status
-SELECT * FROM flyway_schema_history ORDER BY installed_rank DESC;
-
-# Reset and retry
-npm run db:reset
-npm run db:setup
-```
-
-### Seed data errors
-
-```bash
-# Seeds require migrations to run first
-npm run db:migrate
-npm run db:seed
-```
-
-## Production Considerations
-
-1. **Backups**: Implement regular PostgreSQL backups
-2. **SSL**: Enable SSL for database connections
-3. **Monitoring**: Set up connection pool monitoring
-4. **Read Replicas**: Consider read replicas for scaling
-5. **Clean Disabled**: Migrations won't allow clean in production
-
-## Development Workflow
-
-```bash
-# 1. Make schema changes
-vim database/migrations/V8__add_new_feature.sql
-
-# 2. Run migration
-npm run db:migrate
-
-# 3. Add seed data if needed
-vim database/seeds/07_seed_new_feature.sql
-
-# 4. Test with seed data
-npm run db:seed
-
-# 5. Update repositories if needed
-vim database/repositories/NewFeatureRepository.js
-```
-
-## Testing
-
-```bash
-# Run tests with test database
-NODE_ENV=test npm test
-
-# Use separate test database
-createdb poc_banking_test
-DB_NAME=poc_banking_test npm run db:setup
-```
-
-## Support
-
-For issues or questions:
-1. Check the logs: `logs/banking-service.log`
-2. Verify database connection: `node database/scripts/check-connection.js`
-3. Review migration history in database
-4. Check PostgreSQL server logs
-
-## License
-
-ISC
+[Bootstrap integration tests](scripts/__tests__/bootstrap.integration.test.js)
+exercise actual disposable PostgreSQL: concurrent maintenance, numeric ordering,
+transaction rollback, source drift, seed repetition and refusal, reset/remigration,
+and startup failure propagation. See [testing](../README-TESTING.md) for the opt-in
+connection contract. Unit tests also check JWT and TLS settings. No test result
+establishes restore time, production capacity, or live financial-provider behavior.

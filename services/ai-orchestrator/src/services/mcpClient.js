@@ -22,6 +22,14 @@ class MCPClient {
       }
     });
     
+    this.client.interceptors.request.use(request => {
+      request.headers.delete?.('X-Servicing-Service-Token');
+      if (process.env.SERVICING_SERVICE_TOKEN) request.headers['X-Servicing-Service-Token'] = process.env.SERVICING_SERVICE_TOKEN;
+      // Internal credentials must not follow a redirect to another service.
+      request.maxRedirects = 0;
+      return request;
+    });
+
     logger.info('MCP Client initialized', { baseUrl: this.baseUrl });
   }
 

@@ -1,3 +1,7 @@
+> **Historical / superseded reference.** This file preserves an earlier implementation, deployment, example, or test record. Its readiness claims, commands, ports, screenshots, and test counts are not evidence for the current deployment. Use the [current service README](README.md) and [current architecture](../../docs/architecture/overview.md) for supported behavior. Historical content follows; links to moved archive files have been repaired.
+
+---
+
 # MCP Hybrid Implementation - Quick Start
 
 ## What Was Implemented
@@ -225,8 +229,8 @@ const health = await mcpClient.healthCheck();
 For complete details, see:
 - **[MCP-HYBRID-IMPLEMENTATION.md](./MCP-HYBRID-IMPLEMENTATION.md)** - Full implementation guide
 - **[README.md](./README.md)** - Service overview
-- **[LANGGRAPH-MCP-INTEGRATION-ANALYSIS.md](./LANGGRAPH-MCP-INTEGRATION-ANALYSIS.md)** - Original analysis
-- **[MCP-ARCHITECTURE-COMPARISON.md](./MCP-ARCHITECTURE-COMPARISON.md)** - Architecture comparison
+- **[LANGGRAPH-MCP-INTEGRATION-ANALYSIS.md](../../docs/archive/LANGGRAPH-MCP-INTEGRATION-ANALYSIS.md)** - Original analysis
+- **[MCP-ARCHITECTURE-COMPARISON.md](../../docs/archive/MCP-ARCHITECTURE-COMPARISON.md)** - Architecture comparison
 
 ## Support
 

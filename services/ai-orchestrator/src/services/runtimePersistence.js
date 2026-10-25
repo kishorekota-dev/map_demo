@@ -19,10 +19,9 @@ class RuntimePersistence {
         const { Pool } = require('pg');
         const config = require('../../config').database;
         const connectionString = process.env.WORKFLOW_DATABASE_URL;
-        this.pool = new Pool(connectionString ? { connectionString, max: 12 } : {
-          host: config.host, port: config.port, database: config.database, user: config.username, password: config.password, max: 12,
-          ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : false
-        });
+        this.pool = new Pool({ ...require('../models/tls').pgOptions(connectionString, {
+          host: config.host, port: config.port, database: config.database, user: config.username, password: config.password
+        }), max: 12 });
       }
       if (process.env.WORKFLOW_SCHEMA_AUTO_MIGRATE === 'false') {
         await this.pool.query('SELECT operation_id,resolution,context FROM servicing_tool_operations LIMIT 0');

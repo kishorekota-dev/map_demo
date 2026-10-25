@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import environment from './lib/environment.cjs';
+const { quote } = environment;
 
 const defaultProfilePath = 'config/product/enterprise-profile.example.json';
 const defaultOutputDir = 'deployment-scripts/output/example-enterprise';
@@ -36,6 +38,7 @@ const parseArgs = () => {
       console.log('Usage: node deployment-scripts/generate-enterprise-assets.mjs [--profile path] [--output path] [--validate-only]');
       process.exit(0);
     }
+    throw new Error('Unknown or incomplete option. Run with --help.');
   }
 
   return options;
@@ -71,20 +74,36 @@ const validateProfile = (profile) => {
     }
   }
 
-  const supportedIdentityProviders = new Set(['jwt', 'oidc', 'saml']);
-  if (!supportedIdentityProviders.has(profile.identity.provider)) {
-    errors.push(`identity.provider must be one of: ${Array.from(supportedIdentityProviders).join(', ')}`);
+  const supportedIdentityProviders = new Set(['jwt', 'oidc']);
+  if (!supportedIdentityProviders.has(profile.identity?.provider)) {
+    errors.push('identity.provider must be jwt or oidc; a SAML broker is not implemented.');
   }
 
   const supportedDeploymentModes = new Set(['docker-compose', 'pm2', 'kubernetes']);
-  if (!supportedDeploymentModes.has(profile.deployment.mode)) {
+  if (!supportedDeploymentModes.has(profile.deployment?.mode)) {
     errors.push(`deployment.mode must be one of: ${Array.from(supportedDeploymentModes).join(', ')}`);
   }
 
+  const inspectStrings = (value, field = 'profile') => {
+    if (typeof value === 'string' && (value.length > 2048 || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) errors.push(`${field} contains unsupported control characters or exceeds its size limit.`);
+    if (value && typeof value === 'object') for (const [key, nested] of Object.entries(value)) inspectStrings(nested, `${field}.${key}`);
+  };
+  inspectStrings(profile);
+  if (!/^[a-z][a-z0-9-]{1,62}$/.test(profile.tenantId || '')) errors.push('tenantId must be a lowercase deployment identifier (2–63 characters).');
+  for (const field of ['deployment.ingressBaseUrl', ...requiredPaths.filter(item => item.startsWith('services.')),
+    ...(profile.identity?.provider === 'oidc' ? ['identity.issuerUrl'] : [])]) {
+    try {
+      const url = new URL(getValue(profile, field));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+      if (['deployment.ingressBaseUrl', 'identity.issuerUrl'].includes(field) && url.protocol !== 'https:') throw new Error();
+    } catch { errors.push(`${field} must be an HTTP(S) endpoint without credentials/query/fragment; public ingress and OIDC require HTTPS.`); }
+  }
+  if (!profile.features || typeof profile.features.allowTokenAuth !== 'boolean') errors.push('features.allowTokenAuth must be a boolean.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.supportEmail || '')) errors.push('supportEmail must be an email address.');
   return errors;
 };
 
-const buildEnvFile = (profile) => `# Generated enterprise deployment profile for ${profile.organizationName}
+const buildEnvFile = (profile) => `# Generated enterprise deployment profile (dotenv data; never shell-source this file)
 ORG_SLUG=${profile.tenantId}
 DEPLOYMENT_TENANT_ID=${profile.tenantId}
 CONTROL_PLANE_ENABLED=true
@@ -111,7 +130,7 @@ PRODUCT_DISPLAY_NAME=${profile.productName}
 PRODUCT_TAGLINE=${profile.tagline}
 AUTH_PROVIDER=${profile.identity.provider}
 DEFAULT_DEPLOYMENT_MODE=${profile.deployment.mode}
-FRONTEND_RUNTIME_CONFIG_PATH=/app/config/runtime-config.json
+FRONTEND_RUNTIME_CONFIG_PATH=/app/dist/runtime-config.json
 SUPPORT_EMAIL=${profile.supportEmail}
 INGRESS_BASE_URL=${profile.deployment.ingressBaseUrl}
 API_GATEWAY_URL=${profile.services.apiBaseUrl.replace(/\/api\/?$/, '')}
@@ -126,7 +145,7 @@ OIDC_ISSUER_URL=${profile.identity.issuerUrl || ''}
 OIDC_ISSUER=${profile.identity.issuerUrl || ''}
 OIDC_AUDIENCE=${profile.identity.audience || ''}
 ALLOW_TOKEN_AUTH=${profile.features.allowTokenAuth ? 'true' : 'false'}
-`;
+`.replace(/^([A-Z_][A-Z0-9_]*)=(.*)$/gm, (_line, key, value) => `${key}=${quote(value)}`);
 
 const buildRuntimeConfig = (profile) => ({
   tenantId: profile.tenantId,
@@ -159,12 +178,12 @@ const buildSummary = (profile, outputDir) => `# Enterprise Productization Output
 
 ## Deployment Steps
 
-1. Load .env.enterprise.generated into your deployment environment or secret manager.
+1. Review .env.enterprise.generated as dotenv data and inject values through the environment loader or deployment tooling; never shell-source it.
 2. Mount frontend-runtime-config.json as /runtime-config.json in the frontend container or static hosting root.
 3. Replace placeholder endpoints with enterprise ingress and internal service addresses.
 4. Integrate the configured identity provider before enabling external users.
 5. Configure CONTROL_PLANE_DATABASE_URL, run banking migrations for operator roles, and sign in again to obtain signed role claims.
-6. Validate the profile with npm run product:validate and run deployment smoke tests, then review /control-plane before publishing servicing changes.
+6. Complete the production environment, run production:preflight, and run deployment smoke tests before publishing servicing changes. Profile validation checks structure only; it does not certify deployment readiness.
 `;
 
 const main = async () => {

@@ -17,7 +17,6 @@
     "dev:mcp": "./scripts/run-with-env.sh npm run dev -w services/mcp-service",
     "dev:ai": "./scripts/run-with-env.sh npm run dev -w services/ai-orchestrator",
     "dev:agent": "./scripts/run-with-env.sh npm run dev -w services/agent-ui",
-
     "//-- PRODUCTION --//": "",
     "start": "./scripts/run-with-env.sh ./scripts/start-all.sh",
     "stop": "./scripts/stop-all.sh",
@@ -30,42 +29,42 @@
     "start:mcp": "./scripts/run-with-env.sh npm run start -w services/mcp-service",
     "start:ai": "./scripts/run-with-env.sh npm run start -w services/ai-orchestrator",
     "start:agent": "./scripts/run-with-env.sh npm run start -w services/agent-ui",
-
     "//-- BUILD --//": "",
     "build": "npm run build --workspaces --if-present",
     "build:frontend": "npm run build -w services/frontend",
     "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
-
     "//-- TESTING --//": "",
     "test": "npm run test --workspaces --if-present",
     "test:integration": "./scripts/test-integration.sh",
     "test:e2e": "./scripts/test-integration.sh",
     "health": "./scripts/health-check.sh",
-
     "//-- DATABASE --//": "",
     "db:setup": "./scripts/db-setup.sh",
     "db:migrate": "npm run db:migrate -w services/banking-service",
     "db:seed": "npm run db:seed -w services/banking-service",
     "db:reset": "npm run db:reset -w services/banking-service",
-
     "//-- DOCKER --//": "",
     "docker:up": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml up -d",
     "docker:down": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml down",
     "docker:logs": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml logs -f",
     "docker:build": "./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml build",
     "docker:full": "./scripts/run-with-env.sh docker compose -f docker/docker-compose-full-stack.yml up -d --build",
-
     "//-- PRODUCTIZATION --//": "",
     "product:generate": "node deployment-scripts/generate-enterprise-assets.mjs",
     "product:validate": "node deployment-scripts/generate-enterprise-assets.mjs --validate-only",
     "llm:probe": "./scripts/run-with-env.sh node deployment-scripts/probe-llm.cjs",
-
+    "production:preflight": "node deployment-scripts/production-preflight.cjs",
+    "platform:migrate": "node deployment-scripts/migrate-servicing.cjs",
+    "test:deployment": "node --test deployment-scripts/__tests__/*.test.cjs",
     "//-- UTILITIES --//": "",
     "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "validate": "bash ./scripts/validate-env.sh",
-    "postinstall": "npm run validate"
+    "postinstall": "npm run validate",
+    "platform:bootstrap": "./scripts/run-with-env.sh node services/banking-service/database/scripts/bootstrap-admin.js",
+    "docker:production": "node deployment-scripts/production-preflight.cjs --env \"${APP_ENV_FILE:?Set APP_ENV_FILE to your completed production environment file}\" --compose && ./scripts/run-with-env.sh docker compose -f docker/docker-compose-full-stack.yml -f docker/docker-compose.production.yml up -d --build",
+    "docs:check": "node deployment-scripts/check-doc-links.cjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

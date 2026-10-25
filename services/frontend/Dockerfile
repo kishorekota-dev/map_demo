@@ -45,10 +45,11 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
-RUN npm install -g serve@14.2.6
+COPY runtime/package*.json ./
+RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
 EXPOSE 3000
 
-CMD ["serve", "-s", "dist", "-l", "3000"]
+CMD ["./node_modules/.bin/serve", "-s", "dist", "-l", "3000"]

@@ -50,9 +50,9 @@ ensure_root_context() {
 }
 
 load_root_env() {
-    set -a
-    source "$ROOT_ENV_FILE"
-    set +a
+    if [ "${APP_ENV_LOADED:-}" != "true" ]; then
+        APP_ENV_FILE="$ROOT_ENV_FILE" exec ./scripts/run-with-env.sh bash ./scripts/validate-env.sh "$ROOT_ENV_FILE"
+    fi
 }
 
 validate_dependencies() {
