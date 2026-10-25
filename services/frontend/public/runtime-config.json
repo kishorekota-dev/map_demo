@@ -3,6 +3,7 @@
   "productName": "Enterprise Conversational Platform",
   "tagline": "Configurable AI assistants for secure enterprise workflows",
   "supportEmail": "support@example.com",
+  "chatRequestTimeoutMs": 420000,
   "features": {
     "allowTokenAuth": true
   }

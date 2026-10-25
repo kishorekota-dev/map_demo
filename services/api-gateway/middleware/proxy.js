@@ -12,6 +12,15 @@ const serviceRegistry = serviceRegistryModule.getInstance();
 const loadBalancer = loadBalancerModule.getInstance(serviceRegistry);
 const circuitBreaker = circuitBreakerModule.getInstance();
 
+// A servicing turn can perform recognition, extraction and generation in
+// sequence. Only the explicitly selected servicing routes use this budget.
+const getServicingRequestTimeoutMs = (value = process.env.SERVICING_REQUEST_TIMEOUT_MS) => {
+  const milliseconds = typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isSafeInteger(milliseconds)
+    ? Math.min(600000, Math.max(1000, milliseconds))
+    : 410000;
+};
+
 /**
  * Create proxy middleware for routing requests to microservices
  * @param {Object} options - Proxy configuration options
@@ -31,6 +40,7 @@ const createServiceProxy = (options) => {
     changeOrigin,
     pathRewrite,
     timeout,
+    proxyTimeout: timeout,
     
     // Dynamic target resolution using service discovery
     router: (req) => {
@@ -167,9 +177,9 @@ const createServiceProxy = (options) => {
       retries: retryAttempts,
       retryDelay: parseInt(process.env.PROXY_RETRY_DELAY) || 1000,
       retryCondition: (err) => {
-        // Retry on network errors but not on client errors (4xx)
+        // Only pre-connection failures are eligible. A timeout may occur after
+        // model generation or a financial action has already been dispatched.
         return err.code === 'ECONNREFUSED' || 
-               err.code === 'ETIMEDOUT' || 
                err.code === 'ENOTFOUND';
       }
     }
@@ -249,6 +259,7 @@ const checkCircuitBreaker = (serviceName) => {
 
 module.exports = {
   createServiceProxy,
+  getServicingRequestTimeoutMs,
   addRequestTiming,
   checkCircuitBreaker
 };

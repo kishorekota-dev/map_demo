@@ -1,0 +1,42 @@
+{
+  "providers": [
+    {
+      "id": "mac-qwen",
+      "type": "ollama",
+      "enabled": true,
+      "baseUrl": "http://mac-studio.local:11434",
+      "baseUrlRef": "LLM_OLLAMA_BASE_URL"
+    },
+    {
+      "id": "lm-studio",
+      "type": "openai_compatible",
+      "enabled": false,
+      "baseUrl": "http://mac-studio.local:1234/v1"
+    },
+    {
+      "id": "vllm-local",
+      "type": "openai_compatible",
+      "enabled": false,
+      "baseUrl": "http://mac-studio.local:8000/v1"
+    },
+    {
+      "id": "openai-cloud",
+      "type": "openai",
+      "enabled": false,
+      "credentialRef": "env:LLM_OPENAI_API_KEY"
+    },
+    {
+      "id": "vertex-gemini",
+      "type": "vertex_gemini",
+      "enabled": false,
+      "project": "replace-with-google-cloud-project",
+      "location": "us-central1"
+    },
+    {
+      "id": "gemini-api",
+      "type": "gemini",
+      "enabled": false,
+      "credentialRef": "env:LLM_GEMINI_API_KEY"
+    }
+  ]
+}

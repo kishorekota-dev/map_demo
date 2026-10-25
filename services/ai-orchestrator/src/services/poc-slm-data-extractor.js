@@ -58,7 +58,8 @@ class PocSlmDataExtractor {
   }
 
   isEnabled() {
-    return this.enabled;
+    const governed = intentMapper.getLlmConfig();
+    return governed === undefined ? this.enabled : governed.enabled === true;
   }
 
   buildSchema(intent) {
@@ -71,6 +72,7 @@ class PocSlmDataExtractor {
       required: dataRequirements.required || [],
       optional: dataRequirements.optional || [],
       validation: dataRequirements.validation || {},
+      additionalValidation: intentMapper.getPublishedIntent(intent)?.fieldSchemas || {},
       defaults: dataRequirements.defaults || {},
       allowDefaults: behavior.canUseDefaults !== false,
       allowsPartialData: behavior.allowsPartialData !== false
@@ -92,13 +94,18 @@ class PocSlmDataExtractor {
       return `${field}: ${ruleParts.join(', ')}`;
     }).join('\n');
 
-    return `You are a structured data extractor for a banking assistant.\n` +
+    const instructions = intentMapper.getPublishedPrompt('extractionInstructions')
+      || 'You are a structured data extractor for a banking assistant. Read the latest user input and conversation context to extract only explicitly provided values. Do not guess missing values.';
+    // Product wording is editable; the schema/JSON contract below remains an
+    // enforced code boundary, followed by deterministic data validation.
+    return `${instructions}\n` +
       `Goal: read the latest user input and conversation context and return ONLY JSON for intent "${intent}".` +
       `\n- Do not guess values. If a value is not explicitly present, leave it missing.` +
       `\n- Required fields: ${schema.required.length ? schema.required.join(', ') : 'none'}.` +
       `\n- Optional fields: ${schema.optional.length ? schema.optional.join(', ') : 'none'}.` +
       `\n- Existing collected data: ${JSON.stringify(existingData || {})}.` +
       `\n- Validation rules (if any):\n${validationRules || 'none'}` +
+      `\n- Additional field constraints: ${JSON.stringify(schema.additionalValidation || {})}` +
       `\n- Defaults allowed: ${schema.allowDefaults}. Defaults: ${JSON.stringify(schema.defaults)}.` +
       `\nConversation history:\n${historyLines || 'none provided'}` +
       `\nLatest user input:\n${latestInput}` +
@@ -146,25 +153,31 @@ class PocSlmDataExtractor {
     let extractedData = { ...existingData };
     let modelOutput = null;
 
-    if (this.enabled && this.llm) {
+    const governed = intentMapper.getLlmConfig();
+    if (this.isEnabled() && (governed !== undefined || this.llm)) {
       const prompt = this.buildPrompt({ intent, schema, conversationHistory, latestInput, existingData });
       const messages = [
-        new SystemMessage('Extract structured data for the specified intent. Respond with JSON only.'),
+        new SystemMessage(`${intentMapper.getPublishedPrompt('extractionSystem') || 'Extract structured data for the specified intent. Respond with JSON only.'}\nReturn only JSON matching the supplied field schema. Do not execute actions or invent missing values.`),
         new HumanMessage(prompt)
       ];
 
       try {
-        const response = await this.llm.invoke(
-          messages,
-          this.responseFormat ? { response_format: this.responseFormat } : {}
-        );
-        modelOutput = response.content;
-        const parsed = this.safeJsonParse(response.content);
+        const response = governed !== undefined
+          ? await intentMapper.generateForTask('extraction', intent, { messages: messages.map((message, index) => ({ role: index ? 'user' : 'system', content: message.content })), format: 'json' })
+          : await this.llm.invoke(messages, this.responseFormat ? { response_format: this.responseFormat } : {});
+        if (governed === undefined) await intentMapper.recordProviderUsage(response, 'slm', 'extraction');
+        modelOutput = governed === undefined ? response.content : response.text;
+        const parsed = governed === undefined ? this.safeJsonParse(response.content) : response.json;
         const parsedData = parsed.collectedData || parsed.data || parsed;
-        if (parsedData && typeof parsedData === 'object') {
-          extractedData = { ...extractedData, ...parsedData };
+        if (parsedData && typeof parsedData === 'object' && !Array.isArray(parsedData)) {
+          const fields = new Set([...schema.required, ...schema.optional]);
+          const declared = Object.fromEntries(Object.entries(parsedData).filter(([field, value]) => fields.has(field)
+            && !/auth|password|secret|token|userId|tenantId/i.test(field)
+            && (value === null || ['string', 'number', 'boolean'].includes(typeof value))));
+          extractedData = { ...extractedData, ...declared };
         }
       } catch (error) {
+        if (governed !== undefined) throw error;
         logger.error('SLM extraction failed, using existing data', { intent, error: error.message });
       }
     }
@@ -181,7 +194,7 @@ class PocSlmDataExtractor {
       invalidFields,
       validationResult,
       modelOutput,
-      slmEnabled: this.enabled
+      slmEnabled: this.isEnabled()
     };
   }
 }

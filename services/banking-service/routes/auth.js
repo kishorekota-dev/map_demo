@@ -13,13 +13,19 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 
 // Helper function to generate access token
-const generateAccessToken = (user, permissions) => {
+const generateAccessToken = (user, permissions, roles = []) => {
+  // Authorization claims must come from the database on both login and
+  // refresh. Browser profile data is never a source of operator privileges.
+  const roleNames = roles.map(role => role.name.toLowerCase());
   return jwt.sign(
     {
       userId: user.user_id,
       username: user.username,
       email: user.email,
       customerId: user.customer_id,
+      tenantId: process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
+      roles: roleNames,
+      role: roleNames.includes('admin') ? 'admin' : (roleNames[0] || 'customer'),
       permissions: permissions || [],
       type: 'access'
     },
@@ -238,7 +244,7 @@ router.post('/login', async (req, res) => {
     const roles = await getUserRoles(user.user_id);
 
     // Generate tokens
-    const accessToken = generateAccessToken(user, permissions);
+    const accessToken = generateAccessToken(user, permissions, roles);
     const refreshToken = generateRefreshToken(user);
 
     // Store refresh token in database
@@ -397,11 +403,12 @@ router.post('/refresh', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Get user permissions
+    // Re-read authorization on refresh so revoked roles are not renewed.
     const permissions = await getUserPermissions(user.user_id);
+    const roles = await getUserRoles(user.user_id);
 
     // Generate new access token
-    const accessToken = generateAccessToken(user, permissions);
+    const accessToken = generateAccessToken(user, permissions, roles);
 
     res.json({
       status: 'success',

@@ -44,6 +44,7 @@ async function initializeServices() {
 
     // Initialize Workflow Service
     const workflowService = new WorkflowService(mcpClient, sessionManager);
+    await workflowService.persistence.initialize();
     logger.info('Workflow Service initialized');
 
     // Store services in app locals
@@ -82,7 +83,7 @@ function configureMiddleware() {
     origin: config.cors.allowedOrigins,
     credentials: config.cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-ID', 'X-Request-ID']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Session-ID', 'X-Request-ID', 'X-Interaction-ID']
   }));
 
   // Rate limiting
@@ -212,6 +213,7 @@ async function startServer() {
 
           // Close database connection
           const { sequelize } = require('./models');
+          if (app.locals.workflowService?.persistence.pool) await app.locals.workflowService.persistence.pool.end();
           await sequelize.close();
           
           logger.info('Graceful shutdown completed');

@@ -1,5 +1,6 @@
 const logger = require('./logger');
 const jwt = require('jsonwebtoken');
+const HandoffService = require('./handoffService');
 const axios = require('axios');
 
 class SocketHandler {
@@ -8,6 +9,7 @@ class SocketHandler {
         this.chatService = chatService;
         this.agentOrchestrator = agentOrchestrator;
         this.sessionManager = sessionManager;
+        this.handoffService = new HandoffService(sessionManager);
         this.connectedClients = new Map();
         this.activeTyping = new Map();
         this.messageRateLimit = new Map();
@@ -83,6 +85,23 @@ class SocketHandler {
 
         socket.on('joinSession', async (data) => {
             await this.handleJoinSession(socket, data);
+        });
+        socket.on('requestHandoff', async (data = {}) => {
+            const principal = this.connectedClients.get(socket.id);
+            try {
+                if (!principal?.isAuthenticated) throw new Error('Authentication required');
+                socket.emit('handoffCreated', await this.handoffService.issue(principal, principal.sessionId, data.targetChannel));
+            } catch (error) { socket.emit('sessionError', { error: error.message }); }
+        });
+        socket.on('resumeSession', async (data = {}) => {
+            const principal = this.connectedClients.get(socket.id);
+            try {
+                if (!principal?.isAuthenticated) throw new Error('Authentication required');
+                const result = await this.handoffService.resume(principal, data.grant, principal.authToken);
+                principal.sessionId = result.sessionId;
+                await socket.join(`session:${result.sessionId}`);
+                socket.emit('sessionResumed', result);
+            } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
 
         // Messaging
@@ -420,8 +439,13 @@ class SocketHandler {
                 try {
                     const decoded = jwt.verify(
                         data.token,
-                        process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+                        process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+                        { algorithms: ['HS256'] }
                     );
+                    const tenantId = decoded.tenantId || decoded.tenant_id || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+                    if (decoded.type === 'refresh' || tenantId !== (process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')) {
+                        throw new Error('Invalid access token tenant or type');
+                    }
                     const principal = this.getPrincipalContext(decoded);
                     if (!principal.principalId) {
                         throw new Error('Token subject required');
@@ -430,6 +454,7 @@ class SocketHandler {
                     authResult = {
                         authenticated: true,
                         userId: principal.principalId,
+                        tenantId,
                         ...principal,
                         // Retain the verified JWT so it can be propagated to the AI
                         // orchestrator and on to authenticated banking tool calls.
@@ -455,6 +480,7 @@ class SocketHandler {
 
                 clientInfo.isAuthenticated = true;
                 clientInfo.userId = authResult.userId;
+                clientInfo.tenantId = authResult.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
                 clientInfo.principalId = authResult.principalId || authResult.userId;
                 clientInfo.role = authResult.role || null;
                 clientInfo.service = authResult.service || null;
@@ -553,8 +579,14 @@ class SocketHandler {
             const sessionMetadata = {
                 ...clientInfo.metadata,
                 ...data.metadata,
-                socketId: socket.id
+                socketId: socket.id,
+                tenantId: clientInfo.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
+                channel: typeof data.metadata?.channel === 'string' ? data.metadata.channel.trim().toLowerCase() : 'digital'
             };
+            if (!['digital', 'ava', 'ivr'].includes(sessionMetadata.channel)) {
+                socket.emit('sessionError', { error: 'Unsupported servicing channel' });
+                return;
+            }
 
             // SessionManager owns ID generation. Use that same canonical ID in
             // ChatService so the socket room, history, and session state cannot
@@ -740,7 +772,7 @@ class SocketHandler {
             });
 
             // Get conversation context
-            const session = await this.sessionManager.getSession(clientInfo.sessionId);
+            const session = await this.sessionManager.getSession(clientInfo.sessionId, { refresh: true });
             const conversationContext = session ? { ...session.state } : {};
 
             // Attach the authenticated identity + token so the orchestrator can
@@ -753,6 +785,8 @@ class SocketHandler {
             };
             conversationContext.userId = clientInfo.userId;
             conversationContext.authToken = clientInfo.authToken || null;
+            conversationContext.channel = session?.metadata?.channel || 'digital';
+            conversationContext.interactionId = typeof data.clientMessageId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(data.clientMessageId) ? data.clientMessageId : message.id;
 
             // Process through agent orchestrator (deterministic NLU -> workflow)
             const agentResult = await this.agentOrchestrator.processMessage(

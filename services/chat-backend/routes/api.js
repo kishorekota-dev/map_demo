@@ -3,6 +3,15 @@ const router = express.Router();
 const logger = require('../services/logger');
 const { verifyToken } = require('./auth');
 
+router.post('/sessions/:sessionId/handoff', verifyToken, async (req, res, next) => {
+    try { res.json(await req.app.locals.services.handoffService.issue(req.user, req.params.sessionId, req.body.targetChannel)); }
+    catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
+});
+router.post('/sessions/resume', verifyToken, async (req, res, next) => {
+    try { res.json(await req.app.locals.services.handoffService.resume(req.user, req.body.grant, req.headers.authorization.substring(7))); }
+    catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
+});
+
 async function requireSessionOwnership(req, res, next) {
     try {
         const sessionId = req.params.sessionId || req.query.sessionId ||
@@ -16,12 +25,13 @@ async function requireSessionOwnership(req, res, next) {
             return res.status(503).json({ error: 'Session service not available', timestamp: new Date().toISOString() });
         }
 
-        const session = await sessionManager.getSession(sessionId);
+        const session = await sessionManager.getSession(sessionId, { refresh: true });
         if (!session) {
             return res.status(404).json({ error: 'Session not found', sessionId, timestamp: new Date().toISOString() });
         }
 
-        if (String(session.userId) !== String(req.user.userId)) {
+        if (String(session.userId) !== String(req.user.userId)
+            || (session.metadata?.tenantId && session.metadata.tenantId !== req.user.tenantId)) {
             return res.status(403).json({ error: 'Access denied', timestamp: new Date().toISOString() });
         }
 
@@ -52,7 +62,7 @@ async function processSessionMessageHandler(req, res, next) {
         let session = null;
         try {
             if (sessionManager && typeof sessionManager.getSession === 'function') {
-                session = await sessionManager.getSession(sessionId);
+                session = await sessionManager.getSession(sessionId, { refresh: true });
             }
         } catch (err) {
             // ignore and try chatService fallback
@@ -94,7 +104,9 @@ async function processSessionMessageHandler(req, res, next) {
         const conversationContext = {
             ...(session.state || {}),
             userId,
-            authToken
+            authToken,
+            channel: session.metadata?.channel || 'digital',
+            interactionId: req.headers['x-interaction-id'] || message.id
         };
         const enrichedMessage = {
             ...message,
@@ -243,9 +255,12 @@ router.get('/chat/history', verifyToken, requireSessionOwnership, async (req, re
  * @desc Process incoming messages from external services
  * @access Private (inter-service communication)
  */
-router.post('/process', async (req, res) => {
+router.post('/process', verifyToken, (req, res, next) => {
+    req.params.sessionId = req.body?.sessionInfo?.sessionId;
+    return requireSessionOwnership(req, res, next);
+}, async (req, res) => {
     try {
-        const { message, conversationContext, sessionInfo } = req.body;
+        const { message, sessionInfo } = req.body;
 
         if (!message || !sessionInfo) {
             return res.status(400).json({
@@ -273,8 +288,9 @@ router.post('/process', async (req, res) => {
         // Process message through orchestrator
         const result = await agentOrchestrator.processMessage(
             sessionInfo.sessionId,
-            message,
-            conversationContext || {}
+            { ...message, userId: req.user.userId, authToken: req.headers.authorization.substring(7) },
+            { ...(req.ownedSession.state || {}), userId: req.user.userId,
+                authToken: req.headers.authorization.substring(7), channel: req.ownedSession.metadata?.channel || 'digital' }
         );
 
         res.status(200).json({
@@ -382,7 +398,11 @@ router.post('/sessions', verifyToken, async (req, res) => {
         }
 
         // Create session manager session first to generate canonical sessionId
-        const session = await sessionManager.createSession(userId, metadata || {});
+        const channel = typeof metadata?.channel === 'string' ? metadata.channel.trim().toLowerCase() : 'digital';
+        if (!['digital', 'ava', 'ivr'].includes(channel)) {
+            return res.status(400).json({ error: 'Unsupported servicing channel' });
+        }
+        const session = await sessionManager.createSession(userId, { ...(metadata || {}), channel, tenantId: req.user.tenantId });
 
         // Use the sessionManager-generated sessionId when creating chatService session so both stay in sync
         const chatSession = await chatService.createChatSession(userId, session.sessionId, userData || {});

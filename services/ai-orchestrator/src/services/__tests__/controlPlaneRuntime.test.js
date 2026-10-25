@@ -1,0 +1,268 @@
+jest.mock('axios');
+jest.mock('../../utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
+jest.mock('../../models', () => ({ WorkflowExecution: {}, HumanFeedback: { findOne: jest.fn(), create: jest.fn() } }));
+jest.mock('../../workflows/bankingChatWorkflow', () => jest.fn());
+jest.mock('../poc-slm-data-extractor', () => ({ extractAndValidate: jest.fn() }));
+
+const axios = require('axios');
+const intentMapper = require('../intentMapper');
+const WorkflowService = require('../workflowService');
+const { ControlPlaneRuntime, classifyPublishedIntent, validateSnapshot, resolvePublishedRoute } = require('../controlPlaneRuntime');
+const { defaultConfig } = require('../../../../api-gateway/control-plane/config');
+const { HumanFeedback } = require('../../models');
+const PolicyEngine = require('../policyEngine');
+const slmExtractor = require('../poc-slm-data-extractor');
+
+function makeService() {
+  const sessions = new Map();
+  const manager = {
+    getSession: jest.fn(async id => sessions.get(id)),
+    createSession: jest.fn(async (userId, sessionId, intent, metadata) => {
+      const session = { userId, sessionId, intent, metadata, collectedData: {}, conversationHistory: [] };
+      sessions.set(sessionId, session);
+      return session;
+    }),
+    updateSession: jest.fn(async (id, update) => Object.assign(sessions.get(id), update)),
+    updateWorkflowState: jest.fn(),
+    addMessage: jest.fn(async (id, role, content) => sessions.get(id).conversationHistory.push({ role, content }))
+  };
+  const service = new WorkflowService({}, manager);
+  service.integrations.createCase = jest.fn(async () => ({ id: 'case-test', status: 'open' }));
+  service.processConfiguredMessage = jest.fn(async input => ({ type: 'complete', response: intentMapper.buildSystemMessage(input.intent) }));
+  service.processConfiguredFeedback = jest.fn(async () => ({ type: 'complete', response: intentMapper.buildSystemMessage('balance_inquiry') }));
+  return { service, sessions, manager };
+}
+
+describe('published control-plane runtime', () => {
+  const originalEnabled = process.env.CONTROL_PLANE_ENABLED;
+  beforeEach(() => { process.env.CONTROL_PLANE_ENABLED = 'true'; jest.clearAllMocks(); });
+  afterAll(() => {
+    if (originalEnabled === undefined) delete process.env.CONTROL_PLANE_ENABLED;
+    else process.env.CONTROL_PLANE_ENABLED = originalEnabled;
+  });
+
+  test('reads only the authenticated published endpoint; outage fails closed', async () => {
+    const snapshot = { version: 1, config: defaultConfig() };
+    axios.get.mockResolvedValueOnce({ data: snapshot });
+    await expect(new ControlPlaneRuntime().getPublishedConfig('access-token')).resolves.toEqual(snapshot);
+    expect(axios.get).toHaveBeenCalledWith(expect.stringMatching(/\/runtime\/config$/), expect.objectContaining({
+      headers: { Authorization: 'Bearer access-token' }, timeout: 5000, maxRedirects: 0
+    }));
+    axios.get.mockRejectedValueOnce(new Error('unavailable'));
+    const { service } = makeService();
+    const result = await service.processMessage({ sessionId: 's', userId: 'u', intent: 'balance_inquiry', question: 'check balance', authToken: 'token' });
+    expect(result).toMatchObject({ type: 'policy_blocked', code: 'configuration_unavailable' });
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+  });
+
+  test('literal phrases override legacy NLU; removing phrases removes their classification', () => {
+    const config = defaultConfig();
+    const balance = config.intents.find(intent => intent.id === 'balance_inquiry');
+    balance.patterns = ['account.*', 'my special phrase'];
+    expect(classifyPublishedIntent('account123', 'balance_inquiry', config)).toBe('general_inquiry');
+    expect(classifyPublishedIntent('MY  SPECIAL phrase', 'help', config)).toBe('balance_inquiry');
+    balance.enabled = false;
+    expect(resolvePublishedRoute({ version: 1, config }, 'digital', classifyPublishedIntent('my special phrase', 'help', config)))
+      .toMatchObject({ action: 'disabled', reason: 'intent_disabled' });
+  });
+
+  test('pins published release for feedback and data collection; subsequent work uses latest release', async () => {
+    const first = { version: 1, config: defaultConfig() };
+    first.config.intents.find(intent => intent.id === 'balance_inquiry').systemPrompt = 'Published A';
+    const second = structuredClone(first);
+    second.version = 2;
+    second.config.intents.find(intent => intent.id === 'balance_inquiry').systemPrompt = 'Published B';
+    axios.get.mockResolvedValueOnce({ data: first }).mockResolvedValueOnce({ data: second });
+    const { service, sessions } = makeService();
+    const input = { sessionId: 's', userId: 'u', intent: 'help', question: 'check balance', authToken: 'token', metadata: { channel: 'AVA' } };
+    expect(await service.processMessage(input)).toMatchObject({ response: 'Published A', intent: 'balance_inquiry', metadata: { version: 1, channel: 'ava' } });
+    expect(sessions.get('s').metadata.controlPlane.version).toBe(1);
+    expect(await service.processHumanFeedback({ sessionId: 's', response: 'yes', confirmed: true, authToken: 'token' }))
+      .toMatchObject({ response: 'Published A', metadata: { version: 1 } });
+    expect(await service.processMessageInSession({ ...input, resumePublished: true }))
+      .toMatchObject({ response: 'Published A', metadata: { version: 1 } });
+    expect(axios.get).toHaveBeenCalledTimes(1);
+    expect(await service.processMessage(input)).toMatchObject({ response: 'Published B', metadata: { version: 2 } });
+  });
+
+  test('disabled channel and human journey never invoke automated workflow', async () => {
+    const snapshot = { version: 1, config: defaultConfig() };
+    axios.get.mockResolvedValue({ data: snapshot });
+    const { service, manager, sessions } = makeService();
+    expect(await service.processMessage({ sessionId: 'ivr', userId: 'u', question: 'check balance', authToken: 'token', metadata: { channel: 'ivr' } }))
+      .toMatchObject({ type: 'policy_blocked', code: 'channel_disabled' });
+    snapshot.config.journeys.find(entry => entry.id === 'accounts').fulfillment = 'human';
+    await manager.createSession('u', 'human', 'help', { channel: 'digital', tenantId: 'default-enterprise' });
+    expect(await service.processMessage({ sessionId: 'human', userId: 'u', question: 'check balance', authToken: 'token' }))
+      .toMatchObject({ type: 'human_escalation', metadata: { queue: 'general_servicing', version: 1 } });
+    expect(sessions.get('human').intent).toBe('balance_inquiry');
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+  });
+
+  test('separate concurrent workflows retain their own prompts and data requirements', async () => {
+    const a = defaultConfig().intents;
+    const b = structuredClone(a);
+    a.find(entry => entry.id === 'help').systemPrompt = 'Tenant A';
+    b.find(entry => entry.id === 'help').systemPrompt = 'Tenant B';
+    a.find(entry => entry.id === 'help').requiredData = ['caseReference'];
+    const [first, second] = await Promise.all([
+      intentMapper.withPublishedIntents(a, async () => { await new Promise(resolve => setTimeout(resolve, 5)); return [intentMapper.buildSystemMessage('help'), intentMapper.validateData('help', {}).missing]; }),
+      intentMapper.withPublishedIntents(b, async () => { await Promise.resolve(); return [intentMapper.buildSystemMessage('help'), intentMapper.validateData('help', {}).missing]; })
+    ]);
+    expect(first).toEqual(['Tenant A', ['caseReference']]);
+    expect(second).toEqual(['Tenant B', []]);
+    expect(intentMapper.buildSystemMessage('help')).not.toBe('Tenant A');
+  });
+
+  test('confirmation and required-field floors cannot be removed; new confirmation and prompts take effect', () => {
+    const snapshot = { version: 1, config: defaultConfig() };
+    const transfer = snapshot.config.intents.find(entry => entry.id === 'transfer_funds');
+    transfer.needsConfirmation = false;
+    expect(() => validateSnapshot(snapshot)).toThrow('Unsafe published intent');
+    transfer.needsConfirmation = true;
+    transfer.requiredData = [];
+    expect(() => validateSnapshot(snapshot)).toThrow('Unsafe published intent');
+    const entries = defaultConfig().intents;
+    const balance = entries.find(entry => entry.id === 'balance_inquiry');
+    balance.needsConfirmation = true;
+    balance.userPromptTemplate = '{{question}} / {{userId}} / {{context}}';
+    intentMapper.withPublishedIntents(entries, () => {
+      expect(intentMapper.needsConfirmation('balance_inquiry')).toBe(true);
+      expect(new PolicyEngine().evaluateToolExecution({ intent: 'balance_inquiry', tools: ['banking_get_accounts'], state: {} }).action)
+        .toBe('require_confirmation');
+      expect(intentMapper.buildUserMessage('balance_inquiry', { question: 'hello', userId: 'u' }))
+        .toBe('hello / u / {"question":"hello","userId":"u"}');
+    });
+  });
+
+  test('confirmation revalidates the pinned requirements and cannot execute an unapproved tool from feedback', async () => {
+    const { service, manager, sessions } = makeService();
+    const snapshot = { version: 1, config: defaultConfig() };
+    const balance = snapshot.config.intents.find(entry => entry.id === 'balance_inquiry');
+    balance.needsConfirmation = true;
+    balance.requiredData = ['caseReference'];
+    await manager.createSession('u', 's', 'balance_inquiry', { channel: 'digital', controlPlane: snapshot });
+    sessions.get('s').collectedData = {};
+    delete service.processConfiguredFeedback;
+    service.workflow = { getToolsForState: jest.fn(() => intentMapper.getToolsForIntent('balance_inquiry')), buildToolParameters: jest.fn() };
+    service.mcpClient = { executeToolWithRetry: jest.fn() };
+    const feedback = { feedbackType: 'confirmation', context: { tools: ['banking_create_transfer'] }, update: jest.fn(), executionId: 'e' };
+    HumanFeedback.findOne.mockResolvedValue(feedback);
+    const result = await service.processHumanFeedback({ sessionId: 's', response: 'yes', confirmed: true, authToken: 'token' });
+    expect(result).toMatchObject({ type: 'human_input_required', requiredFields: ['caseReference'], metadata: { version: 1 } });
+    expect(service.mcpClient.executeToolWithRetry).not.toHaveBeenCalled();
+    expect(HumanFeedback.create).toHaveBeenCalledWith(expect.objectContaining({ feedbackType: 'data_collection', requiredFields: ['caseReference'], status: 'pending' }));
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  test('global extraction prompt changes retain the required JSON and schema contract', () => {
+    const extractor = jest.requireActual('../poc-slm-data-extractor');
+    const config = defaultConfig();
+    const prompts = { extractionSystem: 'Custom extraction system', extractionInstructions: 'Custom extraction instructions' };
+    intentMapper.withPublishedIntents(config.intents, () => {
+      expect(intentMapper.getPublishedPrompt('extractionSystem')).toBe('Custom extraction system');
+      const prompt = extractor.buildPrompt({ intent: 'help', schema: extractor.buildSchema('help'), latestInput: 'hello' });
+      expect(prompt).toContain('Custom extraction instructions');
+      expect(prompt).toContain('Return JSON ONLY');
+      expect(prompt).toContain('Do not guess values');
+      expect(prompt).toContain('Use field names exactly as provided');
+    }, prompts);
+    expect(intentMapper.getPublishedPrompt('extractionSystem')).toBeNull();
+  });
+
+  test('a new process request cannot replace a release while confirmation is pending', async () => {
+    const { service, manager, sessions } = makeService();
+    await manager.createSession('u', 's', 'transfer_funds', { channel: 'digital', controlPlane: { version: 1, config: defaultConfig() } });
+    sessions.get('s').status = 'waiting_human_input';
+    const result = await service.processMessage({ sessionId: 's', userId: 'u', intent: 'help', question: 'help', authToken: 'token' });
+    expect(result).toMatchObject({ type: 'policy_blocked', code: 'pending_workflow', metadata: { version: 1, intent: 'transfer_funds' } });
+    expect(axios.get).not.toHaveBeenCalled();
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+    expect(sessions.get('s').metadata.controlPlane.version).toBe(1);
+  });
+  test('session ownership is rechecked after acquiring distributed coordination', async () => {
+    const { service, manager } = makeService();
+    await manager.createSession('other-customer', 'raced-id', 'help', { tenantId: 'default-enterprise' });
+    await expect(service.processMessage({ sessionId: 'raced-id', userId: 'u', question: 'help', authToken: 'token' }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  test('new required fields collect correctly without SLM and revalidate the merged reply', async () => {
+    const { service, manager, sessions } = makeService();
+    const config = defaultConfig();
+    config.intents.find(entry => entry.id === 'help').requiredData = ['caseReference'];
+    await manager.createSession('u', 's', 'help', { channel: 'digital', controlPlane: { version: 1, config } });
+    slmExtractor.extractAndValidate.mockResolvedValue({ slmEnabled: false, extractedData: {}, missingFields: ['caseReference'],
+      validationResult: { valid: false, missing: ['caseReference'], invalid: [] } });
+    service.processMessageInSession = jest.fn(async () => ({ type: 'complete' }));
+    await intentMapper.withPublishedIntents(config.intents, () => service.processDataCollection('s', 'caseReference: CASE-7', { requiredFields: ['caseReference'] }, 'token'));
+    expect(sessions.get('s').collectedData).toEqual({ caseReference: 'CASE-7' });
+    expect(service.processMessageInSession).toHaveBeenCalledWith(expect.objectContaining({ resumePublished: true, intent: 'help' }));
+    expect(service.parseDataFromResponse('one ambiguous reply', ['caseReference', 'region'])).toEqual({});
+    expect(service.parseDataFromResponse('caseReference: CASE-7\nregion: central', ['caseReference', 'region']))
+      .toEqual({ caseReference: 'CASE-7', region: 'central' });
+    expect(service.parseDataFromResponse({ caseReference: 'CASE-7', authToken: 'forged' }, ['caseReference']))
+      .toEqual({ caseReference: 'CASE-7' });
+  });
+  test('ledger replay never executes or meters a second financial action', async () => {
+    const adapter = { executeTool: jest.fn(async () => ({ success: true, reference: 'BANK-1' })) };
+    const service = new WorkflowService(adapter, {});
+    service.integrations.event = jest.fn(async () => ({ id: 'event-1' }));
+    service.integrations.usage = jest.fn(async () => ({ id: 'usage-1' }));
+    const parameters = { interactionId: 'one-request', tenantId: 'tenant', authToken: 'access', amount: 20,
+      runtimeContext: { version: 7, channel: 'ava', intent: 'transfer_funds', confirmationRequired: true, confirmationVerified: true } };
+    await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session');
+    expect(await service.mcpClient.executeTool('banking_create_transfer', parameters, 'session')).toMatchObject({ replayed: true });
+    expect(adapter.executeTool).toHaveBeenCalledTimes(1);
+    expect(service.integrations.usage).toHaveBeenCalledTimes(1);
+    expect(service.integrations.usage).toHaveBeenCalledWith(expect.objectContaining({ interactionId: 'one-request', version: 7, units: 1, metric: 'calls', provider: 'mcp' }), 'access');
+  });
+  test('an ancillary evidence persistence failure preserves a completed financial outcome', async () => {
+    const { service, manager } = makeService();
+    manager.getSession.mockRejectedValueOnce(new Error('session read unavailable'));
+    service.integrations.event = jest.fn(async () => ({ telemetryUnavailable: true }));
+    expect(await service.withEvidence({ sessionId: 's', authToken: 'token' }, async () => ({ type: 'complete', response: 'Transfer completed.', operationId: 'op-1' })))
+      .toMatchObject({ type: 'complete', response: 'Transfer completed.', operationId: 'op-1', telemetryUnavailable: true });
+  });
+  test('failed terminal persistence retains the original confirmation key and never repeats the financial action', async () => {
+    const { manager, sessions } = makeService();
+    const adapter = { executeTool: jest.fn(async () => ({ success: true, data: { reference: 'BANK-acknowledged' } })) };
+    const service = new WorkflowService(adapter, manager);
+    const ActualWorkflow = jest.requireActual('../../workflows/bankingChatWorkflow');
+    service.workflow = new ActualWorkflow(service.mcpClient, manager, new PolicyEngine());
+    const snapshot = { version: 7, config: defaultConfig() };
+    await manager.createSession('u', 'terminal-failure', 'transfer_funds', { tenantId: 'default-enterprise', channel: 'digital', interactionId: 'original-action',
+      controlPlane: snapshot, runtimeContext: { version: 7, channel: 'digital', intent: 'transfer_funds' } });
+    Object.assign(sessions.get('terminal-failure'), { status: 'waiting_human_input', currentStep: 'request_confirmation',
+      collectedData: { fromAccountId: 'a', toAccountId: 'b', amount: 20 }, conversationHistory: [{ role: 'user', content: 'Transfer twenty dollars' }] });
+    manager.updateWorkflowState.mockImplementation(async (_id, step) => { if (step !== 'policy_pre_tool') throw new Error('observation store unavailable'); });
+    manager.updateSession.mockRejectedValue(new Error('terminal session write unavailable'));
+    service.integrations.event = jest.fn(async () => ({ telemetryUnavailable: true }));
+    service.integrations.usage = jest.fn(async () => ({ telemetryUnavailable: true }));
+    const confirm = () => intentMapper.withPublishedIntents(snapshot.config.intents,
+      () => service.processConfirmation('terminal-failure', true, {}, 'access'), snapshot.config.prompts);
+    expect(await confirm()).toMatchObject({ type: 'complete', response: 'Your transfer of USD 20.00 was submitted successfully.', telemetryUnavailable: true });
+    expect(await confirm()).toMatchObject({ type: 'complete', telemetryUnavailable: true });
+    expect(adapter.executeTool).toHaveBeenCalledTimes(1);
+    expect(service.integrations.usage).toHaveBeenCalledTimes(1);
+    expect(sessions.get('terminal-failure').metadata.interactionId).toBe('original-action');
+    expect(await service.processMessage({ sessionId: 'terminal-failure', userId: 'u', question: 'Transfer again', authToken: 'access',
+      metadata: { interactionId: 'new-message-id' } })).toMatchObject({ code: 'pending_workflow', metadata: { version: 7 } });
+    expect(adapter.executeTool).toHaveBeenCalledTimes(1);
+  });
+  test('a configured extraction outage restores pending feedback without executing tools or replacing its release', async () => {
+    const { service, manager, sessions } = makeService();
+    const snapshot = { version: 7, config: defaultConfig() };
+    await manager.createSession('u', 'model-outage', 'transfer_funds', { channel: 'digital', controlPlane: snapshot, interactionId: 'original-action' });
+    sessions.get('model-outage').status = 'waiting_human_input';
+    const feedback = { requiredFields: ['amount'], update: jest.fn(async () => {}) };
+    slmExtractor.extractAndValidate.mockRejectedValue(new (require('../../llm/errors').LlmError)('LLM_TIMEOUT', 'Configured model unavailable'));
+    service.processMessageInSession = jest.fn();
+    expect(await service.processDataCollection('model-outage', '22', feedback, 'access')).toMatchObject({ code: 'model_unavailable', modelErrorCode: 'LLM_TIMEOUT' });
+    expect(feedback.update).toHaveBeenCalledWith({ status: 'pending', response: null, respondedAt: null });
+    expect(service.processMessageInSession).not.toHaveBeenCalled();
+    expect(sessions.get('model-outage')).toMatchObject({ status: 'waiting_human_input', metadata: { controlPlane: { version: 7 }, interactionId: 'original-action' } });
+  });
+});

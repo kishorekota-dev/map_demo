@@ -116,9 +116,15 @@ class SessionManager extends EventEmitter {
     /**
      * Get session by ID
      */
-    async getSession(sessionId) {
+    async getSession(sessionId, options = {}) {
         try {
             let session = this.sessions.get(sessionId);
+            if (options.refresh && this.databaseService) {
+                const persisted = await this.databaseService.getSession(sessionId);
+                if (!persisted?.is_active) return null;
+                session = this.fromPersistenceData(persisted);
+                this.cacheSession(session);
+            }
             
             if (!session && this.databaseService) {
                 const persistedSession = await this.databaseService.getSession(sessionId);

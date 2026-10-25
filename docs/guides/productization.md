@@ -1,15 +1,21 @@
 # Productization Guide
 
-This repository can now be positioned as an enterprise conversational platform with a banking accelerator, but it is not yet a drop-in multi-tenant SaaS product. The changes in this guide explain what was added, what still needs to change, and how to move from POC deployment to reusable enterprise product.
+This repository can now be positioned as an enterprise conversational platform with a banking accelerator, but it is not yet a drop-in multi-tenant SaaS product. The first supported model is a dedicated enterprise deployment with provider-neutral adapters. The [implementation matrix](servicing-product-implementation.md) records current capabilities, differentiation and remaining deployment qualification.
 
 ## What Was Added
+
+- A working [customer servicing control plane](control-plane.md) at `/control-plane`, with signed operator roles, PostgreSQL persistence, versioned configuration and immutable releases
+- Editors for every canonical intent's system/user prompts, shared extraction prompts, recognition phrases, required/optional entities, permitted tools and confirmation settings
+- Digital, AVA and signed provider-neutral IVR ingress, cross-channel one-time resume grants, case adapters, durable fulfillment, SLA escalation and reconciliation
+- Custom typed intents, governed knowledge, evaluation gates, independent approval, environment promotion, canaries, rollout monitoring, operational traces and measured costs
+- Published runtime configuration consumed by the existing orchestrator, with request-scoped prompts and release snapshots pinned across confirmation/data collection
 
 - Runtime enterprise branding and endpoint configuration for the frontend via `services/frontend/public/runtime-config.json`
 - A tenant profile template at `config/product/enterprise-profile.example.json`
 - An enterprise asset generator at `deployment-scripts/generate-enterprise-assets.mjs`
 - Updated root environment templates and a current `scripts/validate-env.sh`
 
-These changes remove hard-coded frontend branding, make deployment metadata explicit, and allow enterprise-specific packaging without rebuilding the UI for every customer.
+These changes support enterprise packaging and runtime servicing configuration without rebuilding the UI. The control plane is deployment-scoped. Provider-neutral voice/case/knowledge contracts and OIDC sign-in are implemented; actual provider connections and shared SaaS tenancy have separate qualification requirements.
 
 ## Product Boundary
 
@@ -34,22 +40,20 @@ The platform core should remain domain-neutral. Industry-specific business logic
 
 ### 1. Identity and Enterprise Access
 
-The current stack still assumes local JWT-style flows. For enterprise rollout you need:
+OIDC authorization-code sign-in with PKCE, nonce/state verification, pinned issuer/
+audience/JWKS, local identity mappings and short-lived signed role tokens is
+implemented. Configure the IdP client and exact callback, then map authoritative
+issuer/subject identities to local users in Servicing Studio. Local JWT sign-in
+remains available for the established application.
 
-- OIDC and SAML support
-- SCIM or equivalent user provisioning
-- organization and workspace RBAC
-- per-tenant session policy and token issuer validation
-
-> ⚠️ **Not yet functional:** the enterprise asset generator accepts
-> `identity.provider: oidc|saml` and emits `OIDC_ISSUER_URL` / `OIDC_AUDIENCE`,
-> but there is **no OIDC/SAML token-issuer validation implemented** in the
-> services yet (only local JWT). Treat `oidc`/`saml` profiles as placeholders;
-> use `jwt` for working deployments.
+SCIM provisioning and native SAML are not included. A SAML-based enterprise can
+federate through its OIDC broker or supply a reviewed identity adapter. The asset
+generator's legacy SAML profile option does not activate native SAML validation.
+See the [identity runbook](servicing-operations.md#enterprise-identity).
 
 ### 2. Multi-Tenant Isolation
 
-Today the codebase is deployment-configurable, not fully multi-tenant. To become a reusable enterprise product you need:
+The control plane now enforces signed deployment tenant claims and stores tenant-scoped configuration and audit records. Existing banking/chat data remains deployment-scoped, not fully multi-tenant. To become a reusable SaaS product you still need:
 
 - tenant registry and tenant metadata store
 - per-tenant secrets and model credentials
@@ -66,21 +70,20 @@ Today the codebase is deployment-configurable, not fully multi-tenant. To become
 
 ### 4. Knowledge and Integration Layer
 
-Any enterprise deployment will need connectors beyond banking APIs. Add:
-
-- connector framework for CRM, ITSM, HRIS, case management, and document systems
-- ingestion pipelines for enterprise knowledge bases
-- per-connector auth policy and data residency controls
+The implemented connector registry supports case, voice and governed text-knowledge
+contracts with secret references, trusted hosts, deadlines, real health checks,
+signed callbacks and deterministic replay protection. Configure enterprise
+providers behind those contracts and qualify them in their sandboxes. Provider
+adapters own source-system extraction and permission mapping.
 
 ### 5. Governance, Trust, and Compliance
 
-Productization requires operational controls, not just AI flows:
-
-- prompt and policy versioning
-- content safety and PII redaction pipelines
-- audit retention policy
-- explainability and escalation traces
-- model approval and fallback policy
+Versioned prompts/policy, exact-content evaluations, independent approval,
+environment promotion, canary observation, restricted context, operational
+retention/privacy and signed evidence export are implemented. Configure customer
+retention/legal holds, immutable external archival and appropriate data residency.
+The existing policy engine and bounded operational redaction do not establish
+regulatory certification or universal PII detection.
 
 ### 6. Deployment and Operations
 
@@ -97,9 +100,9 @@ Enterprises need repeatable rollout artifacts:
 To ship this as a product rather than a project, add:
 
 - feature licensing and entitlements
-- tenant usage metering
+- commercial billing/entitlement integration over measured usage
 - support diagnostics bundle export
-- admin console for tenant configuration
+- commercial packaging around the existing servicing admin console
 - documented upgrade compatibility matrix
 
 ## How To Package A New Enterprise Deployment
@@ -110,8 +113,8 @@ To ship this as a product rather than a project, add:
 4. Mount the generated `frontend-runtime-config.json` as `/runtime-config.json` in the frontend deployment.
 5. Load `.env.enterprise.generated` into your deployment environment, secret manager, or Helm values.
 6. Replace demo endpoints with enterprise ingress, private service addresses, and real identity settings.
-7. Validate startup with `npm run validate`, health checks, login, and a scripted chat smoke test.
+7. Validate the profile with `npm run product:validate`; verify environment configuration, health checks, login and a scripted chat smoke test.
 
 ## Recommended Next Engineering Slice
 
-The highest-value next implementation is to introduce a domain adapter contract and move banking-specific prompt and tool registration behind it. That is the architectural step that turns this repo from a banking chatbot solution into a reusable enterprise conversational product.
+Provider-neutral voice, case, knowledge and identity contracts, durable multi-replica coordination, custom typed intents, evaluated releases, approvals/canaries and operational evidence are implemented. Qualify enterprise provider adapters and run representative customer/load/recovery tests before live activation. See the [implementation matrix](servicing-product-implementation.md), [control plane guide](control-plane.md) and [operations runbook](servicing-operations.md) for exact capabilities and deployment boundaries.

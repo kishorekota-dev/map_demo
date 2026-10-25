@@ -2,6 +2,13 @@ const EventEmitter = require('events');
 const axios = require('axios');
 const logger = require('./logger');
 
+const boundedTimeout = (value, defaultMs, maximumMs) => {
+    const milliseconds = typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isSafeInteger(milliseconds)
+        ? Math.min(maximumMs, Math.max(1000, milliseconds))
+        : defaultMs;
+};
+
 /**
  * AgentOrchestrator
  *
@@ -31,7 +38,10 @@ class AgentOrchestrator extends EventEmitter {
         this.orchestratorUrl = process.env.AI_ORCHESTRATOR_URL || 'http://localhost:3007';
 
         // Timeouts / retries
-        this.requestTimeout = parseInt(process.env.AGENT_RESPONSE_TIMEOUT, 10) || 30000;
+        // Allow the full governed workflow (up to three model tasks) to finish.
+        // The optional legacy NLU lookup keeps a separate, shorter budget.
+        this.requestTimeout = boundedTimeout(process.env.AGENT_RESPONSE_TIMEOUT, 400000, 590000);
+        this.nluTimeout = boundedTimeout(process.env.NLU_REQUEST_TIMEOUT_MS, 5000, 120000);
         // Only network-level failures are retried; timeouts are NOT retried so a
         // slow state-changing call is never silently duplicated.
         this.networkRetryAttempts = parseInt(process.env.AGENT_NETWORK_RETRY_ATTEMPTS, 10) || 2;
@@ -54,6 +64,7 @@ class AgentOrchestrator extends EventEmitter {
             nluServiceUrl: this.nluServiceUrl,
             orchestratorUrl: this.orchestratorUrl,
             requestTimeout: this.requestTimeout,
+            nluTimeout: this.nluTimeout,
             fallbackIntent: this.fallbackIntent
         });
     }
@@ -146,7 +157,8 @@ class AgentOrchestrator extends EventEmitter {
             // Step 2 — canonical AI workflow
             const workflow = await this.callOrchestrator({
                 path: '/api/orchestrator/process',
-                payload: { sessionId, intent, question, userId },
+                payload: { sessionId, intent, question, userId, interactionId: conversationContext.interactionId || message.id,
+                    metadata: { channel: conversationContext.channel || 'digital' } },
                 authToken
             });
 
@@ -223,9 +235,9 @@ class AgentOrchestrator extends EventEmitter {
 
     /**
      * Call the AI orchestrator with deterministic timeout and bounded
-     * network-only retries. A timeout aborts the in-flight request (so it cannot
-     * complete after we have given up) and is NOT retried, preventing duplicate
-     * execution of state-changing actions.
+     * network-only retries. A timeout aborts this client request, but downstream
+     * work may still complete. It is NOT retried, avoiding duplicate dispatch of
+     * state-changing actions.
      */
     async callOrchestrator({ path, payload, authToken }) {
         const url = `${this.orchestratorUrl}${path}`;
@@ -272,7 +284,24 @@ class AgentOrchestrator extends EventEmitter {
      * deterministically.
      */
     mapWorkflowResult(workflow, { intent, startTime, sessionId }) {
+        workflow = { ...workflow, metadata: { ...(workflow?.metadata || {}),
+            ...(workflow?.citations ? { citations: workflow.citations } : {}),
+            ...(workflow?.evidenceIds ? { evidenceIds: workflow.evidenceIds } : {}),
+            ...(workflow?.caseId ? { caseId: workflow.caseId } : {}),
+            ...(workflow?.operationId ? { operationId: workflow.operationId, reconciliationRequired: workflow.type === 'reconciliation_required' } : {}) } };
         const type = workflow?.type;
+        intent = workflow?.intent || intent;
+
+        if (type === 'human_escalation') {
+            const route = workflow.metadata || {};
+            const escalationContext = { ...route, intent, escalationRequired: true,
+                escalationReason: route.reason || 'configured_human_routing', escalatedAt: new Date().toISOString() };
+            this.emit('humanEscalation', { sessionId, reason: escalationContext.escalationReason,
+                queue: route.queue, journeyId: route.journeyId, metadata: escalationContext });
+            return this.buildResult({ content: workflow.message, type: 'text', confidence: 1,
+                source: 'human-escalation', metadata: escalationContext },
+            { ...escalationContext, pendingFeedback: null, lockedIntent: null }, startTime, ['human-escalation']);
+        }
 
         // The workflow needs more information or a confirmation from the user.
         if (workflow?.needsHumanInput || type === 'human_input_required' || type === 'confirmation_required') {
@@ -287,6 +316,7 @@ class AgentOrchestrator extends EventEmitter {
                     confidence: 1,
                     source: 'ai-orchestrator',
                     metadata: {
+                        ...(workflow.metadata || {}),
                         intent,
                         requiresUserResponse: true,
                         responseType: type,
@@ -313,9 +343,10 @@ class AgentOrchestrator extends EventEmitter {
                     type: 'text',
                     confidence: 1,
                     source: 'policy-engine',
-                    metadata: { intent, policyCode: workflow.code, stage: workflow.stage }
+                    metadata: { ...(workflow.metadata || {}), intent, policyCode: workflow.code, stage: workflow.stage }
                 },
-                { pendingFeedback: null, lockedIntent: null },
+                ['pending_workflow', 'model_unavailable'].includes(workflow.code)
+                    ? {} : { pendingFeedback: null, lockedIntent: null },
                 startTime,
                 ['ai-orchestrator']
             );
@@ -337,7 +368,7 @@ class AgentOrchestrator extends EventEmitter {
                 type: 'text',
                 confidence: 0.9,
                 source: 'ai-orchestrator',
-                metadata: { intent, policy: workflow?.policy || null }
+                metadata: { ...(workflow.metadata || {}), intent, policy: workflow?.policy || null }
             },
             // Clear any pending state once a turn completes.
             { pendingFeedback: null, lockedIntent: null },
@@ -399,10 +430,10 @@ class AgentOrchestrator extends EventEmitter {
      */
     async httpPost(url, body, extraHeaders = {}) {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.requestTimeout);
+        const timer = setTimeout(() => controller.abort(), this.nluTimeout);
         try {
             return await axios.post(url, body, {
-                timeout: this.requestTimeout,
+                timeout: this.nluTimeout,
                 signal: controller.signal,
                 headers: { 'Content-Type': 'application/json', ...extraHeaders }
             });

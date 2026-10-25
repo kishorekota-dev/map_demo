@@ -42,6 +42,9 @@ class SessionManager {
       // Check if session already exists
       const existing = await Session.findOne({ where: { sessionId } });
       if (existing) {
+        if (String(existing.userId) !== String(userId) || (existing.metadata?.tenantId && existing.metadata.tenantId !== metadata.tenantId)) {
+          throw Object.assign(new Error('Session access denied'), { status: 403 });
+        }
         logger.warn('Session already exists', { sessionId, userId });
         return existing;
       }

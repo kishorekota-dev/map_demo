@@ -32,6 +32,14 @@
 - **Multi-Agent Support** - Coordinate between AI and human agents
 - **Session Persistence** - Maintain context across conversations
 
+### 🎛 Customer Servicing Control Plane
+- **Servicing Studio** at `/control-plane` for Digital, AVA, IVR policy and fulfillment operations
+- **Every canonical intent and prompt** — edit all 16 intents, their recognition phrases, system/user prompts, shared extraction instructions, entity requirements and permitted tools
+- **Model plugins** — remote Mac Studio Qwen/Ollama, OpenAI, Vertex Gemini and compatible servers, with versioned task profiles and intent generation overrides
+- **Governed releases** — validate drafts, publish, restore earlier releases, and inspect audit history; active confirmations keep their published configuration
+- **Persistent work queues** — assignment, SLA dates, idempotent creation and validated fulfillment transitions
+- **Production persistence** — PostgreSQL transactions and signed operator roles; see the [Control Plane Guide](docs/guides/control-plane.md) for configuration and integration boundaries
+
 ### 🏦 Banking Operations
 - Account management and balance inquiries
 - Transaction history and search
@@ -176,6 +184,7 @@ npm run health
 | URL | Description |
 |-----|-------------|
 | http://localhost:3000 | Customer chat interface |
+| http://localhost:3000/control-plane | Servicing Studio (operator role required) |
 | http://localhost:8081 | Agent dashboard |
 | http://localhost:3001/health | API Gateway health |
 | http://localhost:3005/api/docs | Banking API docs |
@@ -215,6 +224,11 @@ poc-banking-chat/
 | [Architecture](docs/architecture/overview.md) | System design and data flow |
 | [Recommendations](docs/architecture/recommendations.md) | Current architecture follow-ups |
 | [Productization](docs/guides/productization.md) | How to package this repo for enterprise rollout |
+| [Control Plane](docs/guides/control-plane.md) | Prompt/intent authoring, evaluated releases, channels and fulfillment |
+| [Servicing Implementation](docs/guides/servicing-product-implementation.md) | Market gaps addressed, differentiation and qualification boundaries |
+| [Model Providers](docs/guides/llm-providers.md) | Remote Mac Studio Qwen, OpenAI, Vertex Gemini and compatible model plugins |
+| [Servicing Operations](docs/guides/servicing-operations.md) | Provider contracts, OIDC, recovery, privacy and evidence |
+| [Market Comparison](docs/guides/market-comparison.md) | Official product benchmarks and differentiation assessment |
 | [Development](docs/guides/development.md) | Development workflows |
 | [Deployment](docs/guides/deployment.md) | Production deployment |
 | [API Overview](docs/api/README.md) | API and OpenAPI entry points |

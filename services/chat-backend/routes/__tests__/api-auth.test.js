@@ -29,6 +29,19 @@ const createApp = (session, serviceOverrides = {}) => {
 };
 
 describe('chat REST authorization', () => {
+  test('protects the private process endpoint and rejects foreign sessions', async () => {
+    const app = createApp({ sessionId: 's1', userId: 'someone-else' });
+    const payload = { sessionInfo: { sessionId: 's1' }, message: { content: 'hello' } };
+    expect((await request(app).post('/api/process').send(payload)).status).toBe(401);
+    expect((await request(app).post('/api/process').set('Authorization', `Bearer ${jwt.sign({ userId: 'user-a' }, JWT_SECRET)}`).send(payload)).status).toBe(403);
+  });
+
+  test('rejects refresh tokens on the chat data plane', async () => {
+    const response = await request(createApp({ sessionId: 's1', userId: 'user-a' })).get('/api/sessions/s1')
+      .set('Authorization', `Bearer ${jwt.sign({ userId: 'user-a', type: 'refresh' }, JWT_SECRET)}`);
+    expect(response.status).toBe(401);
+  });
+
   test('requires a bearer token for session data', async () => {
     const response = await request(createApp({ sessionId: 's1', userId: 'user-a' }))
       .get('/api/sessions/s1');

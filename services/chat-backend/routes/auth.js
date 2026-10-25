@@ -240,7 +240,8 @@ router.post('/validate', async (req, res) => {
         // Verify token
         const decoded = jwt.verify(
             token,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            { algorithms: ['HS256'] }
         );
 
         // Check token type
@@ -391,11 +392,22 @@ const verifyToken = (req, res, next) => {
         
         const decoded = jwt.verify(
             token,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            { algorithms: ['HS256'] }
         );
 
+        const userId = decoded.userId || decoded.sub || decoded.id;
+        const tenantId = decoded.tenantId || decoded.tenant_id || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+        if (!userId || decoded.type === 'refresh') {
+            return res.status(401).json({ error: 'Invalid access token' });
+        }
+        if (tenantId !== (process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')) {
+            return res.status(403).json({ error: 'Tenant access denied' });
+        }
+
         req.user = {
-            userId: decoded.userId,
+            userId: String(userId),
+            tenantId,
             sessionData: decoded.sessionData
         };
 

@@ -5,6 +5,7 @@ export interface RuntimeConfig {
   supportEmail: string;
   apiBaseUrl: string;
   authBaseUrl: string;
+  chatRequestTimeoutMs: number;
   features: {
     allowTokenAuth: boolean;
   };
@@ -32,6 +33,12 @@ const resolveBoolean = (value: string | undefined, fallback: boolean): boolean =
   return !['false', '0', 'no', 'off'].includes(normalized);
 };
 
+const resolveChatTimeout = (value: unknown, fallback = 420000): number => {
+  const milliseconds = typeof value === 'string' && value.trim() ? Number(value) : value;
+  return typeof milliseconds === 'number' && Number.isInteger(milliseconds)
+    && milliseconds >= 1000 && milliseconds <= 600000 ? milliseconds : fallback;
+};
+
 const defaultRuntimeConfig: RuntimeConfig = {
   tenantId: resolveString(import.meta.env.VITE_TENANT_ID, 'default-enterprise'),
   productName: resolveString(import.meta.env.VITE_APP_NAME, 'Enterprise Conversational Platform'),
@@ -45,6 +52,7 @@ const defaultRuntimeConfig: RuntimeConfig = {
     import.meta.env.VITE_AUTH_API_BASE_URL || import.meta.env.VITE_BANKING_SERVICE_URL,
     'http://localhost:3005/api/v1'
   ),
+  chatRequestTimeoutMs: resolveChatTimeout(import.meta.env.VITE_CHAT_REQUEST_TIMEOUT_MS),
   features: {
     allowTokenAuth: resolveBoolean(import.meta.env.VITE_ALLOW_TOKEN_AUTH, true),
   },
@@ -58,6 +66,7 @@ const mergeRuntimeConfig = (partialConfig: Partial<RuntimeConfig>): RuntimeConfi
   return {
     ...defaultRuntimeConfig,
     ...partialConfig,
+    chatRequestTimeoutMs: resolveChatTimeout(partialConfig.chatRequestTimeoutMs, defaultRuntimeConfig.chatRequestTimeoutMs),
     features: {
       ...defaultRuntimeConfig.features,
       ...features,

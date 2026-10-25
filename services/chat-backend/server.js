@@ -75,7 +75,7 @@ app.use(cors({
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     // allow common custom headers including X-Request-Id (case-insensitive)
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Agent-Type', 'X-Session-ID', 'X-Request-Id', 'X-Request-ID', 'x-request-id']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Agent-Type', 'X-Session-ID', 'X-Interaction-ID', 'X-Request-Id', 'X-Request-ID', 'x-request-id']
 }));
 
 // Compression and parsing middleware
@@ -201,9 +201,11 @@ async function initializeServices() {
         
         // Initialize socket handler with services
         socketHandler = new SocketHandler(io, chatService, agentOrchestrator, sessionManager);
+        await socketHandler.handoffService.initialize();
         
         // Store services in app locals for route access
         app.locals.services = {
+            handoffService: socketHandler.handoffService,
             chatService,
             agentOrchestrator,
             sessionManager,
@@ -306,6 +308,7 @@ const gracefulShutdown = async (signal) => {
             logger.info('Closing database connection...');
             await databaseService.close();
         }
+        if (socketHandler?.handoffService.pool) await socketHandler.handoffService.pool.end();
 
         logger.info('Graceful shutdown completed');
         process.exit(0);

@@ -36,7 +36,8 @@
     "jsonwebtoken": "^9.0.2",
     "bcryptjs": "^2.4.3",
     "moment": "^2.29.4",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "google-auth-library": "10.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",

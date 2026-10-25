@@ -2,6 +2,76 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const logger = require('../utils/logger');
+const { authenticate, authorizeSession } = require('../middleware/auth');
+const { normalizeChannel } = require('../services/controlPlaneRuntime');
+
+router.use(authenticate);
+router.use('/llm', require('../llm/routes'));
+
+function requireOperationsPermission(permission) {
+  return (req, res, next) => {
+    if (!req.user.roles.some(role => ['admin', 'control_plane_admin', 'control_plane_operator', 'servicing_operator', 'supervisor'].includes(role))
+      || !req.user.permissions.some(value => value === permission || value === '*')) return res.status(403).json({ error: 'Operator permission required' });
+    next();
+  };
+}
+router.get('/operations', requireOperationsPermission('servicing:operations:read'), async (req, res, next) => {
+  try {
+    if (req.query.status && !['dispatched', 'succeeded', 'reconciliation_required', 'failed'].includes(req.query.status)) return res.status(400).json({ error: 'Invalid operation status' });
+    res.json({ operations: await req.app.locals.workflowService.persistence.listOperations(req.user.tenantId, { status: req.query.status }) });
+  } catch (error) { next(error); }
+});
+router.post('/operations/:operationId/reconcile', requireOperationsPermission('servicing:operations:reconcile'), async (req, res, next) => {
+  try {
+    const service = req.app.locals.workflowService;
+    const operation = await service.persistence.reconcile(req.user.tenantId, req.params.operationId, { outcome: req.body.outcome,
+      reference: req.body.reference, note: req.body.note, actor: req.user.userId });
+    const event = await service.integrations.event({ sessionId: operation.sessionId, interactionId: `reconcile-${operation.operationId}`,
+      operationId: operation.operationId, stage: 'reconciliation', outcome: req.body.outcome,
+      metadata: { reconciliationReference: req.body.reference } }, req.headers.authorization.slice(7));
+    res.json({ operation, evidenceId: event.id || null, telemetryUnavailable: event.telemetryUnavailable === true });
+  } catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
+});
+
+router.post('/session/:sessionId/channel', authorizeSession, async (req, res, next) => {
+  try {
+    const expected = process.env.SERVICING_SERVICE_TOKEN;
+    const provided = req.get('X-Servicing-Service-Token') || '';
+    if (!expected || Buffer.byteLength(provided) !== Buffer.byteLength(expected)
+      || !require('crypto').timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) return res.status(403).json({ error: 'Trusted handoff service required' });
+    const channel = normalizeChannel(req.body.channel);
+    const session = req.ownedSession;
+    if (!session) return res.json({ updated: false, channel });
+    const persistence = req.app.locals.workflowService.persistence;
+    await persistence.runSession(req.user.tenantId, session.sessionId, async () => {
+      const current = await req.app.locals.sessionManager.getSession(session.sessionId);
+      const { resolvePublishedRoute } = require('../services/controlPlaneRuntime');
+      const snapshot = current.metadata?.controlPlane;
+      const route = snapshot ? { ...resolvePublishedRoute(snapshot, channel, current.intent), environment: snapshot.environment, cohort: snapshot.cohort } : null;
+      if (route?.action === 'disabled') throw Object.assign(new Error('Target channel is disabled for this workflow'), { status: 409 });
+      await req.app.locals.sessionManager.updateSession(current.sessionId, { metadata: { ...current.metadata, channel,
+        ...(route ? { runtimeContext: route } : {}) } });
+    });
+    return res.json({ updated: true, channel, version: session.metadata?.controlPlane?.version });
+  } catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
+});
+
+router.get('/session/:sessionId/context', async (req, res, next) => {
+  try {
+    const session = await req.app.locals.sessionManager.getSession(req.params.sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const sameTenant = !session.metadata?.tenantId || session.metadata.tenantId === req.user.tenantId;
+    const operator = req.user.roles.some(role => ['admin', 'control_plane_admin', 'control_plane_operator', 'servicing_operator', 'supervisor', 'agent'].includes(role))
+      && req.user.permissions.some(permission => ['servicing:context:read', '*'].includes(permission));
+    if (!sameTenant || (String(session.userId) !== req.user.userId && !operator)) return res.status(403).json({ error: 'Context access denied' });
+    const operations = await req.app.locals.workflowService.persistence.listOperations(req.user.tenantId, { sessionId: session.sessionId });
+    return res.json({ sessionId: session.sessionId, summary: `${session.intent || 'Unclassified'} request is ${session.status}; current step: ${session.currentStep || 'initial'}.`,
+      intent: session.intent, status: session.status, currentStep: session.currentStep, channel: session.metadata?.channel || 'digital',
+      version: session.metadata?.controlPlane?.version, collectedFields: Object.keys(session.collectedData || {}), requiredFields: session.requiredData || [],
+      confirmationPending: session.currentStep === 'request_confirmation', caseId: session.metadata?.caseId || null, evidenceIds: session.metadata?.evidenceIds || [],
+      unresolvedOperations: operations.filter(operation => ['dispatched', 'reconciliation_required'].includes(operation.status)).map(({ operationId, status, tool }) => ({ operationId, status, tool })) });
+  } catch (error) { next(error); }
+});
 
 /**
  * Enforce express-validator rules. Without this, the declared body()/param()
@@ -28,7 +98,7 @@ function extractAuthToken(req) {
   if (header.startsWith('Bearer ')) {
     return header.slice('Bearer '.length).trim();
   }
-  return req.body?.authToken || null;
+  return null;
 }
 
 /**
@@ -38,7 +108,7 @@ function extractAuthToken(req) {
  * The user must be authenticated and userId is required.
  * This endpoint receives userId from the authenticated session via the client.
  */
-router.post('/process',
+router.post('/process', authorizeSession,
   [
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('intent').notEmpty().withMessage('Intent is required'),
@@ -49,6 +119,9 @@ router.post('/process',
   async (req, res) => {
     try {
       const { sessionId, intent, question, userId, metadata } = req.body;
+      try { metadata.channel = normalizeChannel(metadata.channel); } catch (error) {
+        return res.status(400).json({ success: false, error: 'Unsupported servicing channel' });
+      }
       const { workflowService } = req.app.locals;
       const authToken = extractAuthToken(req);
 
@@ -80,7 +153,7 @@ router.post('/process',
         stack: error.stack
       });
       
-      res.status(500).json({
+      res.status(error.status || 500).json({
         success: false,
         error: 'Failed to process request',
         message: error.message
@@ -93,7 +166,7 @@ router.post('/process',
  * POST /api/orchestrator/feedback
  * Submit human feedback/input to continue workflow
  */
-router.post('/feedback',
+router.post('/feedback', authorizeSession,
   [
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('response').notEmpty().withMessage('Response is required')
@@ -129,7 +202,7 @@ router.post('/feedback',
         error: error.message
       });
       
-      res.status(500).json({
+      res.status(error.status || 500).json({
         success: false,
         error: 'Failed to process feedback',
         message: error.message
@@ -142,7 +215,7 @@ router.post('/feedback',
  * GET /api/orchestrator/session/:sessionId
  * Get session status and state
  */
-router.get('/session/:sessionId',
+router.get('/session/:sessionId', authorizeSession,
   [
     param('sessionId').notEmpty().withMessage('Session ID is required')
   ],
@@ -193,7 +266,7 @@ router.get('/session/:sessionId',
  * POST /api/orchestrator/session
  * Create a new session
  */
-router.post('/session',
+router.post('/session', authorizeSession,
   [
     body('sessionId').notEmpty().withMessage('Session ID is required'),
     body('userId').notEmpty().withMessage('User ID is required')
@@ -238,7 +311,7 @@ router.post('/session',
  * DELETE /api/orchestrator/session/:sessionId
  * Complete/end a session
  */
-router.delete('/session/:sessionId',
+router.delete('/session/:sessionId', authorizeSession,
   [
     param('sessionId').notEmpty().withMessage('Session ID is required')
   ],
@@ -272,7 +345,7 @@ router.delete('/session/:sessionId',
  * GET /api/orchestrator/user/:userId/sessions
  * Get user's active sessions
  */
-router.get('/user/:userId/sessions',
+router.get('/user/:userId/sessions', authorizeSession,
   [
     param('userId').notEmpty().withMessage('User ID is required'),
     query('status').optional().isIn(['active', 'waiting_human_input', 'completed', 'failed', 'expired'])
@@ -288,7 +361,7 @@ router.get('/user/:userId/sessions',
 
       res.json({
         success: true,
-        sessions: sessions.map(s => ({
+        sessions: sessions.filter(s => !s.metadata?.tenantId || s.metadata.tenantId === req.user.tenantId).map(s => ({
           sessionId: s.sessionId,
           status: s.status,
           intent: s.intent,

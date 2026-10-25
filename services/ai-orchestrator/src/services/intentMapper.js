@@ -7,6 +7,9 @@
 
 const intentConfig = require('../../config/intentConfig');
 const logger = require('../utils/logger');
+const { AsyncLocalStorage } = require('async_hooks');
+const recordProviderUsage = require('./providerUsage');
+const publishedIntents = new AsyncLocalStorage();
 
 // Import prompt templates by category
 const ACCOUNT_PROMPTS = require('../prompts/templates/account');
@@ -29,6 +32,34 @@ const ALL_PROMPTS = {
  * Provides methods for intent-based prompt selection and configuration
  */
 class IntentMapper {
+  withPublishedIntents(intents, callback, prompts = {}, hooks = {}, llm = undefined) {
+    // Each asynchronous workflow receives an isolated immutable snapshot.
+    // Neither the singleton nor the canonical configuration is mutated.
+    return publishedIntents.run({ intents: new Map(intents.map(entry => [entry.id, structuredClone(entry)])), prompts: structuredClone(prompts), hooks,
+      llm: llm === undefined ? undefined : structuredClone(llm) }, callback);
+  }
+
+  getLlmConfig() { return publishedIntents.getStore()?.llm; }
+
+  generateForTask(task, intent, input) {
+    return require('../llm/profiles').generateWithProfile(this.getLlmConfig(), task, this.getPublishedIntent(intent), input,
+      publishedIntents.getStore()?.hooks?.recordUsage);
+  }
+
+  recordProviderUsage(response, provider, service, callId) {
+    return recordProviderUsage(response, publishedIntents.getStore()?.hooks?.recordUsage, provider, service, callId);
+  }
+
+  getPublishedIntent(intent) {
+    return publishedIntents.getStore()?.intents.get(intent) || null;
+  }
+
+  getBaseIntent(intent) { return this.getPublishedIntent(intent)?.baseIntent || intent; }
+
+  getPublishedPrompt(name) {
+    return publishedIntents.getStore()?.prompts[name] || null;
+  }
+
   constructor() {
     this.promptCache = new Map();
     this.fallbackPrompt = {
@@ -84,12 +115,29 @@ Provide accurate, helpful information about banking services.`,
    */
   getIntentConfig(intent) {
     try {
-      if (!intentConfig.isValidIntent(intent)) {
+      if (!this.isValidIntent(intent)) {
         logger.warn('Invalid intent requested', { intent });
         return null;
       }
 
-      return intentConfig.getIntentConfig(intent);
+      const baseIntent = this.getBaseIntent(intent);
+      const baseline = ['service_request', 'knowledge_search'].includes(baseIntent)
+        ? { intent, metadata: { requiresAuth: true }, behavior: {}, dataRequirements: { required: [], optional: [] }, tools: [], prompts: {} }
+        : intentConfig.getIntentConfig(baseIntent);
+      const published = this.getPublishedIntent(intent);
+      if (!published) return baseline;
+      return {
+        ...baseline,
+        metadata: { ...baseline.metadata, name: published.name, description: published.description },
+        behavior: { ...baseline.behavior, needsConfirmation: baseline.behavior.needsConfirmation || published.needsConfirmation },
+        dataRequirements: {
+          ...baseline.dataRequirements,
+          required: [...new Set([...(baseline.dataRequirements.required || []), ...published.requiredData])],
+          optional: published.optionalData
+        },
+        tools: published.tools.filter(tool => baseline.tools.includes(tool)),
+        patterns: published.patterns
+      };
     } catch (error) {
       logger.error('Error getting intent config', { intent, error: error.message });
       return null;
@@ -103,7 +151,9 @@ Provide accurate, helpful information about banking services.`,
    */
   getSystemPrompt(intent) {
     try {
-      const config = intentConfig.getIntentConfig(intent);
+      const published = this.getPublishedIntent(intent);
+      if (published) return published.systemPrompt;
+      const config = intentConfig.getIntentConfig(this.getBaseIntent(intent));
       if (!config || !config.prompts || !config.prompts.systemPromptTemplate) {
         logger.warn('System prompt template not found, using fallback', { intent });
         return this.fallbackPrompt.system;
@@ -131,7 +181,14 @@ Provide accurate, helpful information about banking services.`,
    */
   getUserPromptFunction(intent) {
     try {
-      const config = intentConfig.getIntentConfig(intent);
+      const published = this.getPublishedIntent(intent);
+      if (published) {
+        return context => published.userPromptTemplate.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_match, field) => {
+          const value = field === 'context' ? context : Object.prototype.hasOwnProperty.call(context, field) ? context[field] : '';
+          return value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+        });
+      }
+      const config = intentConfig.getIntentConfig(this.getBaseIntent(intent));
       if (!config || !config.prompts || !config.prompts.userPromptTemplate) {
         logger.warn('User prompt template not found, using fallback', { intent });
         return this.fallbackPrompt.user;
@@ -200,7 +257,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {Array} Required field names
    */
   getRequiredData(intent) {
-    return intentConfig.getRequiredDataForIntent(intent);
+    return this.getIntentConfig(intent)?.dataRequirements.required || [];
   }
 
   /**
@@ -209,7 +266,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {Array} Optional field names
    */
   getOptionalData(intent) {
-    return intentConfig.getOptionalDataForIntent(intent);
+    return this.getIntentConfig(intent)?.dataRequirements.optional || [];
   }
 
   /**
@@ -230,7 +287,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {boolean} True if confirmation required
    */
   needsConfirmation(intent) {
-    return intentConfig.needsConfirmation(intent);
+    return this.getIntentConfig(intent)?.behavior.needsConfirmation === true;
   }
 
   /**
@@ -239,7 +296,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {Array} Tool names
    */
   getToolsForIntent(intent) {
-    return intentConfig.getToolsForIntent(intent);
+    return this.getIntentConfig(intent)?.tools || [];
   }
 
   /**
@@ -248,7 +305,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {Object} Validation rules
    */
   getValidationRules(intent) {
-    return intentConfig.getValidationRules(intent);
+    return intentConfig.getValidationRules(this.getBaseIntent(intent));
   }
 
   /**
@@ -257,7 +314,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {Object} Default values
    */
   getDefaults(intent) {
-    return intentConfig.getDefaults(intent);
+    return intentConfig.getDefaults(this.getBaseIntent(intent));
   }
 
   /**
@@ -266,7 +323,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {boolean} True if valid intent
    */
   isValidIntent(intent) {
-    return intentConfig.isValidIntent(intent);
+    return intentConfig.isValidIntent(this.getBaseIntent(intent)) || Boolean(this.getPublishedIntent(intent) && ['service_request', 'knowledge_search'].includes(this.getBaseIntent(intent)));
   }
 
   /**
@@ -321,7 +378,7 @@ Provide accurate, helpful information about banking services.`,
    * @returns {boolean} True if auth required
    */
   requiresAuth(intent) {
-    return intentConfig.requiresAuth(intent);
+    return intentConfig.requiresAuth(this.getBaseIntent(intent));
   }
 
   /**
@@ -331,6 +388,12 @@ Provide accurate, helpful information about banking services.`,
    * @returns {string|null} Confirmation message or null
    */
   getConfirmationMessage(intent, context = {}) {
+    const published = this.getPublishedIntent(intent);
+    if (published?.confirmationMessage) {
+      const allowed = new Set([...this.getRequiredData(intent), ...this.getOptionalData(intent)]);
+      const facts = Object.fromEntries(Object.entries(context).filter(([field]) => allowed.has(field)));
+      return `${published.confirmationMessage}\nAction: ${this.getBaseIntent(intent)}\nDetails: ${JSON.stringify(facts)}`;
+    }
     const behavior = this.getIntentBehavior(intent);
     if (!behavior.confirmationMessage) {
       return null;
@@ -466,6 +529,18 @@ Provide accurate, helpful information about banking services.`,
       }
     }
 
+    // Additional published field schemas cannot replace or weaken any of the
+    // canonical checks above. No executable regex/schema references allowed.
+    for (const [field, rule] of Object.entries(this.getPublishedIntent(intent)?.fieldSchemas || {})) {
+      const value = collectedData[field];
+      if (value === undefined || value === null) continue;
+      let reason = null;
+      if (typeof value !== rule.type || (rule.type === 'number' && !Number.isFinite(value))) reason = `Must be ${rule.type}`;
+      else if (Array.isArray(rule.enum) && !rule.enum.includes(value)) reason = 'Must be an approved value';
+      else if (rule.type === 'number' && ((rule.min !== undefined && value < rule.min) || (rule.max !== undefined && value > rule.max))) reason = 'Outside the configured numeric range';
+      else if (rule.type === 'string' && ((rule.minLength !== undefined && value.length < rule.minLength) || (rule.maxLength !== undefined && value.length > rule.maxLength))) reason = 'Outside the configured length range';
+      if (reason) { result.invalid.push({ field, reason }); result.valid = false; }
+    }
     logger.debug('Data validation result', { intent, result });
 
     return result;

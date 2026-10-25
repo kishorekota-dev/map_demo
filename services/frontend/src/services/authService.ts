@@ -1,8 +1,13 @@
-import axios from 'axios';
-import { getRuntimeConfig } from '@/config/runtimeConfig';
-import type { LoginRequest, LoginResponse, TokenPair, UserProfile } from '@/types';
+import axios from "axios";
+import { getRuntimeConfig } from "@/config/runtimeConfig";
+import type {
+  LoginRequest,
+  LoginResponse,
+  TokenPair,
+  UserProfile,
+} from "@/types";
 
-const STORAGE_NAMESPACE = 'enterprise-chat';
+const STORAGE_NAMESPACE = "enterprise-chat";
 
 const getStorageKey = (suffix: string): string => {
   const { tenantId } = getRuntimeConfig();
@@ -10,19 +15,22 @@ const getStorageKey = (suffix: string): string => {
 };
 
 const buildAuthUrl = (path: string): string => {
-  const baseUrl = getRuntimeConfig().authBaseUrl.replace(/\/$/, '');
+  const baseUrl = getRuntimeConfig().authBaseUrl.replace(/\/$/, "");
   return `${baseUrl}${path}`;
 };
+
+const buildIdentityUrl = (path: string): string =>
+  `${getRuntimeConfig().apiBaseUrl.replace(/\/$/, "")}/identity${path}`;
 
 class AuthService {
   private getErrorMessage(error: any, fallback: string): string {
     const responseError = error?.response?.data?.error;
 
-    if (typeof responseError === 'string') {
+    if (typeof responseError === "string") {
       return responseError;
     }
 
-    if (responseError && typeof responseError.message === 'string') {
+    if (responseError && typeof responseError.message === "string") {
       return responseError.message;
     }
 
@@ -35,32 +43,36 @@ class AuthService {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
       const response = await axios.post<LoginResponse>(
-        buildAuthUrl('/auth/login'),
+        buildAuthUrl("/auth/login"),
         credentials,
         {
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           timeout: 10000,
-        }
+        },
       );
 
       const { data } = response;
-      const payload = data.data || (data.user && data.tokens
-        ? {
-            user: data.user,
-            tokens: data.tokens,
-            roles: data.user.roles || [],
-          }
-        : null);
+      const payload =
+        data.data ||
+        (data.user && data.tokens
+          ? {
+              user: data.user,
+              tokens: data.tokens,
+              roles: data.user.roles || [],
+            }
+          : null);
 
       if (!payload?.user || !payload.tokens?.accessToken) {
-        throw new Error('Authentication service returned an incomplete login response');
+        throw new Error(
+          "Authentication service returned an incomplete login response",
+        );
       }
 
       const userId = payload.user.userId || (payload.user as any).id;
       if (!userId) {
-        throw new Error('Authentication service did not return a user ID');
+        throw new Error("Authentication service did not return a user ID");
       }
 
       // Normalize both the banking service's nested response and the supported
@@ -77,20 +89,21 @@ class AuthService {
 
       this.setTokens(payload.tokens);
       this.setUserProfile(userProfile);
+      localStorage.removeItem(getStorageKey("enterprise_session"));
 
       if (import.meta.env.DEV) {
-        console.debug('Login successful, storing user profile:', userProfile);
+        console.debug("Login successful, storing user profile:", userProfile);
       }
 
       return data;
     } catch (error: any) {
       if (import.meta.env.DEV) {
-        console.error('Login error:', error);
+        console.error("Login error:", error);
       }
       throw {
         message: this.getErrorMessage(
           error,
-          'Login failed. Please check your credentials.'
+          "Login failed. Please check your credentials.",
         ),
         status: error.response?.status || 500,
       };
@@ -100,13 +113,18 @@ class AuthService {
   /**
    * Set access token manually (for users who have a token already)
    */
-  setManualToken(accessToken: string, userProfile?: Partial<UserProfile>): void {
-    localStorage.setItem(getStorageKey('access_token'), accessToken);
-    
+  setManualToken(
+    accessToken: string,
+    userProfile?: Partial<UserProfile>,
+  ): void {
+    localStorage.removeItem(getStorageKey("enterprise_session"));
+    localStorage.removeItem(getStorageKey("refresh_token"));
+    localStorage.setItem(getStorageKey("access_token"), accessToken);
+
     if (userProfile) {
       const profile: UserProfile = {
-        userId: userProfile.userId || 'manual-user',
-        username: userProfile.username || 'Manual User',
+        userId: userProfile.userId || "manual-user",
+        username: userProfile.username || "Manual User",
         email: userProfile.email,
         firstName: userProfile.firstName,
         lastName: userProfile.lastName,
@@ -121,32 +139,74 @@ class AuthService {
    * Logout user
    */
   logout(): void {
-    localStorage.removeItem(getStorageKey('access_token'));
-    localStorage.removeItem(getStorageKey('refresh_token'));
-    localStorage.removeItem(getStorageKey('user_profile'));
+    const enterpriseSession = this.hasEnterpriseSession();
+    localStorage.removeItem(getStorageKey("access_token"));
+    localStorage.removeItem(getStorageKey("refresh_token"));
+    localStorage.removeItem(getStorageKey("user_profile"));
+    localStorage.removeItem(getStorageKey("enterprise_session"));
+    if (enterpriseSession) {
+      void fetch(buildIdentityUrl("/logout"), {
+        method: "POST",
+        credentials: "include",
+      }).catch(() => undefined);
+    }
+  }
+
+  hasEnterpriseSession(): boolean {
+    return localStorage.getItem(getStorageKey("enterprise_session")) === "true";
+  }
+
+  /** Exchange the server's HttpOnly enterprise session for its local access token. */
+  async completeEnterpriseSignIn(): Promise<UserProfile> {
+    const response = await fetch(buildIdentityUrl("/session"), {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as {
+      accessToken?: string;
+      user?: UserProfile;
+      error?: string;
+    };
+    if (
+      !response.ok ||
+      !payload.accessToken ||
+      !payload.user?.userId ||
+      !this.isTokenValid(payload.accessToken)
+    ) {
+      throw new Error(
+        typeof payload.error === "string"
+          ? payload.error
+          : "Enterprise sign-in did not return a valid account session.",
+      );
+    }
+    localStorage.removeItem(getStorageKey("refresh_token"));
+    this.setTokens({ accessToken: payload.accessToken, refreshToken: "" });
+    this.setUserProfile(payload.user);
+    localStorage.setItem(getStorageKey("enterprise_session"), "true");
+    return payload.user;
   }
 
   /**
    * Get stored access token
    */
   getAccessToken(): string | null {
-    return localStorage.getItem(getStorageKey('access_token'));
+    return localStorage.getItem(getStorageKey("access_token"));
   }
 
   /**
    * Get stored refresh token
    */
   getRefreshToken(): string | null {
-    return localStorage.getItem(getStorageKey('refresh_token'));
+    return localStorage.getItem(getStorageKey("refresh_token"));
   }
 
   /**
    * Get stored user profile
    */
   getUserProfile(): UserProfile | null {
-    const profileStr = localStorage.getItem(getStorageKey('user_profile'));
+    const profileStr = localStorage.getItem(getStorageKey("user_profile"));
     if (!profileStr) return null;
-    
+
     try {
       return JSON.parse(profileStr);
     } catch {
@@ -165,9 +225,9 @@ class AuthService {
    * Store tokens
    */
   private setTokens(tokens: TokenPair): void {
-    localStorage.setItem(getStorageKey('access_token'), tokens.accessToken);
+    localStorage.setItem(getStorageKey("access_token"), tokens.accessToken);
     if (tokens.refreshToken) {
-      localStorage.setItem(getStorageKey('refresh_token'), tokens.refreshToken);
+      localStorage.setItem(getStorageKey("refresh_token"), tokens.refreshToken);
     }
   }
 
@@ -175,46 +235,65 @@ class AuthService {
    * Store user profile
    */
   private setUserProfile(profile: UserProfile): void {
-    localStorage.setItem(getStorageKey('user_profile'), JSON.stringify(profile));
+    localStorage.setItem(
+      getStorageKey("user_profile"),
+      JSON.stringify(profile),
+    );
   }
 
   /**
    * Refresh access token using refresh token
-  * This would typically call the configured authentication service
+   * This would typically call the configured authentication service
    */
   async refreshToken(): Promise<TokenPair | null> {
     const refreshToken = this.getRefreshToken();
-    if (!refreshToken) return null;
+    if (!refreshToken) {
+      if (!this.hasEnterpriseSession()) return null;
+      try {
+        await this.completeEnterpriseSignIn();
+        return { accessToken: this.getAccessToken() || "", refreshToken: "" };
+      } catch {
+        this.logout();
+        return null;
+      }
+    }
 
     try {
       const response = await axios.post<{
-        data: { tokens?: TokenPair; accessToken?: string; expiresIn?: number | string }
+        data: {
+          tokens?: TokenPair;
+          accessToken?: string;
+          expiresIn?: number | string;
+        };
       }>(
-        buildAuthUrl('/auth/refresh'),
+        buildAuthUrl("/auth/refresh"),
         { refreshToken },
         {
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           timeout: 10000,
-        }
+        },
       );
 
       const payload = response.data.data;
       const tokens: TokenPair = payload.tokens || {
-        accessToken: payload.accessToken || '',
+        accessToken: payload.accessToken || "",
         refreshToken,
-        expiresIn: typeof payload.expiresIn === 'number' ? payload.expiresIn : undefined,
+        expiresIn:
+          typeof payload.expiresIn === "number" ? payload.expiresIn : undefined,
       };
 
       if (!tokens.accessToken) {
-        throw new Error('Authentication service did not return an access token');
+        throw new Error(
+          "Authentication service did not return an access token",
+        );
       }
 
       this.setTokens(tokens);
       return tokens;
     } catch (error) {
-      console.error('Token refresh error:', error);
+      console.error("Token refresh error:", error);
       this.logout();
       return null;
     }
@@ -229,15 +308,18 @@ class AuthService {
 
     try {
       // Decode JWT (basic check without verification)
-      const segment = token.split('.')[1];
+      const segment = token.split(".")[1];
       if (!segment) return false;
 
-      const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      const normalized = segment.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = normalized.padEnd(
+        Math.ceil(normalized.length / 4) * 4,
+        "=",
+      );
       const payload = JSON.parse(atob(padded));
 
       // Tokens without an expiry are not accepted by the protected UI.
-      return typeof payload.exp === 'number' && Date.now() < payload.exp * 1000;
+      return typeof payload.exp === "number" && Date.now() < payload.exp * 1000;
     } catch {
       return false;
     }

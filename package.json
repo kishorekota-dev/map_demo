@@ -58,6 +58,7 @@
     "//-- PRODUCTIZATION --//": "",
     "product:generate": "node deployment-scripts/generate-enterprise-assets.mjs",
     "product:validate": "node deployment-scripts/generate-enterprise-assets.mjs --validate-only",
+    "llm:probe": "./scripts/run-with-env.sh node deployment-scripts/probe-llm.cjs",
 
     "//-- UTILITIES --//": "",
     "lint": "npm run lint --workspaces --if-present",

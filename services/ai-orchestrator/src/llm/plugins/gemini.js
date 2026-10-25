@@ -1,0 +1,25 @@
+const { usage } = require('../contract');
+module.exports = {
+  async generate(provider, input, client) {
+    const system = input.messages.filter(message => message.role === 'system').map(message => message.content).join('\n\n');
+    const contents = input.messages.filter(message => message.role !== 'system').map(message => ({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] }));
+    const model = input.model.replace(/^models\//, '');
+    const path = provider.type === 'vertex_gemini'
+      ? `/v1/projects/${encodeURIComponent(provider.project)}/locations/${encodeURIComponent(provider.location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`
+      : `/models/${encodeURIComponent(model)}:generateContent`;
+    const data = await client.request(path, { ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}), contents,
+      generationConfig: { ...(provider.supportsTemperature ? { temperature: input.temperature } : {}), maxOutputTokens: input.maxOutputTokens, candidateCount: 1,
+        ...(input.format === 'json' ? { responseMimeType: 'application/json' } : {}) } });
+    const candidate = data.candidates?.[0];
+    if (data.promptFeedback?.blockReason || (candidate?.finishReason && candidate.finishReason !== 'STOP')
+      || candidate?.content?.parts?.some(part => part.functionCall)) client.invalidResponse();
+    return { text: (candidate?.content?.parts || []).filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join(''),
+      usage: usage(data.usageMetadata?.promptTokenCount, data.usageMetadata?.candidatesTokenCount, data.usageMetadata?.totalTokenCount), finishReason: candidate?.finishReason || null };
+  },
+  async models(provider, client) {
+    if (provider.type === 'vertex_gemini') return (provider.allowedModels || []).map(id => ({ id, name: id }));
+    const data = await client.request('/models');
+    return (Array.isArray(data.models) ? data.models : []).filter(model => !model.supportedGenerationMethods || model.supportedGenerationMethods.includes('generateContent'))
+      .map(model => ({ id: String(model.name || '').replace(/^models\//, ''), name: model.displayName || model.name }));
+  }
+};

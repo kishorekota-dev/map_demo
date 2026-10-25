@@ -7,6 +7,7 @@ const { getCheckpointer } = require('../utils/checkpointer');
 const intentMapper = require('../services/intentMapper');
 const slmDataExtractor = require('../services/poc-slm-data-extractor');
 const { formatDeterministicResponse } = require('../services/deterministicResponseFormatter');
+const { isLlmError, modelUnavailable } = require('../llm/errors');
 
 /**
  * Banking Chat Workflow using LangGraph
@@ -53,6 +54,9 @@ class BankingChatWorkflow {
       sessionId: null,
       userId: null,
       authToken: null,
+      interactionId: null,
+      tenantId: null,
+      runtimeContext: null,
       intent: null,
       question: null,
       conversationHistory: [],
@@ -69,6 +73,7 @@ class BankingChatWorkflow {
       policyDecision: null,
       policyTrace: [],
       confirmationGranted: false,
+      telemetryUnavailable: false,
       finalResponse: null,
       error: null
     };
@@ -106,7 +111,9 @@ class BankingChatWorkflow {
       {
         'need_input': 'request_human_input',
         'execute': 'execute_tools',
-        'generate': 'generate_response'
+        'generate': 'generate_response',
+        'policy': 'handle_policy',
+        'error': 'handle_error'
       }
     );
 
@@ -194,7 +201,7 @@ class BankingChatWorkflow {
 
       // Try SLM-based extraction before prompting the human
       let slmResult = null;
-      if (this.slm.isEnabled()) {
+      if (this.slm.isEnabled() && (state.requiredData?.length || intentMapper.getOptionalData(state.intent).length)) {
         slmResult = await this.slm.extractAndValidate({
           intent: state.intent,
           conversationHistory: state.conversationHistory || session?.conversationHistory || [],
@@ -271,6 +278,7 @@ class BankingChatWorkflow {
         sessionId: state.sessionId,
         error: error.message
       });
+      if (isLlmError(error)) return { ...state, currentStep: 'model_extraction', policyDecision: { action: 'block' }, finalResponse: modelUnavailable(error) };
       return { ...state, error: error.message };
     }
   }
@@ -294,7 +302,7 @@ class BankingChatWorkflow {
           .map(issue => issue.field || issue)
           .filter(Boolean)
       ])];
-      let question = 'To help you with this request, I need some information:';
+      let question = intentMapper.getPublishedPrompt('dataCollectionText') || 'To help you with this request, I need some information:';
 
       if (missingFields.length > 0) {
         missingFields.forEach(field => {
@@ -313,6 +321,7 @@ class BankingChatWorkflow {
       }
 
       question += '\n\nPlease provide this information so I can continue.';
+      if (requiredFields.length > 1) question += ' Use one field: value per line.';
 
       // Update session to waiting state
       await this.sessionManager.updateSession(state.sessionId, {
@@ -448,6 +457,10 @@ class BankingChatWorkflow {
             success: result.success !== false
           });
         } catch (error) {
+          if (error.code === 'RECONCILIATION_REQUIRED') {
+            return { ...state, pendingTools: tools, policyDecision: { action: 'block' }, currentStep: 'reconciliation_required',
+              finalResponse: { type: 'reconciliation_required', operationId: error.operationId, message: error.message } };
+          }
           logger.error('Tool execution failed', {
             sessionId: state.sessionId,
             tool,
@@ -458,19 +471,17 @@ class BankingChatWorkflow {
         }
       }
 
-      // Update session with tool results
-      await this.sessionManager.updateWorkflowState(
-        state.sessionId,
-        'execute_tools',
-        {
-          toolResults,
-          policy: policyDecision.audit
-        }
-      );
+      // The execution ledger has already acknowledged mutation outcomes.
+      // An ancillary session write cannot turn that success into a retry.
+      let telemetryUnavailable = state.telemetryUnavailable === true;
+      try {
+        await this.sessionManager.updateWorkflowState(state.sessionId, 'execute_tools', { toolResults, policy: policyDecision.audit });
+      } catch (_error) { telemetryUnavailable = true; }
 
       return {
         ...state,
         toolResults,
+        telemetryUnavailable,
         pendingTools: tools,
         policyTrace,
         policyDecision: null,
@@ -499,6 +510,13 @@ class BankingChatWorkflow {
     });
 
     try {
+      if (['service_request', 'knowledge_search'].includes(intentMapper.getBaseIntent(state.intent))) {
+        if (!this.genericHandler) throw new Error('Generic servicing handler unavailable');
+        const finalResponse = await this.genericHandler(state);
+        try { await this.sessionManager.addMessage(state.sessionId, 'assistant', finalResponse.response, { intent: state.intent, citations: finalResponse.citations || [], caseId: finalResponse.caseId }); }
+        catch (_error) { finalResponse.telemetryUnavailable = true; }
+        return { ...state, finalResponse, currentStep: 'generate_response' };
+      }
       // Build context from collected data and tool results
       // Include userId for authenticated context
       const sanitizedToolResults = this.policyEngine.sanitizeStructuredData(state.toolResults);
@@ -517,7 +535,8 @@ class BankingChatWorkflow {
       // Tool-backed banking responses must be grounded exclusively in the raw
       // tool result. Remote generation is reserved for intents with no tool
       // path, where there is no authoritative banking payload to contradict.
-      if (!isToolBacked && config.openai.enabled) {
+      const governedLlm = intentMapper.getLlmConfig();
+      if (!isToolBacked && (governedLlm === undefined ? config.openai.enabled : governedLlm.enabled)) {
         const systemMessage = new SystemMessage(intentMapper.buildSystemMessage(state.intent));
         const userMessage = new HumanMessage(intentMapper.buildUserMessage(state.intent, context));
         const messages = [systemMessage];
@@ -533,10 +552,19 @@ class BankingChatWorkflow {
         messages.push(userMessage);
 
         try {
-          const response = await this.llm.invoke(messages);
-          generatedResponse = response.content;
-          generationSource = 'openai';
+          if (governedLlm !== undefined) {
+            const response = await intentMapper.generateForTask('generation', state.intent, {
+              messages: messages.map(message => ({ role: message._getType() === 'system' ? 'system' : message._getType() === 'ai' ? 'assistant' : 'user', content: message.content })), format: 'text' });
+            generatedResponse = response.text;
+            generationSource = `llm:${response.providerId}:${response.model}`;
+          } else {
+            const response = await this.llm.invoke(messages);
+            await intentMapper.recordProviderUsage(response, 'openai', 'generation');
+            generatedResponse = response.content;
+            generationSource = 'openai';
+          }
         } catch (error) {
+          if (governedLlm !== undefined) throw error;
           logger.warn('LLM response generation failed; using deterministic formatter', {
             sessionId: state.sessionId,
             error: error.message
@@ -546,7 +574,7 @@ class BankingChatWorkflow {
 
       if (!generatedResponse) {
         generatedResponse = formatDeterministicResponse({
-          intent: state.intent,
+          intent: intentMapper.getBaseIntent(state.intent),
           question: state.question,
           collectedData: state.collectedData,
           // The formatter reveals only deliberately selected fields (for
@@ -569,25 +597,13 @@ class BankingChatWorkflow {
         ? responsePolicy.message
         : responsePolicy.response;
 
-      await this.sessionManager.updateWorkflowState(
-        state.sessionId,
-        'generate_response',
-        {
-          policy: responsePolicy.audit
-        }
-      );
-
-      // Save response to session
-      await this.sessionManager.addMessage(
-        state.sessionId,
-        'assistant',
-        finalResponse,
-        {
-          intent: state.intent,
-          toolResults: sanitizedToolResults,
-          policy: responsePolicy.audit
-        }
-      );
+      let telemetryUnavailable = state.telemetryUnavailable === true || Object.values(state.toolResults || {}).some(result => result?.telemetryUnavailable === true);
+      try {
+        await this.sessionManager.updateWorkflowState(state.sessionId, 'generate_response', { policy: responsePolicy.audit });
+        await this.sessionManager.addMessage(state.sessionId, 'assistant', finalResponse, {
+          intent: state.intent, toolResults: sanitizedToolResults, policy: responsePolicy.audit
+        });
+      } catch (_error) { telemetryUnavailable = true; }
 
       logger.info('Response generated', {
         sessionId: state.sessionId,
@@ -604,7 +620,9 @@ class BankingChatWorkflow {
           response: finalResponse,
           intent: state.intent,
           policy: responsePolicy.audit,
-          generationSource
+          generationSource,
+          telemetryUnavailable,
+          evidenceIds: Object.values(state.toolResults || {}).map(result => result?.evidenceId).filter(Boolean)
         },
         currentStep: 'generate_response'
       };
@@ -613,6 +631,7 @@ class BankingChatWorkflow {
         sessionId: state.sessionId,
         error: error.message
       });
+      if (isLlmError(error)) return { ...state, currentStep: 'model_generation', finalResponse: modelUnavailable(error) };
       return { ...state, error: error.message };
     }
   }
@@ -720,6 +739,8 @@ class BankingChatWorkflow {
    * Routing: After Data Check
    */
   routeAfterDataCheck(state) {
+    if (state.policyDecision?.action === 'block') return 'policy';
+    if (state.error) return 'error';
     if (state.validationResult?.invalid?.length > 0) {
       return 'need_input';
     }
@@ -729,7 +750,7 @@ class BankingChatWorkflow {
     }
     
     const tools = this.getToolsForState(state);
-    if (tools.length > 0) {
+    if (tools.length > 0 || (intentMapper.needsConfirmation(state.intent) && state.confirmationGranted !== true)) {
       return 'execute';
     }
     
@@ -764,10 +785,10 @@ class BankingChatWorkflow {
 
     // Normalize the small vocabulary differences between intent fields and
     // the canonical MCP argument contract at this boundary.
-    if (state.intent === 'report_fraud' && !params.alertType && params.fraudType) {
+    if (intentMapper.getBaseIntent(state.intent) === 'report_fraud' && !params.alertType && params.fraudType) {
       params.alertType = params.fraudType;
     }
-    if (state.intent === 'verify_transaction' && !params.notes && params.additionalInfo) {
+    if (intentMapper.getBaseIntent(state.intent) === 'verify_transaction' && !params.notes && params.additionalInfo) {
       params.notes = params.additionalInfo;
     }
 
@@ -775,6 +796,11 @@ class BankingChatWorkflow {
     // (Authorization: Bearer <jwt>); without it every call 401s. Propagate the
     // session JWT and userId so tool execution is correct and reproducible.
     params.sessionId = state.sessionId;
+    if (state.interactionId) params.interactionId = state.interactionId;
+    if (state.tenantId) params.tenantId = state.tenantId;
+    params.runtimeContext = { ...state.runtimeContext, intent: state.intent,
+      confirmationRequired: intentMapper.needsConfirmation(state.intent) || Boolean(this.policyEngine.hasSensitiveTool?.([tool])),
+      confirmationVerified: state.confirmationGranted === true };
     if (state.userId) {
       params.userId = state.userId;
     }
@@ -792,7 +818,7 @@ class BankingChatWorkflow {
   getRequiredDataForState(intent, collectedData = {}) {
     const required = [...intentMapper.getRequiredData(intent)];
 
-    if (intent === 'card_management') {
+    if (intentMapper.getBaseIntent(intent) === 'card_management') {
       const action = String(collectedData.cardAction || '').toLowerCase();
       if (['block', 'unblock', 'replace'].includes(action)) {
         required.push('cardId');
@@ -809,7 +835,7 @@ class BankingChatWorkflow {
    * Enforce the narrower reason enums of the selected card MCP operation.
    */
   getValidationIssuesForState(intent, collectedData = {}) {
-    if (intent !== 'card_management' || !collectedData.reason) {
+    if (intentMapper.getBaseIntent(intent) !== 'card_management' || !collectedData.reason) {
       return [];
     }
 
@@ -835,9 +861,21 @@ class BankingChatWorkflow {
    * method prevents blindly executing every related tool.
    */
   getToolsForState(state) {
+    const tools = this.resolveToolsForState(state);
+    const published = intentMapper.getPublishedIntent(state.intent);
+    if (published && intentMapper.getBaseIntent(state.intent) === 'verify_transaction' && !published.tools.includes('banking_verify_transaction')) {
+      throw new Error('This action is disabled by the published servicing configuration');
+    }
+    if (published && tools.some(tool => !intentMapper.getToolsForIntent(state.intent).includes(tool))) {
+      throw new Error('This action is disabled by the published servicing configuration');
+    }
+    return tools;
+  }
+
+  resolveToolsForState(state) {
     const data = state.collectedData || {};
 
-    switch (state.intent) {
+    switch (intentMapper.getBaseIntent(state.intent)) {
       case 'balance_inquiry':
         return data.accountId ? ['banking_get_balance'] : ['banking_get_accounts'];
       case 'account_info':

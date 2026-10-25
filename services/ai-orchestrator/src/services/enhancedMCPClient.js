@@ -110,7 +110,7 @@ class EnhancedMCPClient {
         });
         
         // Fall through to HTTP fallback if enabled
-        if (!this.enableFallback) {
+        if (!this.enableFallback || !/^banking_get_/.test(toolName)) {
           throw error;
         }
       }

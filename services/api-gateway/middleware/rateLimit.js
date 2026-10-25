@@ -5,16 +5,21 @@ const logger = require('../utils/logger');
 
 // Create Redis client if Redis URL is provided
 let redisClient;
-let redisConnection;
 let redisConnectionError;
 if (process.env.REDIS_URL) {
   try {
     redisClient = redis.createClient({
       url: process.env.REDIS_URL,
-      legacyMode: false
+      legacyMode: false,
+      socket: { connectTimeout: 5000 }
+    });
+    // Redis emits connection errors independently of its connect() promise.
+    // Consume those events and let request middleware report store unavailability.
+    redisClient.on('error', () => {
+      redisConnectionError = new Error('Rate limiter Redis connection unavailable');
     });
     
-    redisConnection = redisClient.connect().then(() => true).catch((error) => {
+    redisClient.connect().catch((error) => {
       redisConnectionError = error;
       logger.error('Redis connection failed for rate limiting', { error: error.message });
       return false;
@@ -29,18 +34,23 @@ if (process.env.REDIS_URL) {
   logger.info('Rate limiting using in-memory store');
 }
 
-const createRedisStore = (prefix) => redisClient
-  ? new RedisStore({
+const createRedisStore = (prefix) => {
+  if (!redisClient) return undefined;
+  const store = new RedisStore({
       sendCommand: async (...args) => {
-        const connected = await redisConnection;
-        if (!connected) {
+        if (!redisClient.isReady) {
           throw redisConnectionError || new Error('Rate limiter Redis connection unavailable');
         }
         return redisClient.sendCommand(args);
       },
       prefix
-    })
-  : undefined;
+    });
+  // This library eagerly loads scripts in its constructor. Attach rejection
+  // handlers immediately; its increment implementation reloads after recovery.
+  store.incrementScriptSha.catch(() => {});
+  store.getScriptSha.catch(() => {});
+  return store;
+};
 
 /**
  * Standard rate limiter for API requests
@@ -55,7 +65,7 @@ const standardLimiter = rateLimit({
   },
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false, // Disable `X-RateLimit-*` headers
-  passOnStoreError: true,
+  passOnStoreError: process.env.NODE_ENV !== 'production',
   skip: (req) => {
     // Skip rate limiting for health checks
     return req.path === '/health' || req.path === '/health/live';
@@ -88,7 +98,7 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Only 5 attempts per window
   skipSuccessfulRequests: true, // Don't count successful requests
-  passOnStoreError: true,
+  passOnStoreError: process.env.NODE_ENV !== 'production',
   message: {
     error: 'Too many authentication attempts',
     message: 'Too many failed login attempts. Please try again later.',
@@ -126,7 +136,7 @@ const publicLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  passOnStoreError: true,
+  passOnStoreError: process.env.NODE_ENV !== 'production',
   ...(redisClient ? {
     store: createRedisStore('rl:public:')
   } : {})
@@ -139,7 +149,7 @@ const createUserLimiter = (windowMs = 60000, max = 100) => {
   return rateLimit({
     windowMs,
     max,
-    passOnStoreError: true,
+    passOnStoreError: process.env.NODE_ENV !== 'production',
     keyGenerator: (req) => {
       // Use user ID if available, otherwise fall back to IP
       return req.userId || req.user?.userId || req.ip;
@@ -175,7 +185,8 @@ const createUserLimiter = (windowMs = 60000, max = 100) => {
  */
 const cleanup = async () => {
   if (redisClient?.isOpen) {
-    await redisClient.quit();
+    if (redisClient.isReady) await redisClient.quit();
+    else await redisClient.disconnect();
     logger.info('Rate limiter Redis connection closed');
   }
 };

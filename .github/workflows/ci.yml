@@ -54,3 +54,48 @@ jobs:
       - name: Run tests
         working-directory: services/frontend
         run: npx vitest run --passWithNoTests
+      - name: Build and typecheck
+        working-directory: services/frontend
+        run: npm run build
+
+  control-plane-postgres:
+    name: servicing PostgreSQL reliability
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: control_plane_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: control-plane-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d control_plane_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install gateway dependencies
+        working-directory: services/api-gateway
+        run: npm ci --workspaces=false --no-audit --no-fund
+      - name: Verify persistent configuration and replica isolation
+        working-directory: services/api-gateway
+        env:
+          TEST_CONTROL_PLANE_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
+          TEST_OPERATIONS_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
+        run: npx jest --ci --runInBand control-plane/__tests__ operations/__tests__
+      - name: Install runtime dependencies
+        run: |
+          npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund
+          npm ci --prefix services/chat-backend --workspaces=false --no-audit --no-fund
+      - name: Verify distributed runtime and channel recovery
+        env:
+          RUNTIME_TEST_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
+        run: |
+          npm test --prefix services/ai-orchestrator -- --ci --runInBand
+          npm test --prefix services/chat-backend -- --ci --runInBand

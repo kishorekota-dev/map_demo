@@ -86,6 +86,26 @@ const validateProfile = (profile) => {
 
 const buildEnvFile = (profile) => `# Generated enterprise deployment profile for ${profile.organizationName}
 ORG_SLUG=${profile.tenantId}
+DEPLOYMENT_TENANT_ID=${profile.tenantId}
+CONTROL_PLANE_ENABLED=true
+CONTROL_PLANE_URL=${profile.services.apiBaseUrl.replace(/\/$/, '')}/control-plane
+# Set CONTROL_PLANE_DATABASE_URL to a PostgreSQL connection string in your secret manager.
+# Alternatively configure CONTROL_PLANE_DATA_FILE plus CONTROL_PLANE_SINGLE_WRITER=true.
+OPERATIONS_URL=${profile.services.apiBaseUrl.replace(/\/$/, '')}/operations
+FULFILLMENT_WORKER_ENABLED=true
+WORKFLOW_DURABLE_EXECUTION=true
+HANDOFF_STORAGE=postgres
+# Operations require PostgreSQL even when development configuration uses a file.
+# Set OPERATIONS_DATABASE_URL (or CONTROL_PLANE_DATABASE_URL), SERVICING_SERVICE_TOKEN,
+# connector secret references and all OIDC endpoints through your secret manager.
+CONTROL_PLANE_ENVIRONMENT=production
+AGENT_RESPONSE_TIMEOUT=400000
+SERVICING_REQUEST_TIMEOUT_MS=410000
+# Model provider registry is server-owned; see docs/guides/llm-providers.md.
+# Mount a deployment-specific file and set its absolute container/runtime path.
+# LLM_PROVIDERS_FILE=/run/config/llm-providers.json
+# LLM_OLLAMA_BASE_URL=http://mac-studio.local:11434
+# Set explicitly referenced API credentials through your secret manager.
 ORG_NAME=${profile.organizationName}
 PRODUCT_DISPLAY_NAME=${profile.productName}
 PRODUCT_TAGLINE=${profile.tagline}
@@ -103,6 +123,7 @@ NLU_SERVICE_URL=${profile.services.nluServiceUrl}
 MCP_SERVICE_URL=${profile.services.mcpServiceUrl}
 AI_ORCHESTRATOR_URL=${profile.services.aiOrchestratorUrl}
 OIDC_ISSUER_URL=${profile.identity.issuerUrl || ''}
+OIDC_ISSUER=${profile.identity.issuerUrl || ''}
 OIDC_AUDIENCE=${profile.identity.audience || ''}
 ALLOW_TOKEN_AUTH=${profile.features.allowTokenAuth ? 'true' : 'false'}
 `;
@@ -114,6 +135,7 @@ const buildRuntimeConfig = (profile) => ({
   supportEmail: profile.supportEmail,
   apiBaseUrl: profile.services.apiBaseUrl,
   authBaseUrl: profile.services.authBaseUrl,
+  chatRequestTimeoutMs: 420000,
   features: {
     allowTokenAuth: Boolean(profile.features.allowTokenAuth),
   },
@@ -141,7 +163,8 @@ const buildSummary = (profile, outputDir) => `# Enterprise Productization Output
 2. Mount frontend-runtime-config.json as /runtime-config.json in the frontend container or static hosting root.
 3. Replace placeholder endpoints with enterprise ingress and internal service addresses.
 4. Integrate the configured identity provider before enabling external users.
-5. Validate the deployment with npm run validate and your smoke tests.
+5. Configure CONTROL_PLANE_DATABASE_URL, run banking migrations for operator roles, and sign in again to obtain signed role claims.
+6. Validate the profile with npm run product:validate and run deployment smoke tests, then review /control-plane before publishing servicing changes.
 `;
 
 const main = async () => {

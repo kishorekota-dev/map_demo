@@ -11,13 +11,18 @@ const winston = require('winston');
 // exports rather than treating the module export as a function.
 const { authMiddleware } = require('./middleware/auth');
 const rateLimitMiddleware = require('./middleware/rateLimit');
-const { createServiceProxy } = require('./middleware/proxy');
+const { createServiceProxy, getServicingRequestTimeoutMs } = require('./middleware/proxy');
 const { errorHandler } = require('./middleware/error');
 const securityMiddleware = require('./middleware/security');
 
 // Import routes
 const healthRoutes = require('./routes/health');
 const metricsRoutes = require('./routes/metrics');
+const { createControlPlaneRouter } = require('./control-plane');
+const { ControlPlaneStore } = require('./control-plane/store');
+const { PostgresControlPlaneStore } = require('./control-plane/postgres-store');
+const { createOperationsRouter } = require('./operations');
+const { createIdentityRouter } = require('./identity');
 
 // Import services. These modules export factory singletons via getInstance(),
 // so instantiate them here. Constructing the registry kicks off health checks;
@@ -73,19 +78,24 @@ app.use(cors({
     'Authorization',
     'X-Requested-With',
     'X-Session-ID',
+    'X-Interaction-ID',
     'X-Request-ID'
   ]
 }));
 
 app.use(compression());
 
-app.use(morgan('combined', {
+// Authorization codes, state, and search terms must never enter access logs.
+morgan.token('safe-path', (req) => req.originalUrl.split('?')[0]);
+app.use(morgan(':remote-addr :method :safe-path :status :res[content-length] :response-time ms', {
   stream: {
     write: (message) => logger.info(message.trim())
   }
 }));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => {
+  if (req.originalUrl.startsWith('/api/operations/webhooks/')) req.rawBody = Buffer.from(buffer);
+} }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Attach a correlation ID and start time before any proxied request. The proxy
@@ -121,7 +131,10 @@ app.get('/api', (req, res) => {
       nlp: '/api/nlp/*',
       nlu: '/api/nlu/*',
       mcp: '/api/mcp/*',
-      orchestrator: '/api/orchestrator/*'
+      orchestrator: '/api/orchestrator/*',
+      controlPlane: '/api/control-plane/*',
+      operations: '/api/operations/*',
+      identity: '/api/identity/*'
     },
     authentication: 'JWT Bearer Token required for protected endpoints',
     documentation: '/api/docs',
@@ -132,6 +145,16 @@ app.get('/api', (req, res) => {
 
 // Service-specific routing with authentication and load balancing
 
+// The control plane owns its stricter operator/tenant authentication. Published
+// runtime configuration is read through the same verified identity boundary.
+const controlPlaneStore = process.env.CONTROL_PLANE_DATABASE_URL
+  ? new PostgresControlPlaneStore() : new ControlPlaneStore();
+const controlPlaneRouter = createControlPlaneRouter({ store: controlPlaneStore });
+app.use('/api/control-plane', controlPlaneRouter);
+const operationsRouter = createOperationsRouter({ configStore: controlPlaneStore });
+app.use('/api/operations', operationsRouter);
+app.use('/api/identity', rateLimitMiddleware.authLimiter, createIdentityRouter({ store: operationsRouter.store }));
+
 // Chat Backend compatibility routes used by the frontend.
 // Service names below match the registry's standardized names (chat-backend,
 // banking, nlp, nlu, mcp, ai-orchestrator) so routes resolve correctly.
@@ -140,6 +163,7 @@ app.use('/api/chat',
   createServiceProxy({
     serviceName: 'chat-backend',
     pathRewrite: { '^/api/chat': '/api/chat' },
+    timeout: getServicingRequestTimeoutMs(),
     changeOrigin: true
   })
 );
@@ -217,7 +241,8 @@ app.use('/api/orchestrator',
   authMiddleware,
   createServiceProxy({
     serviceName: 'ai-orchestrator',
-    pathRewrite: { '^/api/orchestrator': '/api' },
+    pathRewrite: { '^/api/orchestrator': '/api/orchestrator' },
+    timeout: getServicingRequestTimeoutMs(),
     changeOrigin: true
   })
 );
@@ -266,7 +291,10 @@ app.use('*', (req, res) => {
       nlp: '/api/nlp',
       nlu: '/api/nlu',
       mcp: '/api/mcp',
-      orchestrator: '/api/orchestrator'
+      orchestrator: '/api/orchestrator',
+      controlPlane: '/api/control-plane',
+      operations: '/api/operations',
+      identity: '/api/identity'
     }
   });
 });
@@ -294,10 +322,13 @@ function initializeServices() {
 const gracefulShutdown = (signal) => {
   logger.info(`${signal} received, shutting down API Gateway gracefully`);
 
-  server.close(() => {
+  server.close(async () => {
     try {
       serviceRegistry.cleanup();
       loadBalancer.resetStatistics();
+      await controlPlaneRouter.close();
+      await operationsRouter.close();
+      await rateLimitMiddleware.cleanup();
       logger.info('API Gateway shutdown complete');
       process.exit(0);
     } catch (error) {

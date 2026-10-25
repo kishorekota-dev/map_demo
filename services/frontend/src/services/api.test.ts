@@ -6,6 +6,8 @@ const clientMocks = vi.hoisted(() => ({
   delete: vi.fn(),
 }));
 
+const runtime = vi.hoisted(() => ({ apiBaseUrl: 'http://localhost:3001/api', chatRequestTimeoutMs: 420000 }));
+
 vi.mock('axios', () => ({
   default: {
     create: vi.fn(() => ({
@@ -22,9 +24,7 @@ vi.mock('axios', () => ({
 }));
 
 vi.mock('@/config/runtimeConfig', () => ({
-  getRuntimeConfig: () => ({
-    apiBaseUrl: 'http://localhost:3001/api',
-  }),
+  getRuntimeConfig: () => runtime,
 }));
 
 vi.mock('@/services/authService', () => ({
@@ -37,10 +37,23 @@ vi.mock('@/services/authService', () => ({
 }));
 
 import apiService from './api';
+import axios from 'axios';
 
 describe('apiService NLU contract', () => {
   beforeEach(() => {
     clientMocks.post.mockReset();
+    runtime.chatRequestTimeoutMs = 420000;
+  });
+
+  test('allows the configured multi-stage chat budget while ordinary API calls keep their 30-second timeout', async () => {
+    runtime.chatRequestTimeoutMs = 480000;
+    apiService.setSessionId('canonical-session');
+    clientMocks.post.mockResolvedValue({ data: { message: 'Ready', conversation: { sessionId: 'canonical-session' } } });
+    await apiService.sendMessage('help with servicing');
+    expect(clientMocks.post).toHaveBeenCalledWith('/chat/message', {
+      message: 'help with servicing', context: {}, sessionId: 'canonical-session',
+    }, { timeout: 480000 });
+    expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({ timeout: 30000 }));
   });
 
   test('sends the NLU analyze endpoint its required user_input field', async () => {

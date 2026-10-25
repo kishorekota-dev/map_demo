@@ -227,7 +227,7 @@ class ApiService {
       message,
       context: context || {},
       sessionId,
-    });
+    }, { timeout: getRuntimeConfig().chatRequestTimeoutMs });
     const payload = unwrapPayload(response.data);
 
     if (typeof payload?.message === 'string' && payload?.conversation) {

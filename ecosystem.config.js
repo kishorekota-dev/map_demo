@@ -8,16 +8,21 @@ module.exports = {
       name: 'api-gateway',
       cwd: './services/api-gateway',
       script: 'server.js',
-      instances: 2,
-      exec_mode: 'cluster',
+      // The durable control-plane file store requires exactly one writer.
+      instances: 1,
+      exec_mode: 'fork',
       watch: false,
       env: {
         NODE_ENV: 'development',
-        PORT: 3001
+        PORT: 3001,
+        CONTROL_PLANE_SINGLE_WRITER: 'true',
+        CONTROL_PLANE_DATA_FILE: require('path').join(__dirname, 'services/api-gateway/data/control-plane.json')
       },
       env_production: {
         NODE_ENV: 'production',
-        PORT: 3001
+        PORT: 3001,
+        CONTROL_PLANE_SINGLE_WRITER: 'true',
+        CONTROL_PLANE_DATA_FILE: require('path').join(__dirname, 'services/api-gateway/data/control-plane.json')
       }
     },
 

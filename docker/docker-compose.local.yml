@@ -37,6 +37,7 @@ services:
     build:
       context: ../services/banking-service
     environment:
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
       NODE_ENV: development
       PORT: 3005
       DB_HOST: postgres
@@ -118,6 +119,23 @@ services:
     build:
       context: ../services/ai-orchestrator
     environment:
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
+      CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
+      CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
+      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
+      OPERATIONS_URL: http://api-gateway:3001/api/operations
+      WORKFLOW_DURABLE_EXECUTION: "true"
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:-}
+      WORKFLOW_SCHEMA_AUTO_MIGRATE: "${WORKFLOW_SCHEMA_AUTO_MIGRATE:-true}"
+      LLM_PROVIDERS_FILE: ${LLM_PROVIDERS_FILE-config/llm-providers.example.json}
+      LLM_PROVIDERS_JSON: ${LLM_PROVIDERS_JSON:-}
+      LLM_OLLAMA_BASE_URL: ${LLM_OLLAMA_BASE_URL:-http://mac-studio.local:11434}
+      LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:-}
+      LLM_GEMINI_API_KEY: ${LLM_GEMINI_API_KEY:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      RECOGNITION_PROVIDER_URL: ${RECOGNITION_PROVIDER_URL:-}
+      RECOGNITION_PROVIDER_TOKEN: ${RECOGNITION_PROVIDER_TOKEN:-}
+      CONTROL_PLANE_ENVIRONMENT: ${CONTROL_PLANE_ENVIRONMENT:-development}
       NODE_ENV: development
       PORT: 3007
       DB_HOST: postgres
@@ -157,6 +175,13 @@ services:
     build:
       context: ../services/chat-backend
     environment:
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
+      CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
+      CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
+      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
+      HANDOFF_STORAGE: postgres
+      HANDOFF_DATABASE_URL: ${HANDOFF_DATABASE_URL:-}
+      HANDOFF_SCHEMA_AUTO_MIGRATE: "${HANDOFF_SCHEMA_AUTO_MIGRATE:-true}"
       NODE_ENV: development
       PORT: 3006
       JWT_SECRET: dev-jwt-secret-change-in-production
@@ -176,6 +201,7 @@ services:
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:3006,http://localhost:8081
       REDIS_URL: redis://redis:6379
       AGENT_FALLBACK_ENABLED: "true"
+      AGENT_RESPONSE_TIMEOUT: ${AGENT_RESPONSE_TIMEOUT:-400000}
     ports:
       - "3006:3006"
     depends_on:
@@ -203,6 +229,30 @@ services:
     build:
       context: ../services/api-gateway
     environment:
+      DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:-default-enterprise}
+      CONTROL_PLANE_ENABLED: "${CONTROL_PLANE_ENABLED:-true}"
+      CONTROL_PLANE_URL: http://api-gateway:3001/api/control-plane
+      SERVICING_SERVICE_TOKEN: "${SERVICING_SERVICE_TOKEN:-local-servicing-service-token-change-me}"
+      OPERATIONS_DATABASE_URL: ${OPERATIONS_DATABASE_URL:-postgresql://poc_user:poc_password@postgres:5432/poc_banking}
+      OPERATIONS_MANAGE_SCHEMA: "${OPERATIONS_MANAGE_SCHEMA:-true}"
+      CONTROL_PLANE_MANAGE_SCHEMA: "${CONTROL_PLANE_MANAGE_SCHEMA:-true}"
+      AUDIT_SIGNING_KEY_FILE: ${AUDIT_SIGNING_KEY_FILE:-}
+      AUDIT_ACTOR_HASH_KEY: ${AUDIT_ACTOR_HASH_KEY:-}
+      OPERATIONS_RETENTION_DAYS: ${OPERATIONS_RETENTION_DAYS:-90}
+      FULFILLMENT_WORKER_ENABLED: "true"
+      CONNECTOR_ALLOWED_HOSTS: ${CONNECTOR_ALLOWED_HOSTS:-}
+      CONNECTOR_PRIVATE_HOSTS: ${CONNECTOR_PRIVATE_HOSTS:-}
+      CONNECTOR_SECRET_ROOT: ${CONNECTOR_SECRET_ROOT:-}
+      CASE_CONNECTOR_ID: ${CASE_CONNECTOR_ID:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_AUTHORIZATION_ENDPOINT: ${OIDC_AUTHORIZATION_ENDPOINT:-}
+      OIDC_TOKEN_ENDPOINT: ${OIDC_TOKEN_ENDPOINT:-}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_CLIENT_SECRET_REF: ${OIDC_CLIENT_SECRET_REF:-}
+      CONTROL_PLANE_DATABASE_URL: ${CONTROL_PLANE_DATABASE_URL:-postgresql://poc_user:poc_password@postgres:5432/poc_banking}
       NODE_ENV: development
       PORT: 3001
       JWT_SECRET: dev-jwt-secret-change-in-production
@@ -212,6 +262,7 @@ services:
       NLU_SERVICE_URL: http://nlu-service:3003
       MCP_SERVICE_URL: http://mcp-service:3004
       CHAT_BACKEND_URL: http://chat-backend:3006
+      SERVICING_REQUEST_TIMEOUT_MS: ${SERVICING_REQUEST_TIMEOUT_MS:-410000}
       AI_ORCHESTRATOR_URL: http://ai-orchestrator:3007
       REDIS_URL: redis://redis:6379
     ports:

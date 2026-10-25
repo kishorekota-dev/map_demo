@@ -4,6 +4,12 @@ const logger = require('../utils/logger');
 const slmDataExtractor = require('./poc-slm-data-extractor');
 const intentMapper = require('./intentMapper');
 const PolicyEngine = require('./policyEngine');
+const { ControlPlaneRuntime, normalizeChannel, resolvePublishedRoute, validateSnapshot } = require('./controlPlaneRuntime');
+const KeyedMutex = require('../utils/keyedMutex');
+const { RuntimePersistence } = require('./runtimePersistence');
+const { randomUUID } = require('crypto');
+const RuntimeIntegrations = require('./runtimeIntegrations');
+const { isLlmError, modelUnavailable } = require('../llm/errors');
 
 /**
  * Workflow Service
@@ -12,10 +18,41 @@ const PolicyEngine = require('./policyEngine');
  */
 class WorkflowService {
   constructor(mcpClient, sessionManager) {
-    this.mcpClient = mcpClient;
+    this.persistence = new RuntimePersistence();
+    this.integrations = new RuntimeIntegrations();
+    this.mcpClient = new Proxy(mcpClient, { get: (target, property) => {
+      if (['executeTool', 'executeToolWithRetry'].includes(property)) return async (tool, parameters, sessionId) => {
+        const { interactionId, tenantId, runtimeContext, ...toolParameters } = parameters;
+        const started = Date.now();
+        let callId;
+        try {
+          await this.integrations.event({ sessionId, interactionId, ...runtimeContext, stage: 'authorization', outcome: runtimeContext?.confirmationRequired ? (runtimeContext.confirmationVerified ? 'confirmed' : 'confirmation_missing') : 'confirmation_not_required',
+            metadata: { tool, confirmationRequired: runtimeContext?.confirmationRequired === true, confirmationVerified: runtimeContext?.confirmationVerified === true } }, toolParameters.authToken);
+          const result = await this.persistence.execute({ tenantId: tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
+            interactionId, sessionId, tool, parameters: toolParameters, runtimeContext }, async () => {
+            callId = randomUUID();
+            return target.executeTool(tool, toolParameters, sessionId);
+          });
+          const evidence = await this.integrations.event({ sessionId, interactionId, ...runtimeContext, stage: 'tool', outcome: 'succeeded', operationId: result.operationId, durationMs: Date.now() - started }, toolParameters.authToken);
+          return { ...result, ...(evidence.id ? { evidenceId: evidence.id } : {}), ...(evidence.telemetryUnavailable ? { telemetryUnavailable: true } : {}) };
+        } catch (error) {
+          await this.integrations.event({ sessionId, interactionId, ...runtimeContext, stage: 'tool', outcome: error.code === 'RECONCILIATION_REQUIRED' ? 'reconciliation_required' : 'failed', operationId: error.operationId, durationMs: Date.now() - started }, toolParameters.authToken);
+          throw error;
+        } finally {
+          // Record usage after durable acknowledgement; telemetry must not
+          // widen the interval between an external effect and ledger commit.
+          if (callId) await this.integrations.usage({ eventId: `${callId}:calls`, sessionId, interactionId, version: runtimeContext?.version,
+            channel: runtimeContext?.channel, provider: 'mcp', service: 'tool_execution', metric: 'calls', units: 1 }, toolParameters.authToken);
+        }
+      };
+      return typeof target[property] === 'function' ? target[property].bind(target) : target[property];
+    } });
     this.sessionManager = sessionManager;
     this.policyEngine = new PolicyEngine();
-    this.workflow = new BankingChatWorkflow(mcpClient, sessionManager, this.policyEngine);
+    this.workflow = new BankingChatWorkflow(this.mcpClient, sessionManager, this.policyEngine);
+    this.workflow.genericHandler = state => this.executeGeneric(state);
+    this.controlPlane = new ControlPlaneRuntime();
+    this.requestMutex = new KeyedMutex();
     
     logger.info('Workflow Service initialized with Enhanced MCP Client and Policy Engine');
   }
@@ -23,7 +60,160 @@ class WorkflowService {
   /**
    * Process a message through the workflow
    */
-  async processMessage({ sessionId, intent, question, userId, authToken = null, metadata = {} }) {
+  async processMessage(input) {
+    const tenant = input.metadata?.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+    const enriched = { ...input, metadata: { ...input.metadata, tenantId: tenant, interactionId: input.metadata?.interactionId || randomUUID() } };
+    return this.requestMutex.runExclusive(input.sessionId, () => this.persistence.runSession(tenant, input.sessionId, async () => {
+      // Recheck inside coordination: two callers may both have passed HTTP
+      // ownership checks before either created the same caller-chosen ID.
+      const current = await this.sessionManager.getSession(input.sessionId);
+      if (current && (String(current.userId) !== String(input.userId) || (current.metadata?.tenantId && current.metadata.tenantId !== tenant))) {
+        throw Object.assign(new Error('Session access denied'), { status: 403 });
+      }
+      return this.withEvidence(enriched, () => this.processMessageInSession(enriched));
+    }));
+  }
+
+  async processMessageInSession(input) {
+    if (!this.controlPlane.isEnabled()) return this.processConfiguredMessage(input);
+    let snapshot;
+    let channel;
+    let session;
+    try {
+      session = await this.sessionManager.getSession(input.sessionId);
+      if (session && (String(session.userId) !== String(input.userId)
+        || (session.metadata?.tenantId && session.metadata.tenantId !== (input.metadata?.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')))) {
+        throw Object.assign(new Error('Session access denied'), { status: 403 });
+      }
+      if (session?.status === 'waiting_human_input' && !input.resumePublished) {
+        return this.controlPlaneBlock('pending_workflow', {
+          version: session.metadata?.controlPlane?.version,
+          channel: session.metadata?.channel,
+          intent: session.intent
+        });
+      }
+      channel = normalizeChannel(session?.metadata?.channel || input.metadata?.channel || 'digital');
+      snapshot = input.resumePublished
+        ? validateSnapshot(session?.metadata?.controlPlane)
+        : await this.controlPlane.getPublishedConfig(input.authToken);
+    } catch (error) {
+      if (error.status === 403) throw error;
+      logger.warn('Control-plane configuration unavailable; execution blocked', { error: error.message, sessionId: input.sessionId });
+      return this.controlPlaneBlock('configuration_unavailable');
+    }
+
+    if (!snapshot.config.channels.find(entry => entry.id === channel)?.enabled) {
+      return this.controlPlaneBlock('channel_disabled', { version: snapshot.version, channel }, snapshot.config.prompts.unavailableText);
+    }
+    let recognition;
+    try {
+      recognition = input.resumePublished ? session.metadata?.recognition || { intent: session.intent, confidence: 1, source: 'pinned' }
+        : await this.controlPlane.recognize(snapshot.config, input.question, this.usageRecorder(input, snapshot, channel));
+    } catch (error) {
+      if (!isLlmError(error)) throw error;
+      return { ...modelUnavailable(error), metadata: { version: snapshot.version, environment: snapshot.environment, cohort: snapshot.cohort, channel } };
+    }
+    const intent = input.resumePublished ? session.intent : recognition.intent;
+    const recognitionEvidence = await this.integrations.event({ sessionId: input.sessionId, interactionId: input.metadata?.interactionId || session?.metadata?.interactionId,
+      version: snapshot.version, environment: snapshot.environment, cohort: snapshot.cohort, channel, intent: intent || 'unclassified', stage: 'recognition', outcome: intent ? 'recognized' : recognition.reason,
+      metadata: { confidence: recognition.confidence, recognitionSource: recognition.source } }, input.authToken);
+    if (!intent) {
+      const route = { version: snapshot.version, environment: snapshot.environment, cohort: snapshot.cohort, channel, intent: 'general_inquiry', queue: snapshot.config.channels.find(entry => entry.id === channel)?.queue, recognition };
+      if (snapshot.config.recognition?.ambiguityAction === 'human') return this.routeToHuman(input, route, 'recognition_uncertain', snapshot.config.prompts.handoffText);
+      return { type: 'clarification_required', needsHumanInput: false, response: snapshot.config.prompts.clarificationText || 'Could you clarify which service you need?', metadata: route,
+        evidenceIds: recognitionEvidence.id ? [recognitionEvidence.id] : [],
+        candidates: recognition.candidates.slice(0, 3).map(candidate => ({ id: candidate.intent, name: snapshot.config.intents.find(entry => entry.id === candidate.intent)?.name })) };
+    }
+    const metadata = {
+      ...(session?.metadata || {}),
+      ...(input.metadata || {}),
+      channel,
+      recognition,
+      controlPlane: snapshot
+    };
+    // Persist the exact release before any tools execute. Confirmation and data
+    // collection use this durable snapshot even after publish/rollback/restart.
+    if (!session) {
+      await this.sessionManager.createSession(input.userId, input.sessionId, intent, metadata);
+    } else {
+      await this.sessionManager.updateSession(input.sessionId, { metadata });
+    }
+    const route = { ...resolvePublishedRoute(snapshot, channel, intent), environment: snapshot.environment, cohort: snapshot.cohort };
+    metadata.runtimeContext = route;
+    await this.sessionManager.updateSession(input.sessionId, { metadata, intent });
+    if (route.action === 'disabled') return this.controlPlaneBlock(route.reason, route, snapshot.config.prompts.unavailableText);
+    if (route.action === 'human') return this.routeToHuman(input, { ...route, recognition }, route.reason, snapshot.config.prompts.handoffText);
+    return intentMapper.withPublishedIntents(snapshot.config.intents, async () => {
+      const result = await this.processConfiguredMessage({ ...input, intent, metadata: { ...metadata, runtimeContext: route } });
+      return { ...result, intent, evidenceIds: [...(result.evidenceIds || []), ...(recognitionEvidence.id ? [recognitionEvidence.id] : [])], metadata: { ...(result.metadata || {}), ...route, recognition } };
+    }, snapshot.config.prompts, { recordUsage: this.usageRecorder(input, snapshot, channel) }, snapshot.config.llm);
+  }
+
+  usageRecorder(input, snapshot, channel) {
+    return usage => this.integrations.usage({ ...usage, sessionId: input.sessionId, interactionId: input.metadata?.interactionId,
+      version: snapshot.version, channel }, input.authToken);
+  }
+
+  controlPlaneBlock(reason, metadata = {}, wording = null) {
+    return {
+      type: 'policy_blocked', code: reason, stage: 'control_plane', currentStep: 'control_plane_routing',
+      message: reason === 'configuration_unavailable'
+        ? 'Servicing configuration is temporarily unavailable. Please try again later.'
+        : reason === 'pending_workflow'
+          ? 'Please finish or cancel your pending request before starting another.'
+        : wording ? `Service unavailable. ${wording}` : 'This service is currently unavailable for this channel. Please contact support.',
+      needsHumanInput: false, metadata
+    };
+  }
+
+  async withEvidence(input, callback) {
+    const started = Date.now();
+    let result;
+    try { result = await callback(); }
+    catch (error) {
+      if (error.code !== 'RECONCILIATION_REQUIRED') throw error;
+      result = { type: 'reconciliation_required', operationId: error.operationId, message: error.message, needsHumanInput: false };
+    }
+    let session;
+    let telemetryUnavailable = false;
+    try { session = await this.sessionManager.getSession(input.sessionId); }
+    catch (_error) { telemetryUnavailable = true; }
+    const outcome = result.type === 'complete' ? 'succeeded'
+      : ['human_input_required', 'confirmation_required', 'clarification_required'].includes(result.type) ? 'awaiting_input'
+        : result.type === 'human_escalation' ? 'handoff'
+          : result.type === 'policy_blocked' ? (['configuration_unavailable', 'case_creation_unavailable', 'model_unavailable'].includes(result.code) ? 'failed' : 'policy_denied')
+            : result.type === 'error' ? 'failed' : result.type || 'unknown';
+    const event = await this.integrations.event({ sessionId: input.sessionId, interactionId: session?.metadata?.interactionId || input.metadata?.interactionId,
+      version: result.metadata?.version || session?.metadata?.controlPlane?.version, channel: result.metadata?.channel || session?.metadata?.channel || 'digital',
+      environment: result.metadata?.environment || session?.metadata?.controlPlane?.environment, cohort: result.metadata?.cohort || session?.metadata?.controlPlane?.cohort,
+      intent: result.intent || session?.intent || 'general_inquiry', stage: 'conversation', outcome, durationMs: Date.now() - started,
+      metadata: { workflowStatus: result.type || 'unknown' } }, input.authToken);
+    const evidenceIds = [...(result.evidenceIds || []), ...(event.id ? [event.id] : [])];
+    if (session && (evidenceIds.length || result.caseId)) {
+      try { await this.sessionManager.updateSession(input.sessionId,
+        { metadata: { ...session.metadata, evidenceIds: [...(session.metadata?.evidenceIds || []), ...evidenceIds].slice(-100), caseId: result.caseId || session.metadata?.caseId } }); }
+      catch (_error) { telemetryUnavailable = true; }
+    }
+    return { ...result, evidenceIds, telemetryUnavailable: telemetryUnavailable || result.telemetryUnavailable === true || event.telemetryUnavailable === true };
+  }
+
+  async routeToHuman(input, route, reason, wording = null) {
+    try {
+      const servicingCase = await this.integrations.createCase({ ...input, intent: route.intent, interactionId: input.metadata?.interactionId, runtimeContext: route }, reason);
+      return { type: 'human_escalation', message: wording || 'Your request has been queued for a support specialist.', intent: route.intent,
+        needsHumanInput: false, currentStep: 'control_plane_routing', caseId: servicingCase.id, metadata: { ...route, caseId: servicingCase.id } };
+    } catch (_error) {
+      return { type: 'policy_blocked', code: 'case_creation_unavailable', message: 'We could not queue your request. Please try again or contact support.', needsHumanInput: false, metadata: route };
+    }
+  }
+
+  async executeGeneric(state) {
+    if (intentMapper.getBaseIntent(state.intent) === 'knowledge_search') return this.integrations.knowledge(state);
+    const servicingCase = await this.integrations.createCase(state);
+    return { type: 'complete', response: `Your service request has been created. Reference: ${servicingCase.id}.`, caseId: servicingCase.id, generationSource: 'servicing-case', intent: state.intent };
+  }
+
+  async processConfiguredMessage({ sessionId, intent, question, userId, authToken = null, metadata = {} }) {
     const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     logger.info('Processing message through workflow', {
@@ -44,6 +234,9 @@ class WorkflowService {
           intent,
           metadata
         );
+      }
+      if (String(session.userId) !== String(userId) || (session.metadata?.tenantId && session.metadata.tenantId !== (metadata.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise'))) {
+        throw Object.assign(new Error('Session access denied'), { status: 403 });
       }
 
       // Add user message to conversation history
@@ -69,6 +262,9 @@ class WorkflowService {
         question,
         metadata
       });
+      await this.integrations.event({ sessionId, interactionId: metadata.interactionId || session.metadata?.interactionId,
+        ...metadata.runtimeContext, intent, stage: 'policy', outcome: ingressPolicy.action,
+        metadata: { reason: ingressPolicy.code || 'allowed' } }, authToken);
 
       await this.sessionManager.updateWorkflowState(sessionId, 'policy_ingress', {
         policy: ingressPolicy.audit
@@ -104,6 +300,9 @@ class WorkflowService {
         sessionId,
         userId,
         authToken,
+        interactionId: session.metadata?.interactionId || metadata.interactionId,
+        tenantId: session.metadata?.tenantId || metadata.tenantId,
+        runtimeContext: metadata.runtimeContext || session.metadata?.runtimeContext,
         intent,
         question,
         conversationHistory: session.conversationHistory,
@@ -123,14 +322,18 @@ class WorkflowService {
           ? 'cancelled'
           : 'completed';
 
-      await execution.update({
+      let telemetryUnavailable = result.finalResponse?.telemetryUnavailable === true;
+      try { await execution.update({
         status: executionStatus,
         output: result.finalResponse,
         currentNode: result.currentStep,
         executionPath: this.extractExecutionPath(result),
         error: result.error ? { message: result.error } : null,
         completedAt: new Date()
-      });
+      }); } catch (error) {
+        if (result.needsHumanInput) throw error;
+        telemetryUnavailable = true;
+      }
 
       // Handle human input required
       if (result.needsHumanInput) {
@@ -153,6 +356,9 @@ class WorkflowService {
           feedbackId: feedback.id,
           type: feedback.feedbackType
         });
+      } else {
+        try { await this.sessionManager.updateSession(sessionId, { status: 'active', requiredData: [], currentStep: result.currentStep }); }
+        catch (_error) { telemetryUnavailable = true; }
       }
 
       logger.info('Workflow execution completed', {
@@ -165,6 +371,7 @@ class WorkflowService {
       return {
         executionId,
         ...result.finalResponse,
+        telemetryUnavailable,
         needsHumanInput: result.needsHumanInput,
         currentStep: result.currentStep
       };
@@ -185,7 +392,7 @@ class WorkflowService {
           completedAt: new Date()
         },
         { where: { executionId } }
-      );
+      ).catch(() => {});
 
       throw error;
     }
@@ -194,7 +401,37 @@ class WorkflowService {
   /**
    * Process human feedback
    */
-  async processHumanFeedback({ sessionId, response, confirmed, authToken = null }) {
+  async processHumanFeedback(input) {
+    return this.requestMutex.runExclusive(input.sessionId, () => this.persistence.runSession(process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise', input.sessionId, () => this.withEvidence(input, () => this.processFeedbackInSession(input))));
+  }
+
+  async processFeedbackInSession(input) {
+    if (!this.controlPlane.isEnabled()) return this.processConfiguredFeedback(input);
+    const session = await this.sessionManager.getSession(input.sessionId);
+    let snapshot;
+    let route;
+    try {
+      snapshot = validateSnapshot(session?.metadata?.controlPlane);
+      route = { ...resolvePublishedRoute(snapshot, normalizeChannel(session.metadata.channel), session.intent), environment: snapshot.environment, cohort: snapshot.cohort };
+    } catch (error) {
+      return this.controlPlaneBlock('configuration_unavailable');
+    }
+    if (route.action === 'human') {
+      const result = await this.routeToHuman({ ...input, userId: session.userId, metadata: session.metadata }, route, route.reason, snapshot.config.prompts.handoffText);
+      if (result.caseId) {
+        await HumanFeedback.update({ status: 'cancelled' }, { where: { sessionId: input.sessionId, status: 'pending' } });
+        await this.sessionManager.updateSession(input.sessionId, { status: 'active', currentStep: 'human_handoff', requiredData: [] });
+      }
+      return result;
+    }
+    if (route.action !== 'automated') return this.controlPlaneBlock(route.reason, route);
+    return intentMapper.withPublishedIntents(snapshot.config.intents, async () => {
+      const result = await this.processConfiguredFeedback(input);
+      return { ...result, intent: session.intent, metadata: { ...(result.metadata || {}), ...route } };
+    }, snapshot.config.prompts, { recordUsage: this.usageRecorder({ ...input, metadata: session.metadata }, snapshot, route.channel) }, snapshot.config.llm);
+  }
+
+  async processConfiguredFeedback({ sessionId, response, confirmed, authToken = null }) {
     logger.info('Processing human feedback', {
       sessionId,
       confirmed
@@ -219,6 +456,12 @@ class WorkflowService {
 
       if (!feedback) {
         throw new Error('No pending feedback found');
+      }
+
+      if (feedback.expiresAt && new Date(feedback.expiresAt) <= new Date()) {
+        await feedback.update({ status: 'timeout', respondedAt: new Date() });
+        await this.sessionManager.updateSession(sessionId, { status: 'active', requiredData: [] });
+        return { type: 'cancelled', message: 'That pending request has expired. Please start it again.', confirmed: false, needsHumanInput: false };
       }
 
       // Update feedback
@@ -255,9 +498,9 @@ class WorkflowService {
     if (normalizedConfirmation === true || normalizedConfirmation === 'yes') {
       const session = await this.sessionManager.getSession(sessionId);
       const latestUserMessage = this.getLatestUserMessage(session);
-      const tools = feedback.context.tools?.length
-        ? feedback.context.tools
-        : this.workflow.getToolsForState({
+      // Recompute from the pinned intent allowlist; feedback JSON is not an
+      // independent authority to execute tools.
+      const tools = this.workflow.getToolsForState({
           intent: session.intent,
           collectedData: session.collectedData
         });
@@ -279,6 +522,10 @@ class WorkflowService {
           requiredData: pendingFields,
           currentStep: 'check_required_data'
         });
+
+        await HumanFeedback.create({ sessionId, executionId: feedback.executionId, feedbackType: 'data_collection',
+          question: 'Some details need to be corrected before I can proceed.', requiredFields: pendingFields,
+          context: {}, status: 'pending', expiresAt: new Date(Date.now() + 300000) });
 
         return {
           type: 'human_input_required',
@@ -335,6 +582,11 @@ class WorkflowService {
       for (const tool of tools) {
         const parameters = this.workflow.buildToolParameters(tool, {
           sessionId,
+          intent: session.intent,
+          interactionId: session.metadata?.interactionId,
+          tenantId: session.metadata?.tenantId,
+          runtimeContext: session.metadata?.runtimeContext,
+          confirmationGranted: true,
           userId: session.userId,
           authToken,
           collectedData: session.collectedData
@@ -348,32 +600,38 @@ class WorkflowService {
         toolResults[tool] = result;
       }
 
-      await this.sessionManager.updateWorkflowState(sessionId, 'execute_tools', {
-        toolResults,
-        policy: policyDecision.audit
-      });
+      let telemetryUnavailable = false;
+      try { await this.sessionManager.updateWorkflowState(sessionId, 'execute_tools', { toolResults, policy: policyDecision.audit }); }
+      catch (_error) { telemetryUnavailable = true; }
 
       const generationResult = await this.workflow.generateResponse({
         sessionId,
         userId: session.userId,
         intent: session.intent,
+        interactionId: session.metadata?.interactionId,
+        tenantId: session.metadata?.tenantId,
+        runtimeContext: session.metadata?.runtimeContext,
+        authToken,
+        confirmationGranted: true,
         question: latestUserMessage,
         conversationHistory: session.conversationHistory,
         collectedData: session.collectedData,
         toolResults,
+        telemetryUnavailable,
         policyTrace: [policyDecision.audit]
       });
 
-      await this.sessionManager.updateSession(sessionId, {
+      try { await this.sessionManager.updateSession(sessionId, {
         status: 'active',
         currentStep: generationResult.currentStep
-      });
+      }); } catch (_error) { telemetryUnavailable = true; }
 
       return {
         confirmed: true,
         currentStep: generationResult.currentStep,
         needsHumanInput: false,
-        ...generationResult.finalResponse
+        ...generationResult.finalResponse,
+        telemetryUnavailable: telemetryUnavailable || generationResult.finalResponse?.telemetryUnavailable === true
       };
     } else {
       // User cancelled
@@ -418,18 +676,28 @@ class WorkflowService {
         sessionId,
         error: error.message
       });
+      if (isLlmError(error)) {
+        // Extraction failed before any tool or workflow continuation. Retain
+        // the original release/interaction and allow the same pending reply
+        // to be retried after the configured provider recovers.
+        await feedback.update({ status: 'pending', response: null, respondedAt: null });
+        return modelUnavailable(error);
+      }
     }
 
-    const fallbackCollected = this.parseDataFromResponse(response, feedback.requiredFields);
+    const fallbackCollected = this.parseDataFromResponse(response, feedback.requiredFields, session.intent);
     const collectedData = {
       ...session.collectedData,
       ...(slmResult?.extractedData || {}),
       ...(!slmResult?.slmEnabled ? fallbackCollected : {})
     };
 
-    const validationResult = slmResult?.validationResult || intentMapper.validateData(session.intent, collectedData);
-    const requiredFields = slmResult?.missingFields ?? validationResult.missing ?? [];
-    const invalidFields = slmResult?.invalidFields ?? validationResult.invalid ?? [];
+    // Fallback collection is merged after SLM extraction. Revalidate the final
+    // values, otherwise a disabled SLM's stale missing-fields result discards
+    // valid customer replies indefinitely.
+    const validationResult = intentMapper.validateData(session.intent, collectedData);
+    const requiredFields = validationResult.missing || [];
+    const invalidFields = validationResult.invalid || [];
     const pendingFields = [...new Set([
       ...requiredFields,
       ...invalidFields
@@ -452,14 +720,19 @@ class WorkflowService {
     const needsMore = pendingFields.length > 0 || invalidFields.length > 0;
 
     if (!needsMore) {
-      return await this.processMessage({
+      return await this.processMessageInSession({
         sessionId,
         intent: session.intent,
         question: session.conversationHistory[session.conversationHistory.length - 1]?.content || '',
         userId: session.userId,
-        authToken
+        authToken,
+        resumePublished: true
       });
     }
+
+    await HumanFeedback.create({ sessionId, executionId: feedback.executionId, feedbackType: 'data_collection',
+      question: 'Thank you. I still need some more information.', requiredFields: pendingFields,
+      context: {}, status: 'pending', expiresAt: new Date(Date.now() + 300000) });
 
     return {
       type: 'human_input_required',
@@ -472,27 +745,36 @@ class WorkflowService {
   /**
    * Parse data from user response
    */
-  parseDataFromResponse(response, requiredFields) {
+  parseDataFromResponse(response, requiredFields, intent = null) {
     const collectedData = {};
-    
-    // Simple parsing - in production, use NLU service
-    if (typeof response === 'object') {
-      return response;
-    }
-    
-    // Try to extract values from text
-    // This is a simple implementation - should be enhanced
-    requiredFields.forEach(field => {
-      if (field === 'amount') {
-        const match = response.match(/\$?(\d+(?:,\d{3})*(?:\.\d{2})?)/);
-        if (match) {
-          collectedData[field] = parseFloat(match[1].replace(',', ''));
-        }
+    const fields = Array.isArray(requiredFields) ? requiredFields : [];
+    const assign = (field, value) => {
+      if (!fields.includes(field) || value === '' || value === undefined || value === null) return;
+      const declaredType = intentMapper.getPublishedIntent(intent)?.fieldSchemas?.[field]?.type;
+      if ((field === 'amount' || declaredType === 'number') && typeof value === 'string' && /^\$?-?[0-9,]+(?:\.[0-9]+)?$/.test(value.trim())) {
+        collectedData[field] = Number(value.replace(/[$,]/g, ''));
+      } else if ((field === 'isLegitimate' || declaredType === 'boolean') && typeof value === 'string' && /^(true|false|yes|no)$/i.test(value.trim())) {
+        collectedData[field] = /^(true|yes)$/i.test(value.trim());
       } else {
-        collectedData[field] = response;
+        collectedData[field] = value;
       }
+    };
+    if (response && typeof response === 'object' && !Array.isArray(response)) {
+      fields.forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(response, field)) assign(field, response[field]);
+      });
+      return collectedData;
+    }
+    if (typeof response !== 'string') return collectedData;
+    try {
+      const parsed = JSON.parse(response);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return this.parseDataFromResponse(parsed, fields, intent);
+    } catch (_error) { /* Plain text is supported below. */ }
+    response.split(/[\n;]/).forEach(line => {
+      const separator = line.search(/[:=]/);
+      if (separator > 0) assign(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
     });
-    
+    if (!Object.keys(collectedData).length && fields.length === 1) assign(fields[0], response.trim());
     return collectedData;
   }
 
