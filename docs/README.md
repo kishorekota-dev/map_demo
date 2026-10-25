@@ -36,6 +36,7 @@ executable migration scripts resolve conflicts with old implementation reports.
 | Backend adapter contract and restrictions | [Backend integration](guides/backend-integration-framework.md) |
 | Digital assistant pilot acceptance | [Pilot checklist](guides/digital-assistant-pilot-checklist.md) |
 | Current gaps, new implementation and differentiation | [Platform assessment](guides/platform-gap-assessment.md) |
+| October 2026 code review: security fixes, build fixes and remaining gaps | [Platform review](guides/platform-review-2026-10.md) |
 | Measured model responses and exact-evidence release gates | [Response quality](guides/model-evaluation.md) |
 | Case assignment, citations and handling | [Agent workspace](../services/api-gateway/operations/AGENT-WORKSPACE.md) |
 | Vendor comparison and differentiation | [Market review](guides/market-comparison.md) |

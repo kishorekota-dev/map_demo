@@ -28,6 +28,11 @@ The [earlier market comparison](market-comparison.md) preserves the original bas
 
 ## Remaining gaps before a best-in-class claim
 
+The [October 2026 platform review](platform-review-2026-10.md) records the
+authorization, identity and build defects found and fixed in a full code review,
+and engineering gaps (token signing, browser token storage, refresh rotation)
+that sit alongside the capability gaps below.
+
 The following are still real work. Some require the enterprise deployment, while others are broader product investments. They are not silently described as delivered.
 
 | Priority | Remaining capability | Acceptance evidence needed |
