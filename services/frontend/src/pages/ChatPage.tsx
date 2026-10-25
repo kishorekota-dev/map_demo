@@ -6,6 +6,7 @@ export default function ChatPage() {
   const user = useAuthStore((state) => state.user)
   const {
     sessionId,
+    channel, switchingChannel, handoff, switchChannel, resumeChannel, refreshConversation,
     messages,
     initializing,
     sending,
@@ -20,6 +21,12 @@ export default function ChatPage() {
 
   return (
     <ChatContainer
+      channel={channel}
+      switchingChannel={switchingChannel}
+      handoff={handoff}
+      onSwitchChannel={switchChannel}
+      onResumeChannel={resumeChannel}
+      onRefreshConversation={refreshConversation}
       messages={messages}
       onSend={sendMessage}
       onNewConversation={startNewConversation}

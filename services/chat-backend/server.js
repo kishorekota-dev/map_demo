@@ -139,8 +139,7 @@ app.get('/api', (req, res) => {
 io.use(async (socket, next) => {
     try {
         const token = socket.handshake.auth.token || 
-                     socket.handshake.headers.authorization?.split(' ')[1] ||
-                     socket.handshake.query.token;
+                     socket.handshake.headers.authorization?.split(' ')[1];
         
         if (!token) {
             logger.security('websocket_connection_rejected', {
@@ -154,7 +153,7 @@ io.use(async (socket, next) => {
         // Verify JWT token
         const decoded = jwt.verify(
             token, 
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+            process.env.JWT_SECRET
         );
         
         // Add user info to socket
@@ -184,6 +183,7 @@ let chatService, agentOrchestrator, sessionManager, socketHandler, databaseServi
 
 async function initializeServices() {
     try {
+        if (!process.env.JWT_SECRET || Buffer.byteLength(process.env.JWT_SECRET) < 32) throw new Error('JWT_SECRET must contain at least 32 bytes');
         logger.info('Initializing chat backend services...');
 
         const persistenceEnabled = process.env.CHAT_PERSISTENCE_ENABLED === 'true';

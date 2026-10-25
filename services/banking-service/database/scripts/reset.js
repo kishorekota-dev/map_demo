@@ -2,7 +2,7 @@
 const readline = require('readline');
 const config = require('../config');
 const { withLockedClient } = require('./maintenance');
-const TABLES = ['banking_demo_seed_history', 'disputes', 'fraud_alerts', 'transfers', 'cards', 'transactions', 'accounts',
+const TABLES = ['banking_mutation_results', 'banking_demo_seed_history', 'disputes', 'fraud_alerts', 'transfers', 'cards', 'transactions', 'accounts',
   'customer_relationships', 'customer_contacts', 'customer_preferences', 'audit_logs', 'refresh_tokens', 'user_roles',
   'role_permissions', 'permissions', 'roles', 'users', 'customers', 'flyway_schema_history'];
 
@@ -32,5 +32,5 @@ async function main() {
   await resetDatabase({ confirmed });
   console.log('Banking tables and functions reset. Run migrations before any optional demo seeding.');
 }
-if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) main().catch(() => { console.error('Banking database reset failed. Verify the explicit reset guards and database configuration.'); process.exitCode = 1; });
 module.exports = { resetDatabase };

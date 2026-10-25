@@ -36,7 +36,8 @@ install executable integrations or transform the app into a new domain alone.
    Generated files contain defaults, not provisioned production secrets.
 3. Complete a protected copy of [production environment](../../.env.production.example).
    Mount the generated public runtime JSON read-only, set exact HTTPS endpoints,
-   disable browser token entry and supply private secret/model registry mounts.
+   disable browser token entry, inject named credential environment variables and
+   supply private model/connector declaration mounts.
 4. Run static preflight and explicit banking/servicing migration jobs. Bootstrap
    the initial operator against the intended database and configure authoritative
    identity mappings. Start the production overlay behind controlled TLS ingress.

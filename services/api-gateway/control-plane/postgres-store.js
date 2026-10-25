@@ -24,7 +24,7 @@ class PostgresControlPlaneStore {
     this.ready = null;
     this.pool.on?.('error', (error) => {
       // Log codes only: connection strings and credentials never enter logs.
-      console.error('Control-plane database connection failed:', error.code || 'database_unavailable');
+      console.error('Control-plane database connection failed.');
     });
   }
 

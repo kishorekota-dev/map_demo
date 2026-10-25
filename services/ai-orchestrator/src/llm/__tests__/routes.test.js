@@ -43,4 +43,16 @@ describe('authenticated provider management endpoints', () => {
     expect(result.body).toMatchObject({ ok: false, error: { code: 'LLM_PROVIDER_ERROR' } });
     expect(JSON.stringify(result.body)).not.toMatch(/secret-with-private-url|Authorization/);
   });
+  test('production disables connectivity tests before provider dispatch while retaining safe metadata discovery', async () => {
+    const previousEnvironment = process.env.NODE_ENV; const previousRegistry = process.env.LLM_PROVIDERS_JSON;
+    process.env.NODE_ENV = 'production';
+    process.env.LLM_PROVIDERS_JSON = JSON.stringify({ providers: [{ id: 'fixture', type: 'ollama', enabled: true, baseUrl: 'https://fixture.example.invalid', allowedModels: ['fixture-model'] }] });
+    try {
+      const result = await request(app()).post('/llm/test').set('Authorization', `Bearer ${token('control_plane_admin')}`).send({ providerId: 'fixture', model: 'fixture-model' });
+      expect(result.status).toBe(403); expect(result.body.error.code).toBe('LLM_TEST_DISABLED');
+      await request(app()).get('/llm/providers').set('Authorization', `Bearer ${token('control_plane_viewer')}`).expect(200);
+      expect(axios.request).not.toHaveBeenCalled();
+    } finally { if (previousEnvironment === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnvironment; process.env.LLM_PROVIDERS_JSON = previousRegistry; }
+  });
+
 });

@@ -46,7 +46,7 @@ router.get('/tools', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get tools list',
-      message: error.message
+      message: 'MCP operation is unavailable'
     });
   }
 });
@@ -82,7 +82,7 @@ router.get('/tools/:toolName', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get tool definition',
-      message: error.message
+      message: 'MCP operation is unavailable'
     });
   }
 });
@@ -123,6 +123,7 @@ router.post('/execute', async (req, res) => {
     });
 
     const result = await bankingTools.executeTool(tool, parameters);
+    if (result.outcome === 'uncertain') return res.status(202).json(result);
 
     logger.info('Tool executed successfully', {
       requestId,
@@ -147,15 +148,16 @@ router.post('/execute', async (req, res) => {
       response: error.response?.data
     });
 
-    const statusCode = error.response?.status || 500;
-    const errorMessage = error.response?.data?.message || error.message;
-
+    const uncertain = error.outcome === 'uncertain';
+    const statusCode = uncertain ? 202 : error.status || error.response?.status || 503;
     res.status(statusCode).json({
       success: false,
       requestId,
+      outcome: uncertain ? 'uncertain' : 'failed',
       error: 'Tool execution failed',
-      message: errorMessage,
-      details: error.response?.data || {},
+      message: uncertain ? 'Banking outcome requires reconciliation before retry.' : 'Banking request was rejected or unavailable.',
+      ...(uncertain ? { reconciliationReference: req.body.parameters?.idempotencyKey,
+        reconcilePath: `/api/v1/mutation-status/${encodeURIComponent(req.body.parameters?.idempotencyKey || '')}` } : {}),
       timestamp: new Date().toISOString()
     });
   }
@@ -172,7 +174,7 @@ router.post('/execute-batch', async (req, res) => {
   try {
     const { tools, sessionId } = req.body;
 
-    if (!Array.isArray(tools) || tools.length === 0) {
+    if (!Array.isArray(tools) || tools.length === 0 || tools.length > 20) {
       return res.status(400).json({
         success: false,
         error: 'Tools must be a non-empty array',
@@ -194,6 +196,7 @@ router.post('/execute-batch', async (req, res) => {
 
       try {
         const result = await bankingTools.executeTool(tool, parameters);
+        if (result.outcome === 'uncertain') { errors.push({ index: i, tool, ...result }); continue; }
         results.push({
           index: i,
           tool,
@@ -205,7 +208,8 @@ router.post('/execute-batch', async (req, res) => {
           index: i,
           tool,
           success: false,
-          error: error.message
+          outcome: error.outcome || 'failed',
+          error: 'Banking request did not complete'
         });
       }
     }
@@ -217,8 +221,9 @@ router.post('/execute-batch', async (req, res) => {
       failed: errors.length
     });
 
-    res.json({
+    res.status(errors.some(error => error.outcome === 'uncertain') ? 202 : errors.length ? 207 : 200).json({
       success: errors.length === 0,
+      outcome: errors.some(error => error.outcome === 'uncertain') ? 'uncertain' : errors.length ? 'failed' : 'completed',
       requestId,
       sessionId,
       results,
@@ -241,7 +246,7 @@ router.post('/execute-batch', async (req, res) => {
       success: false,
       requestId,
       error: 'Batch execution failed',
-      message: error.message,
+      message: 'MCP operation is unavailable',
       timestamp: new Date().toISOString()
     });
   }
@@ -293,7 +298,7 @@ router.get('/categories', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get categories',
-      message: error.message
+      message: 'MCP operation is unavailable'
     });
   }
 });
@@ -357,7 +362,7 @@ router.post('/validate', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Validation failed',
-      message: error.message
+      message: 'MCP operation is unavailable'
     });
   }
 });

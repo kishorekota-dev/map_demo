@@ -7,6 +7,8 @@ const plugins = Object.freeze({ ollama: require('./plugins/ollama'), openai: req
   openai_compatible: require('./plugins/openaiCompatible'), vertex_gemini: require('./plugins/gemini'), gemini: require('./plugins/gemini') });
 const DEFAULT_URLS = { ollama: 'http://127.0.0.1:11434', openai: 'https://api.openai.com/v1',
   openai_compatible: 'http://127.0.0.1:1234/v1', gemini: 'https://generativelanguage.googleapis.com/v1beta' };
+const validCredential = value => typeof value === 'string' && value.length > 0 && value.length <= 16384
+  && ![...value].some(character => character.charCodeAt(0) <= 32 || character.charCodeAt(0) > 126);
 
 function loadConfiguration(env) {
   try {
@@ -38,24 +40,25 @@ function normalizeProvider(input, env) {
     url = new URL(override || input.baseUrl || (input.type === 'vertex_gemini'
       ? `https://${input.location === 'global' ? '' : `${input.location}-`}aiplatform.googleapis.com` : DEFAULT_URLS[input.type]));
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
-      || (!['ollama', 'openai_compatible'].includes(input.type) && url.protocol !== 'https:')) throw new Error('Invalid URL');
+      || ((!['ollama', 'openai_compatible'].includes(input.type) || (env.NODE_ENV === 'production' && input.enabled)) && url.protocol !== 'https:')) throw new Error('Invalid URL');
   } catch (_error) { throw new LlmError('LLM_REGISTRY_INVALID', 'A model provider endpoint is invalid.'); }
+  const credentialRef = input.credentialRef?.replace(/^env:/, '');
+  if (input.enabled && ((!['ollama', 'openai_compatible'].includes(input.type) && !credentialRef)
+    || (credentialRef && !validCredential(env[credentialRef])))) {
+    throw new LlmError('LLM_CREDENTIAL_MISSING', credentialRef
+      ? `Model provider credential environment variable ${credentialRef} is missing or invalid.`
+      : 'An enabled cloud model provider requires an explicit credential environment reference.');
+  }
   return Object.freeze({ id: input.id, type: input.type, enabled: input.enabled, baseUrl: url.toString().replace(/\/$/, ''),
     supportsTemperature: input.supportsTemperature !== false,
-    credentialRef: input.credentialRef?.replace(/^env:/, ''), allowedModels: input.allowedModels ? Object.freeze([...new Set(input.allowedModels)]) : undefined,
+    credentialRef, allowedModels: input.allowedModels ? Object.freeze([...new Set(input.allowedModels)]) : undefined,
     ...(input.type === 'vertex_gemini' ? { project: input.project, location: input.location } : {}) });
-}
-async function withinDeadline(promise, milliseconds) {
-  let timer;
-  try { return await Promise.race([promise, new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new LlmError('LLM_TIMEOUT', 'The configured model provider timed out.')), milliseconds);
-  })]); } finally { clearTimeout(timer); }
 }
 class ProviderRegistry {
   constructor(configuration, options = {}) {
     this.env = options.env || process.env;
     const config = configuration || loadConfiguration(this.env);
-    if (!config || !Array.isArray(config.providers) || config.providers.length > 50) throw new LlmError('LLM_REGISTRY_INVALID', 'The server model provider registry is invalid.');
+    if (!config || !Array.isArray(config.providers) || config.providers.length > 50 || Object.keys(config).some(key => key !== 'providers')) throw new LlmError('LLM_REGISTRY_INVALID', 'The server model provider registry is invalid.');
     this.providers = new Map();
     for (const entry of config.providers) {
       const provider = normalizeProvider(entry, this.env);
@@ -63,17 +66,16 @@ class ProviderRegistry {
       this.providers.set(provider.id, provider);
     }
     this.http = options.http || require('axios');
-    this.googleAuth = options.googleAuth;
   }
   configured(provider) {
-    if (provider.credentialRef) return Boolean(this.env[provider.credentialRef]);
-    return ['ollama', 'openai_compatible', 'vertex_gemini'].includes(provider.type);
+    if (provider.credentialRef) return validCredential(this.env[provider.credentialRef]);
+    return ['ollama', 'openai_compatible'].includes(provider.type);
   }
   list() {
     return [...this.providers.values()].map(provider => ({ id: provider.id, type: provider.type, enabled: provider.enabled,
       configured: this.configured(provider), ...(provider.allowedModels ? { allowedModels: provider.allowedModels } : {}),
       capabilities: { json: true, modelDiscovery: provider.type !== 'vertex_gemini', temperature: provider.supportsTemperature },
-      authentication: provider.type === 'vertex_gemini' && !provider.credentialRef ? 'adc' : provider.credentialRef ? 'configured-reference' : 'none' }));
+      authentication: provider.credentialRef ? 'configured-reference' : 'none' }));
   }
   get(id, model) {
     const provider = this.providers.get(id);
@@ -89,14 +91,6 @@ class ProviderRegistry {
     // Customer JWTs and ambient OPENAI_API_KEY are never consulted.
     const credential = provider.credentialRef ? this.env[provider.credentialRef] : null;
     if (credential) headers[provider.type === 'gemini' ? 'x-goog-api-key' : 'Authorization'] = provider.type === 'gemini' ? credential : `Bearer ${credential}`;
-    else if (provider.type === 'vertex_gemini') {
-      if (!this.googleAuth) this.googleAuth = new (require('google-auth-library').GoogleAuth)({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-      let token;
-      try { token = await withinDeadline(this.googleAuth.getAccessToken(), timeoutMs); }
-      catch (error) { if (error instanceof LlmError) throw error; throw new LlmError('LLM_CREDENTIAL_UNAVAILABLE', 'Vertex application credentials are unavailable.'); }
-      if (!token) throw new LlmError('LLM_CREDENTIAL_UNAVAILABLE', 'Vertex application credentials are unavailable.');
-      headers.Authorization = `Bearer ${token}`;
-    }
     return {
       invalidResponse: () => { throw new LlmError('LLM_INVALID_RESPONSE', 'The model did not return a complete supported response.'); },
       request: async (path, body) => {
@@ -107,6 +101,11 @@ class ProviderRegistry {
             ...(body === undefined ? {} : { data: body }), headers, timeout: remaining, signal: AbortSignal.timeout(remaining),
             maxRedirects: 0, maxContentLength: 512000, maxBodyLength: 512000, proxy: false });
           if (!response.data || typeof response.data !== 'object') throw new LlmError('LLM_INVALID_RESPONSE', 'The provider response is invalid.');
+          if (credential) {
+            const serialized = JSON.stringify(response.data);
+            if ([credential, JSON.stringify(credential).slice(1, -1)].some(value => serialized.includes(value)))
+              throw new LlmError('LLM_INVALID_RESPONSE', 'The provider response contains a restricted credential value.');
+          }
           return response.data;
         } catch (error) {
           if (error instanceof LlmError) throw error;

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
+const { queueView } = require('../services/queuePrivacy');
 
 /**
  * Queue management routes
@@ -168,10 +169,8 @@ router.get('/escalations', (req, res) => {
             escalationId: escalation.escalationId,
             queueId: escalation.queueId,
             sessionId: escalation.sessionId,
-            customerId: escalation.customerId,
             originalPriority: escalation.originalPriority,
             escalatedPriority: escalation.escalatedPriority,
-            escalationReason: escalation.escalationReason,
             escalatedAt: escalation.escalatedAt,
             totalWaitTime: escalation.totalWaitTime,
             attempts: escalation.attempts
@@ -207,20 +206,7 @@ router.get('/items/:queueId', (req, res) => {
         }
 
         const itemDetails = {
-            queueId: queueEntry.queueId,
-            sessionId: queueEntry.sessionId,
-            customerId: queueEntry.customerId,
-            customerName: queueEntry.customerName,
-            priority: queueEntry.priority,
-            requirements: queueEntry.requirements,
-            queuedAt: queueEntry.queuedAt,
-            estimatedWaitTime: queueEntry.estimatedWaitTime,
-            attempts: queueEntry.attempts,
-            maxAttempts: queueEntry.maxAttempts,
-            escalationReason: queueEntry.escalationReason,
-            previousAgent: queueEntry.previousAgent,
-            customerData: queueEntry.customerData,
-            metadata: queueEntry.metadata,
+            ...queueView(queueEntry), maxAttempts: queueEntry.maxAttempts,
             currentWaitTime: Date.now() - queueEntry.queuedAt.getTime(),
             position: queueService.getPriorityQueuePosition(queueId)
         };

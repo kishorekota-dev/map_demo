@@ -4,9 +4,7 @@ assertProductionConfiguration();
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
-const morgan = require('morgan');
 const compression = require('compression');
-const winston = require('winston');
 
 // Import middleware
 // These modules export OBJECTS with named members, so destructure the actual
@@ -41,21 +39,7 @@ const loadBalancer = loadBalancerModule.getInstance(serviceRegistry);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configure Winston logger
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.simple()
-    }),
-    new winston.transports.File({ filename: 'logs/api-gateway.log' })
-  ]
-});
+const logger = require('./utils/logger');
 
 // Global middleware
 app.use(helmet({
@@ -90,13 +74,8 @@ app.use(cors({
 
 app.use(compression());
 
-// Authorization codes, state, and search terms must never enter access logs.
-morgan.token('safe-path', (req) => req.originalUrl.split('?')[0]);
-app.use(morgan(':remote-addr :method :safe-path :status :res[content-length] :response-time ms', {
-  stream: {
-    write: (message) => logger.info(message.trim())
-  }
-}));
+// Access logs contain operational method/status/timing only.
+app.use(logger.requestMiddleware);
 
 app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => {
   if (req.originalUrl.startsWith('/api/operations/webhooks/')) req.rawBody = Buffer.from(buffer);
@@ -107,7 +86,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // layer uses both values for tracing, response headers, and latency metrics.
 app.use((req, res, next) => {
   req.startTime = Date.now();
-  req.id = req.get('X-Request-ID') || require('uuid').v4();
+  const suppliedId = req.get('X-Request-ID');
+  req.id = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(suppliedId || '') ? suppliedId : require('uuid').v4();
   res.setHeader('X-Request-ID', req.id);
   next();
 });

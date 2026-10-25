@@ -8,6 +8,7 @@ import {
 import type {
   Analytics,
   Connection,
+  ConnectionDefinition,
   ConsolePermissions,
   FinancialOperation,
   ExecutionCase,
@@ -61,6 +62,7 @@ export default function OperationsConsole({
   const action = useConsoleAction();
   const [status, setStatus] = useState<OperationsStatus | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [connectorDefinitions, setConnectorDefinitions] = useState<ConnectionDefinition[]>([]);
   const [connection, setConnection] = useState<Connection>(emptyConnection);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
@@ -118,8 +120,9 @@ export default function OperationsConsole({
     const nextStatus = await operationsApi.status();
     setStatus(nextStatus);
     if (section === "connections") {
-      const page = await operationsApi.connections(connectionPage.offset);
+      const [page, catalog] = await Promise.all([operationsApi.connections(connectionPage.offset), operationsApi.connectorCatalog()]);
       setConnections(page.items);
+      setConnectorDefinitions(catalog.items);
       setConnectionPage({ ...connectionPage, total: page.total });
     }
     if (section === "traces") {
@@ -155,7 +158,7 @@ export default function OperationsConsole({
           </h2>
           <p>
             {section === "connections"
-              ? "Configure provider-neutral case, voice, and knowledge adapters. Credentials stay in the deployment secret store; this console holds references only."
+              ? "Enable declared case, voice, and knowledge integrations. Your deployment team manages endpoint and credential bindings; this console adjusts names, availability and timeouts."
               : section === "traces"
                 ? "Inspect recorded events and connector-backed cases, including ambiguous outcomes that require reconciliation."
                 : "Review identity, worker readiness, data retention, and exportable audit evidence."}
@@ -201,9 +204,9 @@ export default function OperationsConsole({
               <h3>Adapter connections</h3>
               <button
                 className="cp-button cp-button--quiet"
-                disabled={!canAdmin || action.busy}
+                disabled={!canAdmin || action.busy || !connectorDefinitions.length}
                 onClick={() => {
-                  setConnection(emptyConnection());
+                  setConnection({ ...emptyConnection(), ...connectorDefinitions[0] });
                   setTestResult(null);
                 }}
               >
@@ -235,8 +238,7 @@ export default function OperationsConsole({
               <div className="cp-empty">
                 <h3>No adapters configured</h3>
                 <p>
-                  Add an adapter URL and secret references to connect a
-                  provider.
+                  Ask your deployment team to declare an integration, then select it here.
                 </p>
               </div>
             )}
@@ -296,14 +298,16 @@ export default function OperationsConsole({
             >
               <div className="cp-form-grid">
                 <Field label="Connection ID">
-                  <input
+                  <select
                     value={connection.id}
-                    readOnly={connection.revision !== undefined}
+                    disabled={connection.revision !== undefined}
                     onChange={(e) =>
-                      setConnection({ ...connection, id: e.target.value })
+                      setConnection({ ...emptyConnection(), ...connectorDefinitions.find(item => item.id === e.target.value) })
                     }
-                    placeholder="servicing-crm"
-                  />
+                  >
+                    <option value="">Select a declared integration</option>
+                    {connectorDefinitions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
                 </Field>
                 <Field label="Name">
                   <input
@@ -316,12 +320,7 @@ export default function OperationsConsole({
                 <Field label="Adapter kind">
                   <select
                     value={connection.kind}
-                    onChange={(e) =>
-                      setConnection({
-                        ...connection,
-                        kind: e.target.value as Connection["kind"],
-                      })
-                    }
+                    disabled
                   >
                     <option value="case">Case / fulfillment</option>
                     <option value="voice">Voice / IVR</option>
@@ -345,30 +344,22 @@ export default function OperationsConsole({
                 <Field
                   label="Adapter base URL"
                   wide
-                  hint="Use the approved provider-neutral adapter endpoint for this dedicated deployment."
+                  hint="Managed by your deployment team."
                 >
                   <input
                     type="url"
                     value={connection.baseUrl}
-                    onChange={(e) =>
-                      setConnection({ ...connection, baseUrl: e.target.value })
-                    }
-                    placeholder="https://adapter.example.com"
+                    readOnly
                   />
                 </Field>
                 <Field
                   label="Credential reference"
                   wide
-                  hint="Reference only, such as env:CONNECTOR_SECRET_CRM_TOKEN. Never paste a secret value."
+                  hint="Server-declared environment variable reference."
                 >
                   <input
-                    value={connection.credentialRef}
-                    onChange={(e) =>
-                      setConnection({
-                        ...connection,
-                        credentialRef: e.target.value,
-                      })
-                    }
+                    value={connection.credentialRef || ""}
+                    readOnly
                     autoComplete="off"
                     placeholder="env:CONNECTOR_SECRET_CRM_TOKEN"
                   />
@@ -376,16 +367,11 @@ export default function OperationsConsole({
                 <Field
                   label="Webhook signing secret reference"
                   wide
-                  hint="Reference an environment secret or an approved file under the deployment's configured secret root."
+                  hint="Server-declared environment variable reference."
                 >
                   <input
-                    value={connection.webhookSecretRef}
-                    onChange={(e) =>
-                      setConnection({
-                        ...connection,
-                        webhookSecretRef: e.target.value,
-                      })
-                    }
+                    value={connection.webhookSecretRef || ""}
+                    readOnly
                     autoComplete="off"
                     placeholder="env:CONNECTOR_SECRET_CRM_WEBHOOK"
                   />

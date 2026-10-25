@@ -1,0 +1,13 @@
+{
+  "connectors": [
+    {
+      "id": "reference",
+      "name": "Reference fixture",
+      "kind": "case",
+      "baseUrl": "https://api.example.com",
+      "credentialRef": "env:CONNECTOR_SECRET_REFERENCE",
+      "webhookSecretRef": "env:CONNECTOR_SECRET_REFERENCE",
+      "webhookPublicUrl": "https://example.com/api/operations/webhooks/reference"
+    }
+  ]
+}

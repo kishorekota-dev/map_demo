@@ -8,7 +8,6 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const helmet = require('helmet');
-const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
@@ -62,9 +61,7 @@ class MCPService {
     this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Logging
-    this.app.use(morgan((tokens, req, res) => `${tokens.method(req, res)} ${req.originalUrl.split('?')[0]} ${tokens.status(req, res)} ${tokens['response-time'](req, res)} ms`, {
-      stream: { write: (message) => logger.info(message.trim()) }
-    }));
+    this.app.use(logger.requestMiddleware);
 
     // Health check
     this.app.get(['/health', '/api/mcp/health'], (req, res) => {

@@ -300,7 +300,10 @@ describe('BankingChatWorkflow graph integration', () => {
     const invalid = await intentMapper.withPublishedIntents(entries, () => workflow.execute(input));
     expect(invalid.finalResponse.type).toBe('human_input_required'); expect(workflow.genericHandler).not.toHaveBeenCalled();
     const valid = await intentMapper.withPublishedIntents(entries, () => workflow.execute({ ...input, sessionId: 'typed-valid', collectedData: { participants: 2 } }));
-    expect(valid.finalResponse).toMatchObject({ caseId: 'case-1', generationSource: 'servicing-case' });
+    expect(valid.finalResponse).toMatchObject({ type: 'confirmation_required', details: { confirmation: { schema: 1 } } });
+    expect(workflow.genericHandler).not.toHaveBeenCalled();
+    const confirmed = await intentMapper.withPublishedIntents(entries, () => workflow.generateResponse({ ...input, collectedData: { participants: 2 }, confirmationGranted: true }));
+    expect(confirmed.finalResponse).toMatchObject({ caseId: 'case-1', generationSource: 'servicing-case' });
     expect(workflow.genericHandler).toHaveBeenCalledWith(expect.objectContaining({ authToken: 'access', collectedData: { participants: 2 } }));
     expect(mcp.executeTool).not.toHaveBeenCalled();
   });

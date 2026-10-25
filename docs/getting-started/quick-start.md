@@ -24,7 +24,7 @@ MOCK_DIALOGFLOW=true
 MOCK_EXTERNAL_AI_SERVICES=true
 ```
 
-The mock flags apply to the legacy NLU integration. Published model profiles are configured separately. Keep credentials in local configuration or a secret store, never in browser runtime config. Use the development database credentials matching the supplied Compose PostgreSQL service; do not reuse them for enterprise deployments.
+The mock flags apply to the legacy NLU integration. Published model profiles are configured separately. The tracked environment files contain no working service credentials. Before starting, inject distinct `JWT_SECRET`, `SERVICING_SERVICE_TOKEN` and `SESSION_SECRET` values of at least 32 bytes, and a `POSTGRES_PASSWORD` matching `DB_PASSWORD` and any database URLs. Supply them through your shell environment or a protected, untracked dotenv file selected with `APP_ENV_FILE`. Never put them in browser runtime configuration. See [Configuration](configuration.md#identity-and-internal-credentials).
 
 ## Option A: application processes on the host
 
@@ -51,7 +51,7 @@ npm run docker:up
 ./scripts/run-with-env.sh docker compose -f docker/docker-compose.local.yml ps
 ```
 
-Both current Compose files contain PostgreSQL, Redis and all eight application services. The local file uses the Vite development frontend; `npm run docker:full` builds and starts the static frontend variant. These are development/reference stacks with sample credentials, not finished enterprise deployment manifests.
+Both current Compose files contain PostgreSQL, Redis and all eight application services. The local file uses the Vite development frontend; `npm run docker:full` builds and starts the static frontend variant. These development/reference stacks require explicitly supplied credentials. Use the production overlay and preflight for a dedicated enterprise deployment.
 
 On an empty PostgreSQL volume, initialization creates the three databases. The local banking container runs migrations and explicitly enabled demo seeds, and stops on failure. Production forbids demo seeding and uses separate migration jobs.
 

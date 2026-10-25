@@ -155,3 +155,15 @@ PostgreSQL bootstrap tests, and older customer-service harnesses. Completion
 reports and benchmark numbers in historical files are not current deployment
 certification. The current bank data model is deployment-scoped; this service
 does not provide isolation for multiple enterprises sharing one banking database.
+
+## Confirmed, durable business mutations
+
+Apply migration `V10__durable_mutation_results.sql` before starting the updated service. All POST/PUT/PATCH/DELETE routes under accounts, transactions, transfers, cards, fraud and disputes now require the authenticated customer JWT, a bounded caller `Idempotency-Key`, and `X-Servicing-Confirmation`. Customer login/refresh remains the authentication boundary. Old business clients that omit the new headers are rejected before dispatch.
+
+The confirmation header is an HMAC attestation issued by trusted servicing code after the customer confirms the original request. It binds the verified customer and tenant, caller key, actual method/path/body, and a five-minute expiry. It is not a body boolean. Configure the same deployment-managed `SERVICING_SERVICE_TOKEN` (at least 32 bytes) in banking, MCP, orchestrator and operations; keep these services private and rotate their key together. The MCP adapter forwards the customer bearer token for bank ownership checks, not a server integration credential.
+
+The mutation guard holds one PostgreSQL transaction across repository reads/writes and the result ledger. Nested repository transactions reuse it; direct connection acquisition from a mutation is rejected. The current business handlers return terminal JSON. Other response styles fail closed. A completed duplicate replays the original HTTP status and JSON bytes without repeating controllers or requiring a fresh proof. Changing arguments with the same owner/key returns 409. HTTP 4xx/5xx and confirmed pre-dispatch failures roll back and are not cached; an explicit retry retains its original key. There is no automatic mutation retry.
+
+A lost COMMIT acknowledgement returns 202 with `outcome:uncertain`, the original reconciliation key, and `/api/v1/mutation-status/:key`. That authenticated GET is owner/tenant scoped: completed results return200; in-flight returns 202; authoritative absence returns 404 only after acquiring the same operation lock. Unavailable lookup does not establish absence. Reconcile the orchestrator ledger against this backend evidence before another action. Protect result-table access and retain active keys for the complete retry/reconciliation period; deleting a completed key early removes duplicate protection.
+
+Verification uses `BANKING_TEST_DATABASE_URL` pointing to a disposable database named `banking_test`. Tests create/drop isolated fixture databases and use counters, not customer accounts or live financial effects. They cover concurrent replay, proof binding, rollback after 400/503, non-JSON rejection, in-flight lookup, and recovery after a simulated lost COMMIT acknowledgement.

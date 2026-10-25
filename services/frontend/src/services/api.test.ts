@@ -106,3 +106,23 @@ describe('apiService NLU contract', () => {
       expect(clientMocks.post).not.toHaveBeenCalled();
     } finally { vi.unstubAllGlobals(); }
   });
+
+ test('channel grants use authenticated POST bodies and preserve the canonical conversation', async () => {
+   const grant = crypto.randomUUID().replace(/-/g, '').padEnd(43, 'a');
+   clientMocks.post.mockReset(); apiService.setSessionId('same-conversation');
+   clientMocks.post.mockResolvedValueOnce({ data: { grant, sessionId: 'same-conversation', targetChannel: 'ava', expiresAt: new Date(Date.now() + 300000).toISOString() } })
+     .mockResolvedValueOnce({ data: { sessionId: 'same-conversation', channel: 'ava' } });
+   const issued = await apiService.createChannelHandoff('ava');
+   const result = await apiService.resumeChannelHandoff(issued.grant, 'ava');
+   expect(clientMocks.post.mock.calls.map(call => [call[0], Object.keys(call[1])])).toEqual([
+     ['/sessions/same-conversation/handoff', ['targetChannel']], ['/sessions/resume', ['grant', 'targetChannel']],
+   ]);
+   expect(result).toEqual({ sessionId: 'same-conversation', channel: 'ava' });
+   expect(apiService.getSessionId()).toBe('same-conversation');
+ });
+ test('messages carry their displayed channel so stale voice or browser turns cannot silently dispatch', async () => {
+   clientMocks.post.mockReset(); apiService.setSessionId('same-conversation');
+   clientMocks.post.mockResolvedValue({ data: { message: 'Ready', conversation: { sessionId: 'same-conversation' } } });
+   await apiService.sendMessage('help', { channel: 'ava' });
+   expect(clientMocks.post.mock.calls[0][1].metadata).toEqual({ channel: 'ava' });
+ });

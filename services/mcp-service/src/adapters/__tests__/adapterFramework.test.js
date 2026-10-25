@@ -191,7 +191,7 @@ describe("generic HTTP execution", () => {
       { idempotencyKey: "key-1" },
     );
     expect(first.outcome).toBe("completed");
-    expect(second.replayed).toBe(true);
+    expect(second).toEqual(first);
     expect(second.data).toEqual({ caseId: "k1" });
     expect(client.calls).toHaveLength(1);
   });
@@ -218,11 +218,11 @@ describe("generic HTTP execution", () => {
       { idempotencyKey: "key-9" },
     );
     expect(replay.outcome).toBe("uncertain");
-    expect(replay.replayed).toBe(true);
+    expect(replay).toEqual(result);
     expect(client.calls).toHaveLength(1);
   });
 
-  test("a mutation backend error remains uncertain and raw errors do not escape", async () => {
+  test("a definitive backend failure is not cached and raw errors do not escape", async () => {
     const error = new Error("bad request");
     error.response = {
       status: 400,
@@ -237,16 +237,16 @@ describe("generic HTTP execution", () => {
       { customerId: "c1", subject: "Help" },
       { idempotencyKey: "key-2" },
     );
-    expect(result.outcome).toBe("uncertain");
+    expect(result.outcome).toBe("failed");
     expect(result.status).toBe(400);
     expect(result.error).not.toContain("subject required by backend");
-    // A backend HTTP error does not prove a mutation was rolled back.
+    // A definitive rejection permits an explicit same-key retry.
     await executor.execute(
       "create_case",
       { customerId: "c1", subject: "Help" },
       { idempotencyKey: "key-2" },
     );
-    expect(client.calls).toHaveLength(1);
+    expect(client.calls).toHaveLength(2);
   });
 
   test("reconcile uses the status endpoint instead of re-executing the mutation", async () => {

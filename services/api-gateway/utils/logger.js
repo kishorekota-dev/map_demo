@@ -1,4 +1,8 @@
 const winston = require('winston');
+const { operationalLog } = require('./operationalLog');
+const messages = require('./logMessages');
+const privacyFormat = winston.format(info => operationalLog(info, { service: 'poc-api-gateway', messages }));
+
 const path = require('path');
 const fs = require('fs');
 
@@ -92,6 +96,7 @@ const transports = [
 // Create logger instance
 const logger = winston.createLogger({
   levels,
+  format: winston.format.combine(winston.format.errors({ stack: true }), winston.format.splat(), privacyFormat()),
   transports,
   exitOnError: false
 });
@@ -104,7 +109,7 @@ logger.security = (message, meta = {}) => {
 // Stream object for Morgan
 logger.stream = {
   write: (message) => {
-    logger.http(message.trim());
+    logger.http('HTTP Request');
   }
 };
 
@@ -116,21 +121,9 @@ logger.requestMiddleware = (req, res, next) => {
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-    const logData = {
-      method: req.method,
-      url: req.originalUrl,
-      status: res.statusCode,
-      duration: `${duration}ms`,
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      requestId: req.id
-    };
-    
-    if (res.statusCode >= 400) {
-      logger.warn(`${req.method} ${req.originalUrl} ${res.statusCode}`, logData);
-    } else {
-      logger.http(`${req.method} ${req.originalUrl} ${res.statusCode}`, logData);
-    }
+    const logData = { method: req.method, statusCode: res.statusCode, duration };
+    if (res.statusCode >= 400) logger.warn('HTTP Request', logData);
+    else logger.http('HTTP Request', logData);
   });
   
   next();
@@ -140,7 +133,7 @@ logger.requestMiddleware = (req, res, next) => {
  * Error logger
  */
 logger.logError = (error, context = {}) => {
-  logger.error(error.message, {
+  logger.error('Operation failed', {
     error: error.name,
     stack: error.stack,
     ...context

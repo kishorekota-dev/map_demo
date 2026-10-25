@@ -19,9 +19,13 @@ const {
 } = require('@google-cloud/dialogflow');
 const logger = require('../utils/logger');
 const config = require('../config/config');
+const { clientOptions, unavailableError } = require('./dialogflow-credentials');
 
 class EnhancedDialogFlowService {
   constructor() {
+    if (config.env === 'production') {
+      throw new Error('The enhanced Dialogflow demonstration is disabled in production.');
+    }
     this.enabled = config.dialogflow.enabled;
     this.projectId = config.dialogflow.projectId;
     this.languageCode = config.dialogflow.languageCode || 'en-US';
@@ -38,8 +42,8 @@ class EnhancedDialogFlowService {
         this.initializeAllClients();
         logger.info('Enhanced DialogFlow SDK initialized with all clients');
       } catch (error) {
-        logger.error('Failed to initialize DialogFlow SDK', { error: error.message });
-        this.enabled = false;
+        logger.error('Failed to initialize DialogFlow SDK');
+        throw unavailableError();
       }
     } else {
       logger.info('DialogFlow SDK disabled - using mock mode');
@@ -50,18 +54,7 @@ class EnhancedDialogFlowService {
    * Initialize all DialogFlow SDK clients
    */
   initializeAllClients() {
-    if (!this.projectId) {
-      throw new Error('DialogFlow project ID not configured');
-    }
-    
-    const clientConfig = {
-      projectId: this.projectId
-    };
-    
-    // Add credentials if provided
-    if (config.dialogflow.keyFilename) {
-      clientConfig.keyFilename = config.dialogflow.keyFilename;
-    }
+    const clientConfig = clientOptions(config.dialogflow);
     
     try {
       // Initialize all SDK clients
@@ -73,14 +66,12 @@ class EnhancedDialogFlowService {
       
       logger.info('All DialogFlow SDK clients initialized successfully', {
         projectId: this.projectId,
-        hasCredentials: !!config.dialogflow.keyFilename,
+        hasCredentials: true,
         clients: ['Sessions', 'Intents', 'EntityTypes', 'Contexts', 'Agents']
       });
     } catch (error) {
-      logger.warn('DialogFlow SDK initialization failed, falling back to mock mode', {
-        error: error.message
-      });
-      throw error;
+      logger.error('Failed to initialize DialogFlow SDK');
+      throw unavailableError();
     }
   }
   
@@ -98,15 +89,14 @@ class EnhancedDialogFlowService {
       if (this.sessionsClient && this.enabled) {
         return await this.detectIntentWithSDK(message, sessionId, lang);
       } else {
+        if (config.env === 'production') throw unavailableError();
         // Fallback to mock
         return await this.detectIntentMock(message, sessionId, lang);
       }
     } catch (error) {
       logger.error('Intent detection failed', { error: error.message, sessionId });
       
-      // Fallback to mock on error
-      logger.warn('Falling back to mock detection');
-      return await this.detectIntentMock(message, sessionId, lang);
+      throw unavailableError();
     }
   }
   
@@ -535,6 +525,7 @@ class EnhancedDialogFlowService {
    * Mock intent detection for testing without API
    */
   async detectIntentMock(message, sessionId, languageCode) {
+    if (config.env === 'production') throw unavailableError();
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 100));
     

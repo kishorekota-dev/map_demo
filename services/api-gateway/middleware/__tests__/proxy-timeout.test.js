@@ -56,6 +56,7 @@ describe('proxy request budgets', () => {
     for (const code of ['ETIMEDOUT', 'ECONNABORTED', 'ERR_CANCELED', 'ECONNRESET']) {
       expect(retry.retryCondition({ code })).toBe(false);
     }
-    expect(retry.retryCondition({ code: 'ECONNREFUSED' })).toBe(true);
+    expect(retry.retries).toBe(0);
+    expect(retry.retryCondition({ code: 'ECONNREFUSED' })).toBe(false);
   });
 });

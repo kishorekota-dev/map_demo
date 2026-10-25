@@ -41,12 +41,7 @@ class OperationsStore {
         : null);
     this.manageSchema =
       options.manageSchema ?? process.env.OPERATIONS_MANAGE_SCHEMA !== "false";
-    this.pool?.on("error", (e) =>
-      console.error(
-        "Operations database unavailable:",
-        e.code || "database_error",
-      ),
-    );
+    this.pool?.on("error", () => console.error("Operations database unavailable."));
   }
   async initialize() {
     if (!this.pool)

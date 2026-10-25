@@ -19,6 +19,7 @@ function extractionMessages(extraction) {
 function createEvaluationRouter(options = {}) {
   const router = express.Router(); const env = options.env || process.env;
   router.post('/evaluate', async (req, res) => {
+    if (env.NODE_ENV === 'production') return res.status(403).json({ error: { code: 'LLM_EVALUATION_DISABLED', message: 'Synthetic model evaluation is disabled in production. Use a qualified staging environment.' } });
     const expected = env.SERVICING_SERVICE_TOKEN; const provided = req.get('X-Servicing-Service-Token') || '';
     if (!expected || Buffer.byteLength(provided) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) return res.status(403).json({ error: { code: 'QUALITY_SERVICE_AUTH_REQUIRED', message: 'Trusted evaluation worker identity is required.' } });
     try {

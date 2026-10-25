@@ -67,7 +67,8 @@ class RuntimePersistence {
     if (!interactionId) throw new Error('A durable interaction identifier is required for side effects');
     const executionContext = Object.fromEntries(['version', 'intent', 'channel', 'environment', 'cohort', 'confirmationRequired', 'confirmationVerified']
       .filter(key => ['string', 'number', 'boolean'].includes(typeof runtimeContext[key])).map(key => [key, runtimeContext[key]]));
-    if (executionContext.confirmationRequired === true && executionContext.confirmationVerified !== true) throw Object.assign(new Error('Verified confirmation is required before dispatch'), { code: 'CONFIRMATION_REQUIRED' });
+    if (executionContext.confirmationVerified !== true) throw Object.assign(new Error('Verified confirmation is required before dispatch'), { code: 'CONFIRMATION_REQUIRED' });
+    executionContext.confirmationRequired = true;
     if (context.getStore()?.lockValid() === false) throw new Error('Session coordination lost; action blocked');
     const operationId = digest(`${tenantId}:${sessionId}:${interactionId}:${tool}`);
     const requestHash = digest(JSON.stringify(stable(parameters)));
@@ -86,18 +87,23 @@ class RuntimePersistence {
     }
     if (prior) {
       if (prior.request_hash !== requestHash) throw Object.assign(new Error('Operation key conflicts with different action inputs'), { code: 'OPERATION_CONFLICT', operationId });
-      if (prior.status === 'succeeded') return { ...prior.result, operationId, replayed: true };
+      if (prior.status === 'succeeded') return { ...prior.result, operationId };
       if (prior.status === 'failed') throw Object.assign(new Error('This operation was reconciled as failed. Repeating the original operation is blocked.'), { code: 'OPERATION_FAILED', operationId });
       throw Object.assign(new Error('The previous action outcome requires reconciliation; it will not be repeated.'), { code: 'RECONCILIATION_REQUIRED', operationId });
     }
     try {
-      const result = await invoke();
-      if (result?.success === false || result?.isError === true) throw new Error('Adapter did not confirm successful completion');
+      const result = await invoke({ operationId, idempotencyKey: operationId });
+      if (result?.success === false || result?.isError === true || result?.outcome === 'uncertain') throw Object.assign(new Error('Adapter did not confirm successful completion'), { outcome: result?.outcome, status: result?.status });
       const safeResult = stable(result);
       if (durable) await database.query("UPDATE servicing_tool_operations SET status='succeeded',result=$2,updated_at=now() WHERE operation_id=$1", [operationId, JSON.stringify(safeResult)]);
       else this.memory.set(operationId, { ...this.memory.get(operationId), status: 'succeeded', result: safeResult });
       return { ...result, operationId };
     } catch (error) {
+      if (error.outcome !== 'uncertain' && (error.outcome === 'failed' || error.dispatched === false || (Number.isInteger(error.status) && error.status >= 400 && error.status <= 599))) {
+        if (durable) await database.query("DELETE FROM servicing_tool_operations WHERE operation_id=$1 AND status='dispatched'", [operationId]);
+        else this.memory.delete(operationId);
+        throw Object.assign(new Error('The backend rejected this request. The same operation key may be retried after correcting the failure.'), { code: 'OPERATION_REJECTED', status: error.status || 502, operationId, outcome: 'failed' });
+      }
       // Once dispatched, even a timeout or failed acknowledgement may conceal
       // a committed external effect. Never retry it on another transport.
       if (durable) await database.query("UPDATE servicing_tool_operations SET status='reconciliation_required',updated_at=now() WHERE operation_id=$1", [operationId]).catch(() => {});

@@ -16,6 +16,9 @@ import type {
   SystemStatus,
 } from '@/types';
 
+export type ConversationChannel = 'digital' | 'ava' | 'ivr';
+export interface ChannelHandoff { grant: string; expiresAt: string; sessionId: string; targetChannel: ConversationChannel }
+
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retried?: boolean;
 }
@@ -247,6 +250,7 @@ class ApiService {
     const response = await this.client.post('/chat/message', {
       message,
       context: context || {},
+      ...(context?.channel ? { metadata: { channel: context.channel } } : {}),
       sessionId,
     }, { timeout: getRuntimeConfig().chatRequestTimeoutMs });
     return this.mapChatResponse(unwrapPayload(response.data), sessionId);
@@ -284,6 +288,29 @@ class ApiService {
           outgoing?.agentInfo?.processingTime || payload?.agentResult?.processingTime,
       },
     };
+  }
+
+  public async getConversationChannel(sessionId = this.sessionId): Promise<ConversationChannel> {
+    const response = await this.client.get(`/sessions/${encodeURIComponent(sessionId)}`);
+    const channel = unwrapPayload(response.data)?.session?.metadata?.channel || 'digital';
+    if (!['digital', 'ava', 'ivr'].includes(channel)) throw new Error('The conversation channel could not be verified.');
+    return channel;
+  }
+
+  public async createChannelHandoff(targetChannel: ConversationChannel): Promise<ChannelHandoff> {
+    const sessionId = await this.ensureSession();
+    const response = await this.client.post(`/sessions/${encodeURIComponent(sessionId)}/handoff`, { targetChannel });
+    return unwrapPayload(response.data);
+  }
+
+  public async resumeChannelHandoff(grant: string, targetChannel: ConversationChannel): Promise<{ sessionId: string; channel: ConversationChannel }> {
+    // Never store grants in browser storage or URLs. Destination authentication
+    // is supplied by the normal verified access-token interceptor.
+    const response = await this.client.post('/sessions/resume', { grant, targetChannel });
+    const result = unwrapPayload(response.data);
+    if (result.channel !== targetChannel || typeof result.sessionId !== 'string') throw new Error('The destination conversation could not be verified.');
+    this.setSessionId(result.sessionId);
+    return { sessionId: result.sessionId, channel: result.channel };
   }
 
   public async getRecoveryContext(sessionId = this.sessionId): Promise<{ recoveryRequired: boolean }> {

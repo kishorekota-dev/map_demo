@@ -5,99 +5,45 @@ const logger = require('../utils/logger');
  * Catches and handles all application errors
  */
 const errorHandler = (err, req, res, next) => {
-  // Log the error details
-  logger.error('Application error occurred', {
-    error: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method,
-    userId: req.user?.id,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
-
-  // Default error response
-  let status = 500;
-  let response = {
-    error: 'Internal server error',
-    message: 'An unexpected error occurred',
-    code: 'INTERNAL_ERROR',
-    timestamp: new Date().toISOString(),
-    requestId: req.id || 'unknown'
+  const known = {
+    VALIDATION_ERROR: [400, 'Validation error', 'One or more fields are invalid.'],
+    NOT_FOUND: [404, 'Not found', 'The requested resource was not found.'],
+    UNAUTHORIZED: [401, 'Authentication error', 'A valid access token is required.'],
+    FORBIDDEN: [403, 'Access forbidden', 'This operation is not permitted.'],
+    CONFLICT: [409, 'Resource conflict', 'The request conflicts with the current resource state.'],
+    SERVICE_UNAVAILABLE: [503, 'Service unavailable', 'A required service is unavailable.'],
+    INSUFFICIENT_FUNDS: [400, 'Transaction declined', 'Insufficient funds for transaction.'],
+    DAILY_LIMIT_EXCEEDED: [400, 'Transaction declined', 'The daily transaction limit was exceeded.'],
+    ACCOUNT_BLOCKED: [403, 'Account unavailable', 'The account is currently blocked.'],
+    FRAUD_DETECTED: [403, 'Transaction declined', 'The transaction requires a security review.']
   };
-
-  // Handle specific error types
-  if (err.name === 'ValidationError') {
-    status = 400;
-    response = {
-      error: 'Validation error',
-      message: err.message,
-      code: 'VALIDATION_ERROR',
-      details: err.details || []
-    };
-  } else if (err.name === 'CastError') {
-    status = 400;
-    response = {
-      error: 'Invalid data format',
-      message: 'Invalid ID format or data type',
-      code: 'INVALID_FORMAT'
-    };
-  } else if (err.name === 'JsonWebTokenError') {
-    status = 401;
-    response = {
-      error: 'Authentication error',
-      message: 'Invalid authentication token',
-      code: 'INVALID_TOKEN'
-    };
-  } else if (err.name === 'TokenExpiredError') {
-    status = 401;
-    response = {
-      error: 'Authentication error',
-      message: 'Authentication token has expired',
-      code: 'TOKEN_EXPIRED'
-    };
-  } else if (err.code === 'ECONNREFUSED') {
-    status = 503;
-    response = {
-      error: 'Service unavailable',
-      message: 'Unable to connect to required services',
-      code: 'SERVICE_UNAVAILABLE'
-    };
-  } else if (err.code === 'ENOTFOUND') {
-    status = 503;
-    response = {
-      error: 'Service unavailable',
-      message: 'Required service not found',
-      code: 'SERVICE_NOT_FOUND'
-    };
-  } else if (err.name === 'TimeoutError') {
-    status = 504;
-    response = {
-      error: 'Request timeout',
-      message: 'The request took too long to process',
-      code: 'REQUEST_TIMEOUT'
-    };
-  } else if (err.status && err.message) {
-    // Handle HTTP errors with status codes
-    status = err.status;
-    response = {
-      error: err.message,
-      message: err.details || err.message,
-      code: err.code || 'HTTP_ERROR'
-    };
-  }
-
-  // Don't leak error details in production
-  if (process.env.NODE_ENV === 'production') {
-    delete response.stack;
-    if (status === 500) {
-      response.message = 'An unexpected error occurred';
-    }
+  const byName = {
+    ValidationError: ['VALIDATION_ERROR', 400, 'Validation error', 'One or more fields are invalid.'],
+    CastError: ['INVALID_FORMAT', 400, 'Invalid data format', 'Invalid identifier or data type.'],
+    JsonWebTokenError: ['INVALID_TOKEN', 401, 'Authentication error', 'Invalid authentication token.'],
+    TokenExpiredError: ['TOKEN_EXPIRED', 401, 'Authentication error', 'The authentication token has expired.'],
+    TimeoutError: ['REQUEST_TIMEOUT', 504, 'Request timeout', 'The request took too long to process.']
+  };
+  let status = 500;
+  let code = 'INTERNAL_ERROR';
+  let title = 'Internal server error';
+  let message = 'An unexpected error occurred.';
+  if (Object.hasOwn(known, err.code)) {
+    [status, title, message] = known[err.code];
+    code = err.code;
+  } else if (Object.hasOwn(byName, err.name)) {
+    [code, status, title, message] = byName[err.name];
+  } else if (['ECONNREFUSED', 'ENOTFOUND'].includes(err.code)) {
+    status = 503; code = 'SERVICE_UNAVAILABLE'; title = 'Service unavailable'; message = 'A required service is unavailable.';
   } else {
-    // Include stack trace in development
-    response.stack = err.stack;
+    const suppliedStatus = Number.isInteger(err.statusCode) ? err.statusCode : err.status;
+    if (Number.isInteger(suppliedStatus) && suppliedStatus >= 400 && suppliedStatus <= 599) {
+      status = suppliedStatus; code = 'HTTP_ERROR'; title = 'Request failed'; message = 'The request could not be completed.';
+    }
   }
-
+  // Error objects can contain SQL, credentials and provider bodies in any environment.
+  logger.error('Application error occurred', { method: req.method, statusCode: status });
+  const response = { error: title, message, code, timestamp: new Date().toISOString(), requestId: 'unknown' };
   res.status(status).json(response);
 };
 
@@ -105,16 +51,11 @@ const errorHandler = (err, req, res, next) => {
  * 404 Not Found handler
  */
 const notFoundHandler = (req, res) => {
-  logger.warn('Route not found', {
-    path: req.path,
-    method: req.method,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+  logger.warn('Route not found', { method: req.method, statusCode: 404 });
 
   res.status(404).json({
     error: 'Not found',
-    message: `Route ${req.method} ${req.path} not found`,
+    message: 'The requested route was not found.',
     code: 'ROUTE_NOT_FOUND',
     timestamp: new Date().toISOString(),
     availableRoutes: {

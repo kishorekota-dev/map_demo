@@ -16,7 +16,7 @@ app.post('/auth/token', (req, res) => {
     return res.json({
         success: true,
         userId,
-        token: jwt.sign({ userId }, secret),
+        token: jwt.sign({ userId, role: 'agent', type: 'access' }, secret, { expiresIn: '5m' }),
         agent: { name: 'Browser Test Agent', department: 'customer-service' }
     });
 });
@@ -24,7 +24,7 @@ app.post('/auth/token', (req, res) => {
 app.post('/auth/validate', (req, res) => {
     try {
         const decoded = jwt.verify(req.body?.token, secret);
-        res.json({ valid: true, userId: decoded.userId });
+        res.json({ valid: true, userId: decoded.userId, roles: [decoded.role], expires: new Date(decoded.exp * 1000).toISOString() });
     } catch (error) {
         res.status(401).json({ valid: false });
     }

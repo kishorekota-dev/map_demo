@@ -12,11 +12,10 @@ const errorHandler = (err, req, res, next) => {
     method: req.method
   });
 
-  res.status(err.status || 500).json({
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;
+  res.status(status).json({
     success: false,
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message
+    error: 'Request could not be completed'
   });
 };
 

@@ -95,16 +95,19 @@ class SocketHandler {
             const principal = this.connectedClients.get(socket.id);
             try {
                 this.assertAuthenticated(principal);
-                socket.emit('handoffCreated', await this.handoffService.issue(principal, principal.sessionId, data.targetChannel));
+                const transfer = await this.handoffService.issue(principal, principal.sessionId, data.targetChannel);
+                this.assertAuthenticated(principal);
+                socket.emit('handoffCreated', transfer);
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
         socket.on('resumeSession', async (data = {}) => {
             const principal = this.connectedClients.get(socket.id);
             try {
                 this.assertAuthenticated(principal);
-                const result = await this.handoffService.resume(principal, data.grant, principal.authToken);
-                principal.sessionId = result.sessionId;
-                await socket.join(`session:${result.sessionId}`);
+                const result = await this.handoffService.resume(principal, data.grant, principal.authToken, data.targetChannel);
+                this.assertAuthenticated(principal);
+                await this.moveSocketSession(principal, result.sessionId);
+                principal.channel = result.channel;
                 socket.emit('sessionResumed', result);
             } catch (error) { socket.emit('sessionError', { error: error.message }); }
         });
@@ -140,6 +143,7 @@ class SocketHandler {
                     await this.moveSocketSession(principal, session.sessionId);
                     principal.agentAssignments.set(session.sessionId, agentId);
                     const history = await this.chatService.getConversationHistory(session.sessionId);
+                    this.assertAuthenticated(principal);
                     socket.emit('liveAgentStarted', { sessionId: session.sessionId, agentId, transferContext: buildTransferContext(current, history) });
                 });
                 await this.broadcastToSession(session.sessionId, 'liveAgentJoined', { sessionId: session.sessionId, agentId });
@@ -304,23 +308,17 @@ class SocketHandler {
 
             switch (type) {
                 case 'getSessionHistory': {
-                    const session = await this.sessionManager.getSession(data.sessionId);
-                    if (!session) return respond(false, 'Session not found');
-                    const requestedAgentId = this.getRequestedAgentId(data)
-                        || clientInfo.agentAssignments?.get(data.sessionId);
-                    const access = this.getAssignedSessionAccess(
-                        clientInfo,
-                        session,
-                        requestedAgentId,
-                        { requireActive: false }
-                    );
-                    if (!access.authorized) return respond(false, 'Access denied');
-                    const history = await this.chatService.getMessageHistory?.(data.sessionId)
-                        ?? await this.chatService.getConversationHistory?.(data.sessionId)
-                        ?? session.messages
-                        ?? session.state?.conversationHistory
-                        ?? [];
-                    return respond(true, { sessionId: data.sessionId, messages: history });
+                    return await this.withLiveSession(clientInfo, data.sessionId, async session => {
+                        const requestedAgentId = this.getRequestedAgentId(data)
+                            || clientInfo.agentAssignments?.get(data.sessionId);
+                        const access = this.getAssignedSessionAccess(clientInfo, session, requestedAgentId, { requireActive: false });
+                        if (!access.authorized) return respond(false, 'Access denied');
+                        const history = await this.chatService.getMessageHistory?.(data.sessionId)
+                            ?? await this.chatService.getConversationHistory?.(data.sessionId)
+                            ?? session.messages ?? session.state?.conversationHistory ?? [];
+                        this.assertAuthenticated(clientInfo);
+                        return respond(true, { sessionId: data.sessionId, messages: history });
+                    });
                 }
 
                 case 'sendMessage': {
@@ -531,7 +529,7 @@ class SocketHandler {
                     if (isLiveAgentSession(current) || current.state?.pendingFeedback || current.state?.workflowRecoveryRequired) return;
                     const queued = this.liveAgentQueue.enqueue({ queue, sessionId: data.sessionId, customerId: current.userId, intent: current.state?.lastIntent || null });
                     await this.sessionManager.updateSessionState(data.sessionId, { liveAgentRequestedAt: queued.requestedAt, liveAgentQueue: queue });
-                    this.io.to('agents').emit('escalationRequested', { sessionId: data.sessionId, queue, requestedAt: queued.requestedAt, reason: 'human_assistance_required' });
+                    this.io.to('agents').emit('escalationRequested', { sessionId: data.sessionId, intent: current.state?.lastIntent || null, queue, requestedAt: queued.requestedAt, reason: 'human_assistance_required' });
                 });
                 await this.broadcastToSession(data.sessionId, 'humanEscalation', { sessionId: data.sessionId, queue, reason: 'human_assistance_required' });
             } catch { logger.error('Live assistance queue unavailable', { sessionId: data.sessionId }); }
@@ -566,7 +564,7 @@ class SocketHandler {
                 try {
                     const decoded = jwt.verify(
                         data.token,
-                        process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+                        process.env.JWT_SECRET,
                         { algorithms: ['HS256'] }
                     );
                     const tenantId = decoded.tenantId || decoded.tenant_id || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
@@ -735,6 +733,7 @@ class SocketHandler {
 
             // Update client info
             clientInfo.sessionId = session.sessionId;
+            clientInfo.channel = session.metadata?.channel || 'digital';
 
             // Join socket room for this session
             socket.join(`session:${session.sessionId}`);
@@ -781,53 +780,57 @@ class SocketHandler {
             }
 
             this.assertAuthenticated(clientInfo);
-            // Get session info
-            const session = await this.sessionManager.getSession(data.sessionId, { refresh: true });
-            if (!session) {
-                socket.emit('sessionError', { error: 'Session not found' });
-                return;
-            }
+            const join = async session => {
+                if (!session) {
+                    socket.emit('sessionError', { error: 'Session not found' });
+                    return;
+                }
 
-            const ownsSession = session.userId !== undefined
-                && session.userId !== null
-                && clientInfo.userId !== undefined
-                && clientInfo.userId !== null
-                && String(session.userId) === String(clientInfo.userId);
-            const requestedAgentId = this.getRequestedAgentId(data)
-                || clientInfo.agentAssignments?.get(data.sessionId);
-            const agentAccess = this.getAssignedSessionAccess(
-                clientInfo,
-                session,
-                requestedAgentId
-            );
+                const ownsSession = session.userId !== undefined
+                    && session.userId !== null
+                    && clientInfo.userId !== undefined
+                    && clientInfo.userId !== null
+                    && String(session.userId) === String(clientInfo.userId);
+                const requestedAgentId = this.getRequestedAgentId(data)
+                    || clientInfo.agentAssignments?.get(data.sessionId);
+                const agentAccess = this.getAssignedSessionAccess(
+                    clientInfo,
+                    session,
+                    requestedAgentId
+                );
 
-            // Customers may join their own session. A direct agent must be the
-            // active assignee; the trusted Agent UI service must identify the
-            // active assignee it is relaying for (or have just assigned it on
-            // this socket).
-            if (!this.sameTenant(clientInfo, session) || (!ownsSession && !agentAccess.authorized)) {
-                socket.emit('sessionError', { error: 'Access denied' });
-                return;
-            }
+                // Customers may join their own session. A direct agent must be the
+                // active assignee; the trusted Agent UI service must identify the
+                // active assignee it is relaying for (or have just assigned it on
+                // this socket).
+                if (!this.sameTenant(clientInfo, session) || (!ownsSession && !agentAccess.authorized)) {
+                    socket.emit('sessionError', { error: 'Access denied' });
+                    return;
+                }
 
-            // Update client info
-            await this.moveSocketSession(clientInfo, data.sessionId);
+                // Update client info
+                await this.moveSocketSession(clientInfo, data.sessionId);
+                clientInfo.channel = session.metadata?.channel || 'digital';
 
-            // Get conversation history
-            const history = await this.chatService.getConversationHistory(data.sessionId);
+                // Get conversation history
+                const history = await this.chatService.getConversationHistory(data.sessionId);
 
-            logger.info('Session joined', {
-                socketId: socket.id,
-                userId: clientInfo.userId,
-                sessionId: data.sessionId
-            });
+                logger.info('Session joined', {
+                    socketId: socket.id,
+                    userId: clientInfo.userId,
+                    sessionId: data.sessionId
+                });
 
-            socket.emit('sessionJoined', {
-                sessionId: data.sessionId,
-                session,
-                conversationHistory: history,
-                timestamp: new Date().toISOString()
-            });
+                this.assertAuthenticated(clientInfo);
+                socket.emit('sessionJoined', {
+                    sessionId: data.sessionId,
+                    session,
+                    conversationHistory: history,
+                    timestamp: new Date().toISOString()
+                });
+            };
+            if (clientInfo.isAgentPrincipal) return await this.withLiveSession(clientInfo, data.sessionId, join);
+            return await join(await this.sessionManager.getSession(data.sessionId, { refresh: true }));
 
         } catch (error) {
             logger.error('Session join error', {
@@ -878,6 +881,10 @@ class SocketHandler {
             if (!liveSession || !this.sameTenant(clientInfo, liveSession)) throw new Error('Session access denied');
             if (clientInfo.isAgentPrincipal && !this.getAssignedSessionAccess(clientInfo, liveSession, clientInfo.agentAssignments?.get(clientInfo.sessionId)).authorized) throw new Error('Access denied');
             if (!clientInfo.isAgentPrincipal && String(liveSession.userId) !== String(clientInfo.userId)) throw new Error('Access denied');
+            const expectedChannel = clientInfo.channel || 'digital';
+            if (!clientInfo.isAgentPrincipal && (expectedChannel === 'ivr' || expectedChannel !== (liveSession.metadata?.channel || 'digital'))) {
+                throw new Error('Conversation channel has changed; resume it in Digital or AVA before sending messages');
+            }
             if (!isLiveAgentSession(liveSession) && liveSession.state?.liveAgentRequestedAt && !hasLiveRequest(liveSession)) throw new Error('Live request expired; request assistance again or end live chat');
             if (isLiveAgentSession(liveSession) || hasLiveRequest(liveSession)) {
                 return await this.withLiveSession(clientInfo, clientInfo.sessionId, async current => {
@@ -955,7 +962,7 @@ class SocketHandler {
             };
             conversationContext.userId = clientInfo.userId;
             conversationContext.authToken = clientInfo.authToken || null;
-            conversationContext.channel = session?.metadata?.channel || 'digital';
+            conversationContext.channel = expectedChannel;
             conversationContext.interactionId = typeof data.clientMessageId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(data.clientMessageId) ? data.clientMessageId : message.id;
 
             // Process through agent orchestrator (deterministic NLU -> workflow)
@@ -996,8 +1003,7 @@ class SocketHandler {
             logger.error('Message processing error', {
                 error: error.message,
                 socketId: socket.id,
-                sessionId: clientInfo?.sessionId,
-                messageContent: data?.content?.substring(0, 100)
+                sessionId: clientInfo?.sessionId
             });
             socket.emit('messageError', { error: 'Failed to process message' });
         }

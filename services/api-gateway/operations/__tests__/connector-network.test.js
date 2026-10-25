@@ -98,4 +98,16 @@ describe("connector network isolation and deadlines", () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+  test.each([400, 503])('mutation HTTP %s is definitive even with a malformed unfinished response body', async status => {
+    const server = http.createServer((req, res) => {
+      req.resume();
+      req.on('end', () => { res.writeHead(status); res.write('<invalid-json>'); });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const response = await requestConnector({ baseUrl: `http://127.0.0.1:${server.address().port}`, timeoutMs: 500 }, '/cases',
+        { env: { NODE_ENV: 'test', CONNECTOR_ALLOW_LOCAL: 'true' }, method: 'POST', headers: { 'Idempotency-Key': 'rejected-request' }, body: { operationId: 'rejected-request' } });
+      expect(response).toEqual({ status, data: {} });
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  });
 });

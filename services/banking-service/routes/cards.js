@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+router.use(require('../middleware/durableMutation').durableMutation);
 const cardController = require('../controllers/cards');
 const { validators } = require('../middleware/validation');
 const { verifyAccountOwnership, verifyCardOwnership } = require('../middleware/auth');

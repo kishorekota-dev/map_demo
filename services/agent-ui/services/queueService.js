@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const logger = require('./logger');
 const { getRedisClient } = require('./redisClient');
+const { intent } = require('./queuePrivacy');
 
 // Redis key under which a full queue snapshot is persisted.
 const QUEUE_REDIS_KEY = 'agent-ui:queue';
@@ -111,6 +112,7 @@ class QueueService extends EventEmitter {
      */
     async addToQueue(chatSession, priority = 'medium', requirements = {}) {
         try {
+            if (typeof chatSession?.sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(chatSession.sessionId)) throw new Error('Invalid chat session identity');
             // Check queue capacity
             if (this.chatQueue.size >= this.maxQueueSize) {
                 throw new Error('Queue is at maximum capacity');
@@ -120,6 +122,7 @@ class QueueService extends EventEmitter {
             const queueEntry = {
                 queueId,
                 sessionId: chatSession.sessionId,
+                intent: intent(chatSession.intent),
                 customerId: chatSession.customerId,
                 customerName: chatSession.customerName || 'Anonymous',
                 priority: this.normalizePriority(priority),
@@ -138,8 +141,8 @@ class QueueService extends EventEmitter {
                 escalationReason: chatSession.escalationReason || null,
                 previousAgent: chatSession.previousAgent || null,
                 customerData: {
-                    accountType: chatSession.customerData?.accountType || 'standard',
-                    membershipLevel: chatSession.customerData?.membershipLevel || 'basic',
+                    accountType: null, // Account facts require an authoritative owning-service integration.
+                    membershipLevel: null,
                     issueType: chatSession.issueType || 'general',
                     urgency: chatSession.urgency || 'medium',
                     complexity: chatSession.complexity || 'standard'

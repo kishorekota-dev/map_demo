@@ -134,11 +134,7 @@ function createAdapterApiRoutes(registryInstance, env = process.env) {
           .json({ success: false, error: "parameters must be an object" });
       }
       logger.info("Executing generic adapter tool", {
-        adapterId,
-        toolName,
-        sessionId,
-        parameters: parameters ? Object.keys(parameters) : [],
-        idempotencyKey: Boolean(idempotencyKey),
+        operation: "execute",
       });
       const result = await executor.execute(toolName, parameters || {}, {
         idempotencyKey: idempotencyKey ?? null,
@@ -162,9 +158,7 @@ function createAdapterApiRoutes(registryInstance, env = process.env) {
         return res.status(404).json({ success: false, error: error.message });
       }
       logger.error("Generic adapter execution failed", {
-        adapterId,
-        toolName,
-        code: error.code || error.name,
+        operation: "execute",
       });
       return respondError(res, error);
     }
@@ -194,8 +188,7 @@ function createAdapterApiRoutes(registryInstance, env = process.env) {
       return res.json({ success: result.outcome === "completed", ...result });
     } catch (error) {
       logger.error("Generic adapter reconciliation failed", {
-        adapterId,
-        code: error.code || error.name,
+        operation: "reconcile",
       });
       return respondError(res, error);
     }

@@ -109,6 +109,19 @@ test('expired socket identity is revoked before history or transcript delivery',
   expect(eventCalls(old.socket, 'newMessage')).toHaveLength(0);
 });
 
+test('history authorization uses fresh assignment state and rechecks expiry after loading', async () => {
+  const h = harness(assigned()); const old = h.add('agent-7', true);
+  h.sessions.getSession.mockImplementation(async (_id, options) => ({ ...structuredClone(h.session), state: options?.refresh ? { ...assigned(), assignedAgentId: 'agent-8', liveAgentId: 'agent-8' } : assigned() }));
+  await h.handler.handleAgentRequest(old.socket, { requestId: 'stale', type: 'getSessionHistory', data: { sessionId: h.session.sessionId } });
+  expect(h.chat.getConversationHistory).not.toHaveBeenCalled();
+  expect(old.socket.emit.mock.calls.find(([event]) => event === 'response')[1].success).toBe(false);
+  h.sessions.getSession.mockImplementation(async () => structuredClone(h.session));
+  h.chat.getConversationHistory.mockImplementationOnce(async () => { old.client.authExpiresAt = Date.now() - 1; return [{ content: 'Private transcript' }]; });
+  old.socket.emit.mockClear();
+  await h.handler.handleAgentRequest(old.socket, { requestId: 'expired-during-read', type: 'getSessionHistory', data: { sessionId: h.session.sessionId } });
+  expect(old.socket.emit.mock.calls.find(([event]) => event === 'response')[1].success).toBe(false);
+});
+
 test('persistence failure emits no stored acknowledgment or message disclosure', async () => {
   const h = harness(assigned()); const owner = h.add('customer'); h.chat.processMessage.mockRejectedValueOnce(new Error('Unavailable'));
   await h.handler.handleSendMessage(owner.socket, { content: 'A message' });

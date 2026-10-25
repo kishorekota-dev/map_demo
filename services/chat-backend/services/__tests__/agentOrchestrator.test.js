@@ -99,7 +99,7 @@ describe('AgentOrchestrator NLU contract', () => {
     expect(orchestrator.callOrchestrator).toHaveBeenCalledTimes(2);
     for (const [request] of orchestrator.callOrchestrator.mock.calls) {
       expect(request).toMatchObject({ path: '/api/orchestrator/feedback',
-        payload: { sessionId: 's', response: 'yes', confirmed: true } });
+        payload: { sessionId: 's', response: 'yes', confirmed: true, expectedChannel: 'digital' } });
     }
     expect(retry.conversationContextUpdates).toMatchObject({ pendingFeedback: null, lockedIntent: null });
   });
@@ -199,3 +199,11 @@ describe('AgentOrchestrator request deadlines', () => {
     axios.post.mockRejectedValueOnce({ response: { status: 404, data: { code: 'WORKFLOW_SESSION_NOT_FOUND' } }, message: 'not found' });
     await expect(orchestrator.recoverWorkflow('never-dispatched','fresh')).rejects.toMatchObject({ status: 404, upstreamCode: 'WORKFLOW_SESSION_NOT_FOUND' });
   });
+
+ test('a verified channel race does not mark an undispatched mutation uncertain', async () => {
+   const orchestrator = new AgentOrchestrator();
+   orchestrator.callOrchestrator = jest.fn(async () => { throw Object.assign(new Error('changed'), { status: 409, upstreamCode: 'CHANNEL_CHANGED' }); });
+   const result = await orchestrator.processMessage('s', { id: 'm', content: 'yes' }, { channel: 'ivr', pendingFeedback: { type: 'confirmation_required', intent: 'transfer_funds' } });
+   expect(result.finalResponse.metadata.policyCode).toBe('channel_changed');
+   expect(result.conversationContextUpdates).toEqual({ workflowRecoveryRequired: false });
+ });

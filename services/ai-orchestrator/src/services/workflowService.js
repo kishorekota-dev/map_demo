@@ -11,6 +11,8 @@ const { randomUUID } = require('crypto');
 const RuntimeIntegrations = require('./runtimeIntegrations');
 const { isLlmError, modelUnavailable } = require('../llm/errors');
 const { graphThreadId } = require('../utils/checkpointer');
+const { issueProof, toolArguments } = require('./mutationProof');
+const { confirmationContext, matchesConfirmation } = require('./actionConfirmation');
 
 /**
  * Workflow Service
@@ -30,9 +32,13 @@ class WorkflowService {
           await this.integrations.event({ sessionId, interactionId, ...runtimeContext, stage: 'authorization', outcome: runtimeContext?.confirmationRequired ? (runtimeContext.confirmationVerified ? 'confirmed' : 'confirmation_missing') : 'confirmation_not_required',
             metadata: { tool, confirmationRequired: runtimeContext?.confirmationRequired === true, confirmationVerified: runtimeContext?.confirmationVerified === true } }, toolParameters.authToken);
           const result = await this.persistence.execute({ tenantId: tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
-            interactionId, sessionId, tool, parameters: toolParameters, runtimeContext }, async () => {
+            interactionId, sessionId, tool, parameters: toolParameters, runtimeContext }, async operation => {
             callId = randomUUID();
-            return target.executeTool(tool, toolParameters, sessionId);
+            if (!operation) return target.executeTool(tool, toolParameters, sessionId);
+            const tenant = tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+            const confirmationProof = issueProof({ scope: 'banking_tool', principalId: String(toolParameters.userId || ''), tenantId: tenant,
+              key: operation.idempotencyKey, method: 'CALL', path: tool, body: toolArguments(toolParameters) });
+            return target.executeTool(tool, { ...toolParameters, tenantId: tenant, idempotencyKey: operation.idempotencyKey, confirmationProof }, sessionId);
           });
           const evidence = await this.integrations.event({ sessionId, interactionId, ...runtimeContext, stage: 'tool', outcome: 'succeeded', operationId: result.operationId, durationMs: Date.now() - started }, toolParameters.authToken);
           return { ...result, ...(evidence.id ? { evidenceId: evidence.id } : {}), ...(evidence.telemetryUnavailable ? { telemetryUnavailable: true } : {}) };
@@ -71,6 +77,7 @@ class WorkflowService {
       if (current && (String(current.userId) !== String(input.userId) || (current.metadata?.tenantId && current.metadata.tenantId !== tenant))) {
         throw Object.assign(new Error('Session access denied'), { status: 403 });
       }
+      if (input.expectedChannel && current?.metadata?.channel && input.expectedChannel !== current.metadata.channel) throw Object.assign(new Error('Conversation channel has changed'), { status: 409, code: 'CHANNEL_CHANGED' });
       if (current?.metadata?.graphRun?.status === 'running') return this.controlPlaneBlock('workflow_recovery_required', { version: current.metadata.controlPlane?.version, recoveryRequired: true });
       return this.withEvidence(enriched, () => this.processMessageInSession(enriched));
     }));
@@ -121,7 +128,7 @@ class WorkflowService {
       metadata: { confidence: recognition.confidence, recognitionSource: recognition.source } }, input.authToken);
     if (!intent) {
       const route = { version: snapshot.version, environment: snapshot.environment, cohort: snapshot.cohort, channel, intent: 'general_inquiry', queue: snapshot.config.channels.find(entry => entry.id === channel)?.queue, recognition };
-      if (snapshot.config.recognition?.ambiguityAction === 'human') return this.routeToHuman(input, route, 'recognition_uncertain', snapshot.config.prompts.handoffText);
+      if (snapshot.config.recognition?.ambiguityAction === 'human') return this.routeToHuman({ ...input, metadata: { ...input.metadata, controlPlane: snapshot, channel } }, route, 'recognition_uncertain', snapshot.config.prompts.handoffText);
       return { type: 'clarification_required', needsHumanInput: false, response: snapshot.config.prompts.clarificationText || 'Could you clarify which service you need?', metadata: route,
         evidenceIds: recognitionEvidence.id ? [recognitionEvidence.id] : [],
         candidates: recognition.candidates.slice(0, 3).map(candidate => ({ id: candidate.intent, name: snapshot.config.intents.find(entry => entry.id === candidate.intent)?.name })) };
@@ -203,17 +210,34 @@ class WorkflowService {
 
   async routeToHuman(input, route, reason, wording = null) {
     try {
-      const servicingCase = await this.integrations.createCase({ ...input, intent: route.intent, interactionId: input.metadata?.interactionId, runtimeContext: route }, reason);
-      return { type: 'human_escalation', message: wording || 'Your request has been queued for a support specialist.', intent: route.intent,
-        needsHumanInput: false, currentStep: 'control_plane_routing', caseId: servicingCase.id, metadata: { ...route, caseId: servicingCase.id } };
+      let session = await this.sessionManager.getSession(input.sessionId);
+      if (!session) session = await this.sessionManager.createSession(input.userId, input.sessionId, route.intent, { ...input.metadata, runtimeContext: route });
+      const metadata = { ...session.metadata, ...input.metadata, runtimeContext: route };
+      await this.sessionManager.updateSession(input.sessionId, { metadata, intent: route.intent });
+      const state = { sessionId: input.sessionId, userId: session.userId, intent: route.intent, collectedData: session.collectedData,
+        channel: metadata.channel || route.channel, tenantId: metadata.tenantId, interactionId: metadata.interactionId, runtimeContext: route };
+      const details = { confirmation: confirmationContext(state, [], 'handoff'), handoff: { reason, wording } };
+      const question = 'Would you like me to create a support request for a specialist? Please confirm to continue.';
+      const executionId = randomUUID();
+      await WorkflowExecution.create({ sessionId: input.sessionId, executionId, intent: route.intent, input: { type: 'handoff_confirmation', version: route.version },
+        output: { type: 'confirmation_required', question, details }, status: 'completed', currentNode: 'request_confirmation', completedAt: new Date() });
+      await HumanFeedback.create({ sessionId: input.sessionId, executionId, feedbackType: 'confirmation', question, context: details, status: 'pending', expiresAt: new Date(Date.now() + 300000) });
+      await this.sessionManager.updateSession(input.sessionId, { status: 'waiting_human_input', currentStep: 'request_confirmation' });
+      return { type: 'confirmation_required', question, action: 'human_handoff', details, intent: route.intent, needsHumanInput: true, metadata: route };
     } catch (_error) {
-      return { type: 'policy_blocked', code: 'case_creation_unavailable', message: 'We could not queue your request. Please try again or contact support.', needsHumanInput: false, metadata: route };
+      return { type: 'policy_blocked', code: 'case_creation_unavailable', message: 'We could not prepare the support request confirmation. Please try again or contact support.', needsHumanInput: false, metadata: route };
     }
   }
 
   async executeGeneric(state) {
     if (intentMapper.getBaseIntent(state.intent) === 'knowledge_search') return this.integrations.knowledge(state);
-    const servicingCase = await this.integrations.createCase(state);
+    let servicingCase;
+    try { servicingCase = await this.integrations.createCase(state); }
+    catch (error) {
+      if (error.code === 'RECONCILIATION_REQUIRED') return { type: 'reconciliation_required', operationId: error.operationId, reconcilePath: error.reconcilePath,
+        response: 'The support request outcome is unconfirmed. Contact a support operator to reconcile it before trying again.', intent: state.intent };
+      throw error;
+    }
     return { type: 'complete', response: `Your service request has been created. Reference: ${servicingCase.id}.`, caseId: servicingCase.id, generationSource: 'servicing-case', intent: state.intent };
   }
 
@@ -309,6 +333,7 @@ class WorkflowService {
         interactionId: session.metadata?.interactionId || metadata.interactionId,
         tenantId: session.metadata?.tenantId || metadata.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
         runtimeContext: metadata.runtimeContext || session.metadata?.runtimeContext,
+        channel: session.metadata?.channel || metadata.channel,
         intent,
         question,
         conversationHistory: session.conversationHistory,
@@ -457,7 +482,11 @@ class WorkflowService {
    * Process human feedback
    */
   async processHumanFeedback(input) {
-    return this.requestMutex.runExclusive(input.sessionId, () => this.persistence.runSession(process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise', input.sessionId, () => this.withEvidence(input, () => this.processFeedbackInSession(input))));
+    return this.requestMutex.runExclusive(input.sessionId, () => this.persistence.runSession(process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise', input.sessionId, async () => {
+      const current = await this.sessionManager.getSession(input.sessionId);
+      if (input.expectedChannel && current?.metadata?.channel && input.expectedChannel !== current.metadata.channel) throw Object.assign(new Error('Conversation channel has changed'), { status: 409, code: 'CHANNEL_CHANGED' });
+      return this.withEvidence(input, () => this.processFeedbackInSession(input));
+    }));
   }
 
   async processFeedbackInSession(input) {
@@ -473,15 +502,7 @@ class WorkflowService {
     } catch (error) {
       return this.controlPlaneBlock('configuration_unavailable');
     }
-    if (route.action === 'human') {
-      const result = await this.routeToHuman({ ...input, userId: session.userId, metadata: session.metadata }, route, route.reason, snapshot.config.prompts.handoffText);
-      if (result.caseId) {
-        await HumanFeedback.update({ status: 'cancelled' }, { where: { sessionId: input.sessionId, status: 'pending' } });
-        await this.sessionManager.updateSession(input.sessionId, { status: 'active', currentStep: 'human_handoff', requiredData: [] });
-      }
-      return result;
-    }
-    if (route.action !== 'automated') return this.controlPlaneBlock(route.reason, route);
+    if (!['automated', 'human'].includes(route.action)) return this.controlPlaneBlock(route.reason, route);
     return intentMapper.withPublishedIntents(snapshot.config.intents, async () => {
       const result = await this.processConfiguredFeedback(input);
       return { ...result, intent: session.intent, metadata: { ...(result.metadata || {}), ...route } };
@@ -557,7 +578,8 @@ class WorkflowService {
       const latestUserMessage = this.getLatestUserMessage(session);
       // Recompute from the pinned intent allowlist; feedback JSON is not an
       // independent authority to execute tools.
-      const tools = this.workflow.getToolsForState({
+      const handoff = feedback.context?.handoff;
+      const tools = handoff ? [] : this.workflow.getToolsForState({
           intent: session.intent,
           collectedData: session.collectedData
         });
@@ -567,7 +589,7 @@ class WorkflowService {
       // tool calls (or the same re-prompt) as the graph path for identical
       // input + state. Without this, range/enum/pattern rules (e.g. amount max,
       // recipient pattern) are silently skipped on the confirmation path.
-      const validationResult = intentMapper.validateData(session.intent, session.collectedData);
+      const validationResult = handoff ? { valid: true } : intentMapper.validateData(session.intent, session.collectedData);
       if (!validationResult.valid) {
         const pendingFields = [...new Set([
           ...(validationResult.missing || []),
@@ -604,6 +626,30 @@ class WorkflowService {
         );
         await this.sessionManager.updateSession(sessionId, { status: 'active', currentStep: 'policy_pre_tool' });
         return { currentStep: 'policy_pre_tool', needsHumanInput: false, ...this.buildPolicyResponse(authBlock) };
+      }
+
+      const confirmationState = { sessionId, userId: session.userId, intent: session.intent, collectedData: session.collectedData,
+        channel: session.metadata?.channel || session.metadata?.runtimeContext?.channel, tenantId: session.metadata?.tenantId, interactionId: session.metadata?.interactionId, runtimeContext: session.metadata?.runtimeContext };
+      if (!matchesConfirmation(feedback.context?.confirmation, confirmationState, tools, handoff ? 'handoff' : 'banking')) {
+        if (handoff) return this.routeToHuman({ sessionId, userId: session.userId, metadata: session.metadata }, session.metadata.runtimeContext, handoff.reason, handoff.wording);
+        const refreshed = await this.workflow.requestConfirmation(confirmationState);
+        if (!refreshed.finalResponse || !feedback.executionId) return { type: 'cancelled', code: 'confirmation_changed', message: 'The pending request cannot be verified. Please repeat your request.', needsHumanInput: false };
+        await HumanFeedback.create({ sessionId, executionId: feedback.executionId, feedbackType: 'confirmation', question: refreshed.finalResponse.question,
+          context: refreshed.finalResponse.details, status: 'pending', expiresAt: new Date(Date.now() + 300000) });
+        return { ...refreshed.finalResponse, code: 'confirmation_changed', currentStep: 'request_confirmation', needsHumanInput: true };
+      }
+      if (handoff) {
+        try {
+          const servicingCase = await this.integrations.createCase({ ...confirmationState, authToken, confirmationGranted: true }, handoff.reason);
+          await this.sessionManager.updateSession(sessionId, { status: 'active', currentStep: 'human_handoff', requiredData: [] });
+          return { type: 'human_escalation', message: handoff.wording || 'Your request has been queued for a support specialist.', intent: session.intent,
+            needsHumanInput: false, caseId: servicingCase.id, metadata: { ...session.metadata.runtimeContext, caseId: servicingCase.id } };
+        } catch (error) {
+          if (error.code === 'RECONCILIATION_REQUIRED') return { type: 'reconciliation_required', operationId: error.operationId, reconcilePath: error.reconcilePath,
+            message: 'The support request outcome is unconfirmed. Contact a support operator to reconcile it before trying again.', needsHumanInput: false };
+          await this.sessionManager.updateSession(sessionId, { status: 'active', currentStep: 'human_handoff_failed', requiredData: [] });
+          return { type: 'policy_blocked', code: 'case_creation_unavailable', message: 'The support request was not accepted. Please try again or contact support.', needsHumanInput: false };
+        }
       }
 
       const policyDecision = this.policyEngine.evaluateToolExecution({

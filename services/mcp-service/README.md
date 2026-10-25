@@ -17,7 +17,7 @@ The active entry point is [src/server.js](src/server.js), which loads [src/confi
 
 The current [tool catalog](src/tools/completeBankingTools.js) contains 29 definitions across authentication, accounts, transactions, transfers, cards, fraud, and disputes. Use discovery to obtain exact names and schemas rather than relying on old counts or shortened aliases. Examples include `banking_get_accounts`, `banking_get_balance`, `banking_create_transfer`, `banking_activate_card`, and `banking_verify_transaction`.
 
-Tool arguments are validated before dispatch. Domain bearer credentials are supplied as `parameters.authToken` and forwarded to the banking API; the bank enforces customer ownership and business rules. The internal servicing-service credential authenticates the calling service and must not be forwarded to banking or a model provider. Published intent/confirmation/ledger controls live in the orchestrator; invoking this lower-level adapter is not equivalent to running that workflow.
+Tool arguments are validated before dispatch. Domain bearer credentials are supplied as `parameters.authToken` and forwarded to the banking API; the bank enforces customer ownership and business rules. The internal servicing-service credential authenticates the calling service and must not be forwarded to banking or a model provider. Published intent/confirmation/ledger controls live in the orchestrator. Every non-read banking execution additionally requires `userId`, `tenantId`, `idempotencyKey`, and an expiring `confirmationProof` signed by trusted servicing code after exact request confirmation. MCP verifies the principal/key/tool/arguments binding and forwards `Idempotency-Key` plus a separate body-bound `X-Servicing-Confirmation` to banking. Configure a shared deployment-managed `SERVICING_SERVICE_TOKEN` of at least 32 bytes. A browser or LLM cannot authorize a mutation by setting a boolean. Legacy credential-capture authentication tools remain discoverable for name compatibility but cannot execute; use the customer sign-in flow.
 
 ## HTTP endpoints
 
@@ -33,7 +33,7 @@ Tool arguments are validated before dispatch. Domain bearer credentials are supp
 | POST | `/api/mcp/execute` | Execute `{tool,parameters,sessionId?}` |
 | POST | `/api/mcp/execute-batch` | Execute `{tools:[{tool,parameters}],sessionId?}` sequentially |
 
-Batch execution is not a database transaction and does not replace workflow idempotency. The canonical prefix is `/api/mcp`; gateway routing must preserve it.
+Ambiguous execution returns HTTP 202 with `outcome:uncertain` and the original reconciliation key; do not retry or switch transports. Definitive HTTP 4xx/5xx and verified pre-dispatch failures remain failed and may be explicitly retried with the original key. Mutation dispatch performs no automatic retry or redirect. Batch execution is limited to 20 entries and is not a database transaction and does not replace workflow idempotency. The canonical prefix is `/api/mcp`; gateway routing must preserve it.
 
 Read-only internal example:
 
@@ -63,6 +63,11 @@ Production executes GET tools only. Mutations require an explicit
 them until customer authorization, confirmation and durable effect-ledger contracts
 are integrated. Pilot replay is argument-bound and concurrent-safe within one
 process, with explicit uncertainty; it does not survive restart or span replicas.
+Completed/uncertain results replay verbatim. Definitive HTTP 4xx/5xx or known
+pre-dispatch failures are not cached; only an explicit same-request/same-key retry
+can dispatch again. Uncertain outcomes include a reconciliation path and must
+be reconciled. All configured credential environment variables are checked at
+startup, and known credential values are redacted from provider result payloads.
 
 See [the adapter contract and operating limits](../../docs/guides/backend-integration-framework.md)
 and [fictional example](adapters.example.json). No credential values belong in

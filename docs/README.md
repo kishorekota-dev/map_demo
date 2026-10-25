@@ -23,6 +23,7 @@ executable migration scripts resolve conflicts with old implementation reports.
 | System boundaries and data flow | [Architecture overview](architecture/overview.md) |
 | Deterministic banking contracts and model limits | [Determinism](architecture/determinism.md) |
 | Prompt/intent/channel authoring and release governance | [Control plane](guides/control-plane.md) |
+| Continue an owned conversation across Digital, AVA and IVR | [Channel switching](guides/channel-switching.md) |
 | Operator workflows and permissions | [Studio guide](../services/frontend/OPERATIONS-CONSOLE.md) |
 | Fulfillment, OIDC, evidence, privacy and recovery | [Operations runbook](guides/servicing-operations.md) |
 | Model plugin protocol and credentials | [Plugin contract](../services/ai-orchestrator/src/llm/README.md) |
@@ -30,6 +31,7 @@ executable migration scripts resolve conflicts with old implementation reports.
 | Enterprise packaging and supported boundaries | [Productization](guides/productization.md) |
 | Delivered market gaps and verification evidence | [Implementation record](guides/servicing-product-implementation.md) |
 | Recent integration changes, fixes and qualification scope | [Change review](guides/recent-changes-review.md) |
+| Requirements hardening, compatibility changes and acceptance scope | [Requirements review](guides/requirements-compliance.md) |
 | Backend adapter contract and restrictions | [Backend integration](guides/backend-integration-framework.md) |
 | Digital assistant pilot acceptance | [Pilot checklist](guides/digital-assistant-pilot-checklist.md) |
 | Current gaps, new implementation and differentiation | [Platform assessment](guides/platform-gap-assessment.md) |
@@ -49,7 +51,7 @@ contracts and historical OpenAPI artifacts. Detailed references are owned by the
 [chat service](../services/chat-backend/README.md),
 [orchestrator](../services/ai-orchestrator/README.md),
 [MCP service](../services/mcp-service/README.md) and
-[NLU service](../services/nlu-service/README.md).
+[NLU service](../services/nlu-service/README.md). The [agent service reference](../services/agent-ui/README.md) documents verified role and current-assignment enforcement for its dashboard and sockets.
 
 The [documentation review record](reference/documentation-review.md) describes
 the source-of-truth audit and automated local-link check.

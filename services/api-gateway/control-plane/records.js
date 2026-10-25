@@ -1,6 +1,13 @@
 const { clone } = require('./config');
+const { validateKnowledgeDocument } = require('../operations/knowledgeValidation');
 const KINDS = ['suites', 'evaluations', 'approvals', 'knowledge', 'knowledge_published', 'knowledge_versions', 'promotions', 'quality_suites', 'quality_evidence'];
 const checkKind = (kind) => { if (!KINDS.includes(kind)) throw new Error('Unknown studio record kind'); };
+function answerSource(record) {
+  return validateKnowledgeDocument(record, { requireVersion: true }).valid && record.status === 'published'
+    && Array.isArray(record.allowedRoles) && record.allowedRoles.length > 0 && record.allowedRoles.length <= 30
+    && record.allowedRoles.every(role => typeof role === 'string' && (role === '*' || /^[a-z][a-z0-9_]{0,63}$/.test(role)))
+    && (record.expiresAt === null || record.expiresAt === undefined || (typeof record.expiresAt === 'string' && Number.isFinite(Date.parse(record.expiresAt))));
+}
 function filterRecord(record, filters = {}) {
   return Object.entries(filters).every(([key, value]) => record[key] === value);
 }
@@ -19,9 +26,9 @@ function memoryRecords(state) {
       state.studioRecords[kind][id] = clone(value);
     },
     async searchKnowledge(terms, roles, limit, now) {
-      const allowed = Object.values(state.studioRecords.knowledge_published || {}).filter((record) => record.status === 'published'
+      const allowed = Object.entries(state.studioRecords.knowledge_published || {}).filter(([id, record]) => id === record?.id && answerSource(record)
         && (!record.expiresAt || Date.parse(record.expiresAt) > Date.parse(now))
-        && record.allowedRoles.some((role) => role === '*' || roles.includes(role)));
+        && record.allowedRoles.some((role) => role === '*' || roles.includes(role))).map(([, record]) => record);
       return allowed.map((record) => {
         const words = new Set(`${record.title} ${record.content}`.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
         return { ...clone(record), score: terms.filter((term) => words.has(term)).length / terms.length };
@@ -54,12 +61,12 @@ function postgresRecords(client, tenantId) {
     },
     async searchKnowledge(terms, roles, limit, now) {
       const vector = "to_tsvector('simple', coalesce(document->>'title','') || ' ' || coalesce(document->>'content',''))";
-      const result = await client.query(`SELECT document, ts_rank_cd(${vector}, to_tsquery('simple',$2)) AS score
+      const result = await client.query(`SELECT id, document, ts_rank_cd(${vector}, to_tsquery('simple',$2)) AS score
         FROM servicing_control_plane_records WHERE tenant_id=$1 AND kind='knowledge_published'
         AND document->>'status'='published' AND jsonb_exists_any(document->'allowedRoles',$3::text[])
         AND (document->>'expiresAt' IS NULL OR (document->>'expiresAt')::timestamptz > $4::timestamptz)
         AND ${vector} @@ to_tsquery('simple',$2) ORDER BY score DESC,id ASC LIMIT $5`, [tenantId, terms.join(' | '), [...roles, '*'], now, limit]);
-      return result.rows.map((row) => ({ ...row.document, score: Number(row.score) }));
+      return result.rows.filter(row => row.id === row.document?.id && answerSource(row.document)).map((row) => ({ ...row.document, score: Number(row.score) }));
     }
   };
 }

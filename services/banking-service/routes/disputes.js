@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+router.use(require('../middleware/durableMutation').durableMutation);
 const disputeController = require('../controllers/disputes');
 const { validators } = require('../middleware/validation');
 const {

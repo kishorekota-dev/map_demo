@@ -47,6 +47,16 @@ afterAll(() => {
 });
 
 describe('ChatClientService payload normalization', () => {
+    test('forwards the current customer live-agent request event to queue integration', async () => {
+        const service = new ChatClientService();
+        const socket = createSocket('queue-fixture');
+        service.socket = socket;
+        await service.setupSocketHandlers();
+        const listener = jest.fn(); service.on('escalationRequest', listener);
+        const request = { sessionId: 'session-one', intent: 'general_inquiry', queue: 'support' };
+        socket.emit('liveAgentRequested', request);
+        expect(listener).toHaveBeenCalledWith(request);
+    });
     test('sends the flat payload expected by chat-backend', async () => {
         const service = new ChatClientService();
         service.isConnected = true;

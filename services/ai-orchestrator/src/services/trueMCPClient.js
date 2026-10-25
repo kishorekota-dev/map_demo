@@ -183,6 +183,8 @@ class TrueMCPClient {
 
       // Parse response content
       const result = this.parseToolResponse(response);
+      if (response.isError) throw Object.assign(new Error('MCP tool was rejected'), { status: result?.status, outcome: result?.outcome, dispatched: result?.dispatched });
+      if (result?.outcome === 'uncertain') return result;
       
       return {
         success: !response.isError,
@@ -200,7 +202,7 @@ class TrueMCPClient {
         error: error.message
       });
       
-      throw new Error(`MCP tool call failed: ${error.message}`);
+      throw Object.assign(new Error('MCP tool did not complete'), { status: error.status, outcome: error.outcome, dispatched: error.dispatched });
     }
   }
 

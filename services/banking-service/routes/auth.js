@@ -307,7 +307,7 @@ router.post('/login', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error');
     res.status(500).json({
       status: 'error',
       error: {
@@ -452,7 +452,7 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    console.error('Token refresh error:', error);
+    console.error('Token refresh error');
     res.status(500).json({
       status: 'error',
       error: {
@@ -517,7 +517,7 @@ router.post('/logout', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error('Logout error');
     res.status(500).json({
       status: 'error',
       error: {
@@ -592,7 +592,7 @@ router.get('/me', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get user profile error:', error);
+    console.error('Get user profile error');
     res.status(500).json({
       status: 'error',
       error: {

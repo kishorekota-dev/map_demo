@@ -60,6 +60,7 @@ services:
     environment:
       NODE_ENV: production
       DEPLOYMENT_TENANT_ID: ${DEPLOYMENT_TENANT_ID:?Choose a deployment tenant}
+      SERVICING_SERVICE_TOKEN: ${SERVICING_SERVICE_TOKEN:?Supply a strong internal service credential}
       DB_PASSWORD: ${POSTGRES_PASSWORD:?Supply a strong database password}
       DATABASE_URL: postgresql://poc_user:${POSTGRES_PASSWORD:?}@postgres:5432/poc_banking
       JWT_SECRET: ${JWT_SECRET:?Supply a strong JWT secret}
@@ -172,14 +173,7 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       CONNECTOR_ALLOW_LOCAL: "false"
       OIDC_ALLOW_LOCAL: "false"
-      CONNECTOR_SECRET_ROOT: /run/servicing-secrets
       SERVICING_REQUEST_TIMEOUT_MS: ${SERVICING_REQUEST_TIMEOUT_MS:-410000}
-    volumes:
-      - type: bind
-        source: ${CONNECTOR_SECRET_HOST_DIR:?Supply an absolute secret directory, which may be empty}
-        target: /run/servicing-secrets
-        read_only: true
-        bind: {create_host_path: false}
     ports: !override ["127.0.0.1:3001:3001"]
     healthcheck:
       test: [CMD, node, -e, "require('http').get('http://localhost:3001/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]

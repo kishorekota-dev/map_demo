@@ -323,7 +323,7 @@ class AgentDashboard {
         this.updateActiveChatsList();
         this.updateChatStats();
         this.chatManager.loadChatHistory(chat.sessionId);
-        if (chat.customerId) this.socket.emit('getCustomerInfo', { customerId: chat.customerId });
+        if (chat.customerId) this.socket.emit('getCustomerInfo', { customerId: chat.customerId, sessionId: chat.sessionId });
     }
 
     showChatWindow(chat) {
@@ -536,7 +536,7 @@ class AgentDashboard {
         document.getElementById('profile-name').textContent = name;
         document.getElementById('profile-initial').textContent = name.charAt(0).toUpperCase();
         document.getElementById('profile-email').textContent = info.email || 'Not available';
-        document.getElementById('account-type').textContent = info.accountType || chat.customerData?.accountType || 'Standard';
+        document.getElementById('account-type').textContent = info.accountType || chat.customerData?.accountType || 'Not available';
         document.getElementById('member-since').textContent = info.memberSince || 'Not available';
         document.getElementById('total-chats').textContent = info.totalChats || 0;
         document.getElementById('last-contact').textContent = info.lastContact || 'Not available';

@@ -289,6 +289,7 @@ class ChatClientService extends EventEmitter {
         };
         this.socket.on('escalationRequest', handleEscalation);
         this.socket.on('escalationRequested', handleEscalation);
+        this.socket.on('liveAgentRequested', handleEscalation);
 
         this.socket.on('escalationAccepted', (data) => {
             logger.chat('escalation_accepted', data.sessionId, {

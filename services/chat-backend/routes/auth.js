@@ -7,7 +7,7 @@ const { isQualityDelegation } = require('../services/accessTokenPolicy');
 
 const BANKING_SERVICE_URL = process.env.BANKING_SERVICE_URL || 'http://localhost:3005';
 const BANKING_AUTH_URL = `${BANKING_SERVICE_URL}/api/v1/auth/login`;
-const ALLOW_INSECURE_AUTH = process.env.ALLOW_INSECURE_AUTH === 'true' || process.env.NODE_ENV !== 'production';
+const insecureAuthAllowed = () => process.env.NODE_ENV !== 'production';
 
 const validateUserCredentials = async (credentials) => {
     if (!credentials?.username || !credentials?.password) {
@@ -32,7 +32,8 @@ const validateUserCredentials = async (credentials) => {
         return {
             valid: true,
             userId: user?.userId || user?.id,
-            user
+            user,
+            authToken: response.data?.data?.tokens?.accessToken
         };
     } catch (error) {
         return {
@@ -60,8 +61,10 @@ router.post('/token', async (req, res) => {
             });
         }
 
+        if (!process.env.JWT_SECRET) return res.status(503).json({ error: 'Authentication is not configured' });
         let isValidUser = false;
         let resolvedUserId = userId;
+        let bankToken;
 
         if (credentials) {
             logger.auth('credential_validation_attempted', userId || 'unknown', {
@@ -69,11 +72,16 @@ router.post('/token', async (req, res) => {
             });
 
             const validation = await validateUserCredentials(credentials);
-            isValidUser = validation.valid;
-            if (validation.userId) {
-                resolvedUserId = validation.userId;
+            if (validation.valid && validation.authToken) {
+                try {
+                    const verified = jwt.verify(validation.authToken, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+                    const subject = verified.userId || verified.sub;
+                    const tenant = process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+                    if (typeof subject !== 'string' || !subject || verified.type !== 'access' || isQualityDelegation(verified) || verified.tenantId !== tenant) throw new Error('Invalid banking identity');
+                    isValidUser = true; resolvedUserId = subject; bankToken = validation.authToken;
+                } catch { isValidUser = false; }
             }
-        } else if (userId && ALLOW_INSECURE_AUTH) {
+        } else if (userId && insecureAuthAllowed()) {
             isValidUser = true;
         }
 
@@ -92,7 +100,9 @@ router.post('/token', async (req, res) => {
             });
         }
 
-        // Generate JWT token for WebSocket authentication
+        if (bankToken) return res.status(200).json({ success: true, token: bankToken, userId: resolvedUserId, tokenType: 'Bearer' });
+
+        // Development-only customer token helper; it never invents operator roles.
         const tokenPayload = {
             userId: resolvedUserId,
             type: 'websocket_auth',
@@ -102,7 +112,7 @@ router.post('/token', async (req, res) => {
 
         const token = jwt.sign(
             tokenPayload,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            process.env.JWT_SECRET,
             {
                 expiresIn: process.env.JWT_EXPIRY || '24h',
                 issuer: 'poc-chat-backend',
@@ -144,6 +154,8 @@ router.post('/token', async (req, res) => {
  */
 router.post('/refresh', async (req, res) => {
     try {
+        if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: 'Development token refresh is disabled in production; use the identity provider' });
+        if (!process.env.JWT_SECRET) return res.status(503).json({ error: 'Authentication is not configured' });
         const { token } = req.body;
 
         if (!token) {
@@ -156,11 +168,11 @@ router.post('/refresh', async (req, res) => {
         // Verify existing token
         const decoded = jwt.verify(
             token,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            process.env.JWT_SECRET,
             { ignoreExpiration: true } // We'll check expiration manually
         );
 
-        if (isQualityDelegation(decoded)) return res.status(401).json({ error: 'Invalid access token' });
+        if (isQualityDelegation(decoded) || decoded.type !== 'websocket_auth') return res.status(401).json({ error: 'Invalid development token' });
 
         // Check if token is not too old (allow refresh within 7 days of expiration)
         const now = Math.floor(Date.now() / 1000);
@@ -184,7 +196,7 @@ router.post('/refresh', async (req, res) => {
 
         const newToken = jwt.sign(
             newTokenPayload,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            process.env.JWT_SECRET,
             {
                 expiresIn: process.env.JWT_EXPIRY || '24h',
                 issuer: 'poc-chat-backend',
@@ -231,6 +243,7 @@ router.post('/refresh', async (req, res) => {
  */
 router.post('/validate', async (req, res) => {
     try {
+        if (!process.env.JWT_SECRET) return res.status(503).json({ error: 'Authentication is not configured' });
         const { token } = req.body;
 
         if (!token) {
@@ -243,12 +256,14 @@ router.post('/validate', async (req, res) => {
         // Verify token
         const decoded = jwt.verify(
             token,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            process.env.JWT_SECRET,
             { algorithms: ['HS256'] }
         );
 
-        // Check token type
-        if (isQualityDelegation(decoded) || decoded.type !== 'websocket_auth') {
+        // Both bank access tokens and development customer tokens are supported.
+        const tenant = process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
+        if (isQualityDelegation(decoded) || !Number.isFinite(decoded.exp) || !['access', 'websocket_auth'].includes(decoded.type)
+            || (decoded.tenantId !== undefined && decoded.tenantId !== tenant) || typeof decoded.userId !== 'string' || !decoded.userId) {
             return res.status(401).json({
                 error: 'Invalid token type',
                 timestamp: new Date().toISOString()
@@ -262,7 +277,7 @@ router.post('/validate', async (req, res) => {
             userId: decoded.userId,
             issued: decoded.issued,
             expires: new Date(decoded.exp * 1000).toISOString(),
-            sessionData: decoded.sessionData,
+            roles: [...new Set([decoded.role, ...(Array.isArray(decoded.roles) ? decoded.roles : [])].filter(role => typeof role === 'string').map(role => role.toLowerCase()))],
             timestamp: new Date().toISOString()
         });
 
@@ -306,16 +321,14 @@ router.post('/logout', async (req, res) => {
     try {
         const { token, userId } = req.body;
 
-        // In a production system, you would:
-        // 1. Add token to a blacklist/revocation list
-        // 2. Clear any server-side sessions
-        // 3. Notify other services of logout
+        // This bridge acknowledges client sign-out only. Revocation belongs to
+        // the actual identity service; no token blacklist exists in this route.
 
         if (token) {
             try {
                 const decoded = jwt.verify(
                     token,
-                    process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024'
+                    process.env.JWT_SECRET
                 );
                 
                 logger.auth('user_logout', decoded.userId);
@@ -327,7 +340,8 @@ router.post('/logout', async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'Logged out successfully',
+            message: 'Client sign-out acknowledged; use the identity service for token revocation',
+            tokenRevoked: false,
             timestamp: new Date().toISOString()
         });
 
@@ -382,6 +396,7 @@ router.get('/status', (req, res) => {
  */
 const verifyToken = (req, res, next) => {
     try {
+        if (!process.env.JWT_SECRET) return res.status(503).json({ error: 'Authentication is not configured' });
         const authHeader = req.headers.authorization;
         
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -395,7 +410,7 @@ const verifyToken = (req, res, next) => {
         
         const decoded = jwt.verify(
             token,
-            process.env.JWT_SECRET || 'dev-jwt-secret-change-me-in-production-2024',
+            process.env.JWT_SECRET,
             { algorithms: ['HS256'] }
         );
 

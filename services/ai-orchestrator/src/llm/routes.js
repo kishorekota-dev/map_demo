@@ -25,7 +25,10 @@ router.get('/providers/:providerId/models', authorize(), async (req, res) => {
     res.json(await getRegistry().models(req.params.providerId));
   } catch (error) { res.status(error.status || 503).json({ error: failure(error) }); }
 });
-router.post('/test', authorize(true), rateLimit({ windowMs: 60000, max: 10, standardHeaders: true, legacyHeaders: false,
+router.post('/test', authorize(true), (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: { code: 'LLM_TEST_DISABLED', message: 'Model connectivity tests are disabled in production.' } });
+  next();
+}, rateLimit({ windowMs: 60000, max: 10, standardHeaders: true, legacyHeaders: false,
   keyGenerator: req => `${req.user.tenantId}:${req.user.userId}` }), async (req, res) => {
   const { providerId, model } = req.body || {};
   if (!IDENTIFIER.test(providerId || '') || !validModel(model) || Object.keys(req.body || {}).some(key => !['providerId', 'model'].includes(key))) {

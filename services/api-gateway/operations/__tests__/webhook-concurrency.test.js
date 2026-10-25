@@ -1,7 +1,8 @@
 const { createHmac, createHash, randomUUID } = require("crypto");
 const jwt = require("jsonwebtoken");
 const { OperationsStore } = require("../store");
-const { receiveWebhook } = require("../webhooks");
+const { receiveWebhook: receiveRegisteredWebhook } = require("../webhooks");
+const { ConnectorCatalog } = require('../connectorCatalog');
 
 const url =
   process.env.TEST_OPERATIONS_DATABASE_URL ||
@@ -11,19 +12,24 @@ const WEBHOOK_SECRET = "provider-signature-secret";
 (url ? describe : describe.skip)(
   "signed voice concurrency and ownership",
   () => {
-    let store;
+    let store; let connectorCatalog;
+    const receiveWebhook = (req, target, options) => receiveRegisteredWebhook(req, target, { ...options, connectorCatalog });
     const env = {
       CONNECTOR_SECRET_VOICE_TEST: WEBHOOK_SECRET,
       JWT_SECRET: SECRET,
     };
     beforeEach(async () => {
+      env.CONNECTOR_ALLOWED_HOSTS = 'api.example.com';
+      const definition = { id: 'voice-provider', name: 'Voice fixture', kind: 'voice', baseUrl: 'https://api.example.com',
+        webhookSecretRef: 'env:CONNECTOR_SECRET_VOICE_TEST', webhookPublicUrl: 'https://example.com/api/operations/webhooks/voice-provider' };
+      connectorCatalog = new ConnectorCatalog([definition], env);
       store = new OperationsStore({
         databaseUrl: url,
         tenantId: `voice-concurrency-${randomUUID()}`,
       });
       await store.transaction((tx) =>
         tx.put("connection", "voice-provider", {
-          kind: "voice",
+          ...definition,
           enabled: true,
           webhookSecretRef: "env:CONNECTOR_SECRET_VOICE_TEST",
         }),
@@ -59,13 +65,14 @@ const WEBHOOK_SECRET = "provider-signature-secret";
         "X-Servicing-Timestamp": timestamp,
         "X-Servicing-Event-Id": eventId,
         "X-Servicing-Signature": createHmac("sha256", WEBHOOK_SECRET)
-          .update(`${timestamp}.${eventId}.`)
+          .update(`${timestamp}.${eventId}.https://example.com/api/operations/webhooks/voice-provider.`)
           .update(rawBody)
           .digest("hex"),
         Authorization: `Bearer ${token}`,
       };
       return {
         params: { id: "voice-provider" },
+        originalUrl: '/api/operations/webhooks/voice-provider',
         body,
         rawBody,
         get: (key) => headers[key],

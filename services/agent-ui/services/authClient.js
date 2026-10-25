@@ -64,11 +64,13 @@ async function validateAgentToken(token) {
             { timeout: getTimeout() }
         );
 
-        return {
-            valid: response.data?.valid === true,
-            userId: response.data?.userId ? String(response.data.userId) : null,
-            tokenData: response.data || null
-        };
+        const data = response.data || {};
+        const userId = typeof data.userId === 'string' && data.userId.length <= 200 ? data.userId : null;
+        const roles = Array.isArray(data.roles) ? data.roles.filter(role => typeof role === 'string') : [];
+        const expiresAt = Date.parse(data.expires);
+        const valid = data.valid === true && Boolean(userId) && Number.isFinite(expiresAt) && expiresAt > Date.now()
+            && roles.some(role => ['agent', 'admin', 'control_plane_admin', 'control_plane_operator'].includes(role));
+        return { valid, userId: valid ? userId : null, roles: valid ? roles : [], expiresAt: valid ? expiresAt : null };
     } catch (error) {
         return {
             valid: false,

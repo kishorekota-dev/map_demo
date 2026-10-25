@@ -1,12 +1,15 @@
 const express = require("express");
 const supertest = require("supertest");
 const jwt = require("jsonwebtoken");
-const { randomUUID, createHash } = require("crypto");
+const { randomUUID, createHash, randomBytes } = require("crypto");
+const { issueProof } = require('../mutationProof');
 const { OperationsStore } = require("../store");
 const { createOperationsRouter } = require("..");
 const { FulfillmentWorker } = require("../worker");
 const { defaultConfig } = require("../../control-plane/config");
-const { signWebhook } = require("../reference-adapter/server");
+const { signWebhook: signPublicWebhook } = require("../reference-adapter/server");
+const signWebhook = (key, eventId, body) => signPublicWebhook(key, eventId, body,
+  `https://example.com/api/operations/webhooks/${body.type.startsWith('voice.') ? 'voice-reference' : 'reference'}`);
 const databaseUrl =
   process.env.TEST_OPERATIONS_DATABASE_URL ||
   process.env.TEST_CONTROL_PLANE_DATABASE_URL;
@@ -23,7 +26,7 @@ const databaseUrl =
         NODE_ENV: "test",
         CONNECTOR_ALLOW_LOCAL: "true",
         CONNECTOR_SECRET_REFERENCE: "reference-secret",
-        SERVICING_SERVICE_TOKEN: "runtime-service-test",
+        SERVICING_SERVICE_TOKEN: randomBytes(32).toString('hex'),
         OIDC_ISSUER: "https://id.example.com",
         JWT_SECRET: secret,
       };
@@ -39,6 +42,12 @@ const databaseUrl =
         env,
         request,
         jwtSecret: secret,
+        connectorDefinitions: ['case', 'voice'].map(kind => ({
+          id: kind === 'voice' ? 'voice-reference' : 'reference', name: 'Reference', kind,
+          baseUrl: 'http://127.0.0.1:3099', credentialRef: 'env:CONNECTOR_SECRET_REFERENCE',
+          webhookSecretRef: 'env:CONNECTOR_SECRET_REFERENCE',
+          webhookPublicUrl: `https://example.com/api/operations/webhooks/${kind === 'voice' ? 'voice-reference' : 'reference'}`,
+        })),
         configStore: { read: async () => ({ releases: [version] }) },
       });
       app = express();
@@ -96,11 +105,13 @@ const databaseUrl =
         .post("/api/operations/runtime/cases")
         .set("Authorization", auth("customer"))
         .set("X-Servicing-Service-Token", env.SERVICING_SERVICE_TOKEN)
+        .set('X-Servicing-Confirmation', issueProof({ scope: 'servicing_case', principalId: 'customer-1', tenantId: tenant,
+          key: body.idempotencyKey, method: 'POST', path: '/runtime/cases', body }, env))
         .send(body);
     }
     async function connection(kind = "case") {
       const result = await api()
-        .put("/api/operations/connections/reference")
+        .put(`/api/operations/connections/${kind === 'voice' ? 'voice-reference' : 'reference'}`)
         .set("Authorization", auth("control_plane_admin"))
         .send({
           name: "Reference",
@@ -224,10 +235,97 @@ const databaseUrl =
         ).status,
       ).toBe(400);
     });
+    test('case creation requires an unexpired confirmation bound to the original actor, key and body', async () => {
+      const body = caseInput();
+      const submit = proof => {
+        const pending = api().post('/api/operations/runtime/cases').set('Authorization', auth('customer'))
+          .set('X-Servicing-Service-Token', env.SERVICING_SERVICE_TOKEN);
+        if (proof) pending.set('X-Servicing-Confirmation', proof);
+        return pending.send(body);
+      };
+      const binding = { scope: 'servicing_case', principalId: 'customer-1', tenantId: tenant,
+        key: body.idempotencyKey, method: 'POST', path: '/runtime/cases', body };
+      await submit().expect(403);
+      await submit(issueProof({ ...binding, principalId: 'another-customer' }, env)).expect(403);
+      await submit(issueProof({ ...binding, body: { ...body, summary: 'A different request' } }, env)).expect(403);
+      await submit(issueProof(binding, env, Date.now() - 600000)).expect(403);
+      expect((await store.list('case')).total).toBe(0);
+      await submit(issueProof(binding, env)).expect(201);
+    });
+    test('definitive provider failures never auto-retry and an explicit exact-key retry dispatches once', async () => {
+      await connection();
+      const failures = [400, 503, 'before-dispatch'];
+      for (const [index, failure] of failures.entries()) {
+        const body = { ...caseInput(), idempotencyKey: `explicit-retry-${index}` };
+        const created = await createCase(body);
+        if (failure === 'before-dispatch') request.mockRejectedValueOnce(Object.assign(new Error('Fixture preflight rejection'), { dispatched: false }));
+        else request.mockResolvedValueOnce({ status: failure, data: {} });
+        const before = request.mock.calls.length;
+        await router.worker.runOnce();
+        expect((await store.get('case', created.body.id))).toMatchObject({ status: 'failed', definitiveFailure: true });
+        await router.worker.runOnce();
+        expect(request.mock.calls.length - before).toBe(1);
+        await createCase(body);
+        await router.worker.runOnce();
+        expect(request.mock.calls.length - before).toBe(2);
+        expect(request.mock.calls.slice(before).map(call => call[2].headers['Idempotency-Key'])).toEqual([body.idempotencyKey, body.idempotencyKey]);
+      }
+    });
+    test.each(['definitive', 'uncertain'])('SLA routing cannot change provider arguments on an explicit %s retry', async failureKind => {
+      await connection(); const body = caseInput(); const created = await createCase(body);
+      request.mockImplementationOnce(async () => {
+        await store.transaction(async tx => { const item = await tx.get('case', created.body.id);
+          await tx.put('case', item.id, { ...item, queue: 'supervisor', slaEscalatedAt: new Date().toISOString() }); });
+        if (failureKind === 'uncertain') throw Object.assign(new Error('Fixture lost acknowledgement'), { dispatched: true });
+        return { status: 503, data: {} };
+      });
+      await router.worker.runOnce();
+      const original = request.mock.calls[0][2]; expect(original.body.queue).toBe('general_servicing');
+      const view = await api().get('/api/operations/cases').set('Authorization', auth('control_plane_viewer'));
+      expect(view.body.items[0]).not.toHaveProperty('outboundRequests');
+      if (failureKind === 'uncertain') {
+        request.mockResolvedValueOnce({ status: 404, data: { authoritative: true } });
+        await api().post(`/api/operations/cases/${created.body.id}/reconcile`).set('Authorization', auth('control_plane_operator'))
+          .send({ outcome: 'retry', note: 'Provider confirms original operation absent' }).expect(200);
+      } else await createCase(body);
+      await router.worker.runOnce();
+      const repeated = request.mock.calls.filter(call => call[1] === '/cases');
+      expect(repeated).toHaveLength(2); expect(repeated[1][2].body).toEqual(original.body);
+      expect(repeated[1][2].headers).toEqual(original.headers); expect(repeated[1][2].method).toBe(original.method);
+      await router.worker.runOnce();
+      const escalation = request.mock.calls.at(-1); expect(escalation[1]).toBe('/cases/case-external/escalations');
+      expect(escalation[2].body.queue).toBe('supervisor'); expect(escalation[2].headers['Idempotency-Key']).toBe(`${body.idempotencyKey}:escalation`);
+    });
+    test('a definitively failed escalation can be explicitly retried with its original proof and provider request', async () => {
+      await connection(); const body = caseInput(); const created = await createCase(body); await router.worker.runOnce();
+      await store.transaction(async tx => { const item = await tx.get('case', created.body.id); await tx.put('case', item.id, { ...item, dueAt: new Date(Date.now() - 1000).toISOString() }); });
+      request.mockResolvedValueOnce({ status: 503, data: {} }); await router.worker.runOnce();
+      expect(await store.get('case', created.body.id)).toMatchObject({ status: 'in_progress', pendingOperation: 'escalate', definitiveFailure: true });
+      const first = request.mock.calls[1]; await router.worker.runOnce(); expect(request).toHaveBeenCalledTimes(2);
+      await api().post('/api/operations/runtime/cases').set('Authorization', auth('customer')).set('X-Servicing-Service-Token', env.SERVICING_SERVICE_TOKEN).send(body).expect(403);
+      expect((await createCase({ ...body, summary: 'Different request' })).status).toBe(409);
+      expect((await createCase(body)).status).toBe(201); await router.worker.runOnce();
+      const repeated = request.mock.calls[2]; expect(repeated[1]).toBe(first[1]); expect(repeated[2].body).toEqual(first[2].body); expect(repeated[2].headers).toEqual(first[2].headers);
+      expect(await store.get('case', created.body.id)).toMatchObject({ status: 'in_progress', definitiveFailure: false, pendingOperation: null });
+    });
+    test('legacy previously dispatched operations without pinned arguments fail closed before retry', async () => {
+      await connection(); const body = caseInput(); const created = await createCase(body);
+      request.mockResolvedValueOnce({ status: 503, data: {} }); await router.worker.runOnce();
+      await store.transaction(async tx => { const item = await tx.get('case', created.body.id); delete item.outboundRequests; await tx.put('case', item.id, item); });
+      await createCase(body); await router.worker.runOnce(); expect(request).toHaveBeenCalledTimes(1);
+      expect(await store.get('case', created.body.id)).toMatchObject({ status: 'reconciliation_required' });
+      await api().post(`/api/operations/cases/${created.body.id}/reconcile`).set('Authorization', auth('control_plane_operator'))
+        .send({ outcome: 'retry', note: 'Do not invent missing original arguments' }).expect(409);
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+    test('the idempotency identity includes the resolved intent even within the same journey', async () => {
+      expect((await createCase()).status).toBe(201);
+      expect((await createCase({ ...caseInput(), intent: 'help' })).status).toBe(409);
+    });
     test("two workers dispatch once; signed callback is deduplicated and terminal state protected", async () => {
       await connection();
       const created = await createCase();
-      const worker2 = new FulfillmentWorker(store, { env, request });
+      const worker2 = new FulfillmentWorker(store, { env, request, connectorCatalog: router.connectorCatalog });
       await Promise.all([router.worker.runOnce(), worker2.runOnce()]);
       expect(request).toHaveBeenCalledTimes(1);
       expect((await store.get("case", created.body.id)).status).toBe(
@@ -263,6 +361,19 @@ const databaseUrl =
             .send(bad.raw)
         ).status,
       ).toBe(409);
+    });
+    test.each(['http503', 'timeout'])('a signed in-progress create callback outranks a later %s response', async outcome => {
+      await connection(); const created = await createCase();
+      request.mockImplementationOnce(async () => {
+        const signed = signWebhook(env.CONNECTOR_SECRET_REFERENCE, 'accepted-during-create', { type: 'case.updated', operationId: 'case-key', externalId: 'case-accepted', status: 'in_progress' });
+        await api().post('/api/operations/webhooks/reference').set(signed.headers).send(signed.raw).expect(200);
+        if (outcome === 'timeout') throw Object.assign(new Error('Fixture lost acknowledgement'), { dispatched: true });
+        return { status: 503, data: {} };
+      });
+      await router.worker.runOnce();
+      expect(await store.get('case', created.body.id)).toMatchObject({ status: 'in_progress', externalId: 'case-accepted', pendingOperation: null, definitiveFailure: false, lastError: null });
+      expect((await store.query('SELECT status FROM servicing_operations_jobs WHERE tenant_id=$1', [tenant])).rows).toEqual([{ status: 'complete' }]);
+      await router.worker.runOnce(); expect(request).toHaveBeenCalledTimes(1);
     });
     test("ambiguous dispatch blocks retry until provider confirms absent; lease recovery is conservative", async () => {
       await connection();
@@ -340,7 +451,7 @@ const databaseUrl =
         json: async () =>
           url.endsWith("/sessions")
             ? { sessionId: "voice-session" }
-            : {
+            : url.endsWith("/sessions/voice-session") ? { session: { metadata: { channel: "ivr" } } } : {
                 response: { content: "Your request was received." },
                 agentResult: {
                   metadata: { caseId: "case-reference", queue: "support" },
@@ -353,6 +464,7 @@ const databaseUrl =
         request,
         jwtSecret: secret,
         fetch: fetcher,
+        connectorDefinitions: router.connectorCatalog.list(),
       });
       const voiceApp = express();
       voiceApp.use(
@@ -362,13 +474,13 @@ const databaseUrl =
           },
         }),
       );
-      voiceApp.use("/ops", voiceRouter);
+      voiceApp.use("/api/operations", voiceRouter);
       const start = signWebhook("reference-secret", "voice-start", {
         type: "voice.start",
         callId: "call-1",
       });
       const anonymous = await supertest(voiceApp)
-        .post("/ops/webhooks/reference")
+        .post("/api/operations/webhooks/voice-reference")
         .set(start.headers)
         .send(start.raw);
       expect(anonymous.body.actions[0].type).toBe("authenticate");
@@ -376,7 +488,7 @@ const databaseUrl =
       expect(
         (
           await supertest(voiceApp)
-            .post("/ops/webhooks/reference")
+            .post("/api/operations/webhooks/voice-reference")
             .set(start.headers)
             .set("Authorization", auth("customer"))
             .send(start.raw)
@@ -389,7 +501,7 @@ const databaseUrl =
       });
       const invoke = () =>
         supertest(voiceApp)
-          .post("/ops/webhooks/reference")
+          .post("/api/operations/webhooks/voice-reference")
           .set(turn.headers)
           .set("Authorization", auth("customer"))
           .send(turn.raw);
@@ -400,7 +512,7 @@ const databaseUrl =
         "transfer",
       ]);
       await invoke();
-      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher).toHaveBeenCalledTimes(3);
     });
     test("SLA dispatches an idempotent provider queue escalation and retention keeps replay protection", async () => {
       await connection();

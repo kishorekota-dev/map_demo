@@ -35,6 +35,8 @@ ledger path.
    after reviewing the backend contract. A missing/invalid config fails startup.
 2. Put credentials in the environment variables named by `auth`, never in the
    JSON declaration, request body, frontend or public runtime configuration.
+   Every referenced variable is validated at startup, including OAuth client
+   variables; missing or malformed values fail startup without contacting a provider.
 3. Supply a strong `SERVICING_SERVICE_TOKEN` of at least 32 bytes. Adapter routes
    require it in `X-Servicing-Service-Token` in **every environment**, even when
    ordinary development internal-service authentication is disabled. A missing
@@ -99,9 +101,11 @@ OAuth token cache identity includes the actual client ID/secret, endpoint, scope
 and deployment tenant. Secret removal/rotation and scope changes do not reuse an
 older token. Tokens are not cached beyond their reported validity; an absent
 `expires_in` does not invent a cache lifetime. Configured credential values and
-raw provider error bodies are not copied into API errors or logs. Successful read
-payloads intentionally contain backend data and must be handled as restricted
-administrative responses; this is not automatic data classification/redaction.
+raw provider error bodies are not copied into API errors or logs. Successful
+execution/reconciliation payloads redact known configured credential values and
+the actual dispatched authorization header/token before caching or returning data.
+Processing is bounded to 64 nested levels and 100,000 values. This is not general
+PII classification: read payloads still contain restricted administrative data.
 
 ## API
 
@@ -120,10 +124,15 @@ arbitrary executable code.
 
 Execution returns `completed` for a successful read or terminal pilot transport
 response. It means HTTP completion, not independently proven business fulfillment.
-A pilot mutation returning 202, non-2xx or an unconfirmed dispatched transport error
-stays `uncertain` (API 202), because even an HTTP 5xx/4xx does not establish rollback.
-Only a transport preflight known not to dispatch can report a failed mutation.
-Raw upstream errors are replaced with safe messages.
+The pilot rejection contract treats HTTP 4xx/5xx and transport preflight failures
+known not to dispatch as `failed`; these results are not cached and callers may
+explicitly retry the same request with the same key. This does not authorize
+automatic mutation retries. Qualify the backend's rejection/idempotency contract
+before a real integration; an HTTP fixture is not proof of provider rollback.
+A mutation returning 202, a redirect or an unconfirmed dispatched transport error
+stays `uncertain` (API 202). It includes `reconciliationReference`,
+`reconciliationPath` and `reconciliationTool`. Never use a new key for uncertain
+work. Raw upstream errors are replaced with safe messages.
 
 `reconcile` never repeats the original mutation. It reads `statusPath` and accepts
 only an authoritative 2xx response with `status: completed` or `status: failed`.
@@ -136,7 +145,12 @@ The pilot cache binds a key to canonical arguments, reserves it before dispatch,
 and shares concurrent attempts. Changed arguments return 409. An active execution
 cannot race a status lookup into a conflicting cached result. Capacity is bounded
 and refuses new keyed work before dispatch rather than evicting unexpired entries.
-Completed/failed/uncertain results can be replayed during the cache lifetime.
+Completed and uncertain results are replayed verbatim during the cache lifetime,
+including the original response metadata. The retained `replayed` field is not
+changed on subsequent delivery. Failed result bodies are not cached. A bounded
+argument fingerprint remains reserved so a retry cannot change the original
+request under the same key. Concurrent attempts share the active execution;
+a later explicit retry after a definitive failure performs a fresh dispatch.
 
 This is still a **single-process, in-memory, 24-hour cache**, not durable dedupe.
 It is lost on restart, does not coordinate replicas and expires old records.
@@ -146,7 +160,9 @@ customer-delegated OAuth, production mutation switch or generic action installer
 
 The MCP regression suite covers malformed declarations, nested/unknown arguments,
 namespace collisions, mandatory service identity, production mutation denial,
-concurrent replay/argument conflicts, uncertain outcomes, bounded read retries,
+concurrent/verbatim replay, uncached definitive failures, argument conflicts,
+uncertain outcomes with reconciliation paths, credential payload redaction,
+startup credential validation, bounded read retries,
 OAuth rotation/scope/expiry, restricted DNS, pinned fixture sockets, redirect refusal
 and response limits. Tests use deterministic transports and local synthetic HTTP
 servers; they do not qualify an enterprise CRM, live provider or billing outcome.

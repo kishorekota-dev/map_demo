@@ -149,6 +149,7 @@ class AgentOrchestrator extends EventEmitter {
                     question,
                     authToken,
                     pendingFeedback: conversationContext.pendingFeedback,
+                    expectedChannel: conversationContext.channel || 'digital',
                     startTime
                 });
             }
@@ -160,7 +161,7 @@ class AgentOrchestrator extends EventEmitter {
             workflowDispatched = true;
             const workflow = await this.callOrchestrator({
                 path: '/api/orchestrator/process',
-                payload: { sessionId, intent, question, userId, interactionId: conversationContext.interactionId || message.id,
+                payload: { sessionId, intent, question, userId, expectedChannel: conversationContext.channel || 'digital', interactionId: conversationContext.interactionId || message.id,
                     metadata: { channel: conversationContext.channel || 'digital' } },
                 authToken
             });
@@ -171,6 +172,9 @@ class AgentOrchestrator extends EventEmitter {
             return this.mapWorkflowResult(workflow, { intent, startTime, sessionId });
         } catch (error) {
             logger.error('Orchestration failed', { sessionId, error: error.message });
+            if (error.status === 409 && error.upstreamCode === 'CHANNEL_CHANGED') return this.buildResult({
+                content: 'This conversation has moved to another channel. Refresh it before continuing.', type: 'text', confidence: 1,
+                source: 'channel-switch', metadata: { policyCode: 'channel_changed' } }, { workflowRecoveryRequired: false }, startTime, ['ai-orchestrator']);
             if (workflowDispatched) return this.buildResult({ content: 'Your request was interrupted. Resume the same request before continuing.',
                 type: 'text', confidence: 1, source: 'workflow-recovery', metadata: { policyCode: 'workflow_recovery_required', recoveryRequired: true } },
                 { workflowRecoveryRequired: true }, startTime, ['ai-orchestrator']);
@@ -191,14 +195,14 @@ class AgentOrchestrator extends EventEmitter {
         return this.mapWorkflowResult(workflow, { intent, startTime, sessionId });
     }
 
-    async continuePendingWorkflow({ sessionId, question, authToken, pendingFeedback, startTime }) {
+    async continuePendingWorkflow({ sessionId, question, authToken, pendingFeedback, startTime, expectedChannel }) {
         const confirmed = pendingFeedback.type === 'confirmation_required'
             ? /\b(yes|confirm|approve|proceed|ok|okay)\b/i.test(question)
             : undefined;
 
         const workflow = await this.callOrchestrator({
             path: '/api/orchestrator/feedback',
-            payload: { sessionId, response: question, confirmed },
+            payload: { sessionId, response: question, confirmed, expectedChannel },
             authToken
         });
 

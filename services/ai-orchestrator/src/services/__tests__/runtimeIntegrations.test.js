@@ -1,12 +1,16 @@
 jest.mock('axios');
 const axios = require('axios');
+const { randomBytes } = require('crypto');
+const { verifyProof } = require('../mutationProof');
 const RuntimeIntegrations = require('../runtimeIntegrations');
 const mapper = require('../intentMapper');
 const { defaultConfig } = require('../../../../api-gateway/control-plane/config');
 const { ControlPlaneRuntime, validateSnapshot } = require('../controlPlaneRuntime');
 
 describe('provider-neutral runtime contracts', () => {
-  beforeEach(() => { jest.clearAllMocks(); axios.post.mockReset(); });
+  const originalToken = process.env.SERVICING_SERVICE_TOKEN;
+  beforeEach(() => { process.env.SERVICING_SERVICE_TOKEN = randomBytes(32).toString('hex'); jest.clearAllMocks(); axios.post.mockReset(); });
+  afterAll(() => { if (originalToken === undefined) delete process.env.SERVICING_SERVICE_TOKEN; else process.env.SERVICING_SERVICE_TOKEN = originalToken; });
   test('custom aliases inherit authorization and tool/data floors', () => {
     const config = defaultConfig();
     const transfer = structuredClone(config.intents.find(entry => entry.id === 'transfer_funds'));
@@ -28,10 +32,30 @@ describe('provider-neutral runtime contracts', () => {
       patterns: ['change address'], requiredData: ['postalCode'], optionalData: [], tools: [], needsConfirmation: false, systemPrompt: 'Help', userPromptTemplate: '{{question}}' });
     axios.post.mockResolvedValue({ data: { id: 'case-7', status: 'pending' } });
     const client = new RuntimeIntegrations();
-    await mapper.withPublishedIntents(config.intents, () => client.createCase({ sessionId: 's', interactionId: 'i', intent: 'address_request',
+    await mapper.withPublishedIntents(config.intents, () => client.createCase({ userId: 'u', confirmationGranted: true, sessionId: 's', interactionId: 'i', intent: 'address_request',
       authToken: 'customer-token', collectedData: { postalCode: '60601', authToken: 'secret', undeclared: 'drop' }, runtimeContext: { version: 7, channel: 'ava', journeyId: 'support' } }));
     expect(axios.post).toHaveBeenCalledWith(expect.stringMatching(/\/runtime\/cases$/), expect.objectContaining({ details: { postalCode: '60601' }, version: 7,
       idempotencyKey: expect.stringMatching(/^[a-f0-9]{64}$/) }), expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer customer-token' }) }));
+  });
+  test('case transport requires confirmation, binds the actual payload and preserves uncertain outcomes', async () => {
+    const client = new RuntimeIntegrations();
+    const state = { userId: 'u', sessionId: 'case-session', interactionId: 'original', intent: 'help', authToken: require('crypto').randomBytes(24).toString('hex'), runtimeContext: { version: 7, channel: 'digital' }, confirmationGranted: true };
+    await expect(client.createCase({ ...state, confirmationGranted: false })).rejects.toMatchObject({ code: 'CONFIRMATION_REQUIRED' }); expect(axios.post).not.toHaveBeenCalled();
+    axios.post.mockResolvedValue({ data: { id: 'fixture-case' } }); await client.createCase(state);
+    const [, body, options] = axios.post.mock.calls[0];
+    expect(options.headers['Idempotency-Key']).toBe(body.idempotencyKey);
+    expect(verifyProof(options.headers['X-Servicing-Confirmation'], { scope: 'servicing_case', principalId: 'u', tenantId: 'default-enterprise', key: body.idempotencyKey, method: 'POST', path: '/runtime/cases', body })).toBe(true);
+    axios.post.mockReset(); axios.post.mockRejectedValue({ response: { status: 503 } });
+    await expect(client.createCase(state)).rejects.toMatchObject({ code: 'OPERATION_REJECTED', outcome: 'failed', operationId: body.idempotencyKey }); expect(axios.post).toHaveBeenCalledTimes(1);
+    axios.post.mockReset(); axios.post.mockRejectedValue({ code: 'ECONNABORTED' });
+    await expect(client.createCase(state)).rejects.toMatchObject({ code: 'RECONCILIATION_REQUIRED', outcome: 'uncertain', operationId: body.idempotencyKey }); expect(axios.post).toHaveBeenCalledTimes(1);
+    axios.post.mockReset(); axios.post.mockResolvedValue({ data: { success: false, outcome: 'uncertain' } });
+    await expect(client.createCase(state)).rejects.toMatchObject({ code: 'RECONCILIATION_REQUIRED', outcome: 'uncertain' }); expect(axios.post).toHaveBeenCalledTimes(1);
+  });
+  test('analytics accepts enum values and drops free form metadata', async () => {
+    axios.post.mockResolvedValue({ data: { id: 'event' } });
+    await new RuntimeIntegrations().event({ sessionId: 's', metadata: { reason: 'customer supplied content', workflowStatus: 'private value', tool: 'customer supplied', reconciliationReference: 'private', confidence: 4, confirmationVerified: true, recognitionSource: 'lexical' } }, 'customer');
+    expect(axios.post.mock.calls[0][1].metadata).toEqual({ recognitionSource: 'lexical', confirmationVerified: true });
   });
   test('knowledge returns approved evidence and source citations without generated claims', async () => {
     axios.post.mockResolvedValue({ data: { matches: [{ id: 'doc-1', title: 'Hours', content: 'The office opens at nine.', source: 'https://enterprise.example/hours', version: 3 }] } });

@@ -2,13 +2,20 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
 const { verifyToken } = require('./auth');
+const { timingSafeEqual } = require('crypto');
+function verifiedVoiceTransport(req) {
+    const expected = process.env.SERVICING_SERVICE_TOKEN || '';
+    const provided = req.get('X-Servicing-Service-Token') || '';
+    return Boolean(expected) && Buffer.byteLength(expected) === Buffer.byteLength(provided)
+        && timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+}
 
 router.post('/sessions/:sessionId/handoff', verifyToken, async (req, res, next) => {
     try { res.json(await req.app.locals.services.handoffService.issue(req.user, req.params.sessionId, req.body.targetChannel)); }
     catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
 });
 router.post('/sessions/resume', verifyToken, async (req, res, next) => {
-    try { res.json(await req.app.locals.services.handoffService.resume(req.user, req.body.grant, req.headers.authorization.substring(7))); }
+    try { res.json(await req.app.locals.services.handoffService.resume(req.user, req.body.grant, req.headers.authorization.substring(7), req.body.targetChannel)); }
     catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
 });
 
@@ -83,6 +90,15 @@ async function processSessionMessageHandler(req, res, next) {
             return res.status(404).json({ error: 'Session not found', sessionId, timestamp: new Date().toISOString() });
         }
 
+        const expectedChannel = req.body.metadata?.channel || session.metadata?.channel || 'digital';
+        if (!['digital', 'ava', 'ivr'].includes(expectedChannel) || expectedChannel !== (session.metadata?.channel || 'digital')) {
+            return res.status(409).json({ error: 'Conversation channel has changed; refresh or resume this conversation before sending.' });
+        }
+
+        if (expectedChannel === 'ivr' && !verifiedVoiceTransport(req)) {
+            return res.status(403).json({ error: 'An authenticated voice connector is required for IVR input.' });
+        }
+
         // Process message via chatService
         const message = await chatService.processMessage(
             sessionId,
@@ -105,7 +121,7 @@ async function processSessionMessageHandler(req, res, next) {
             ...(session.state || {}),
             userId,
             authToken,
-            channel: session.metadata?.channel || 'digital',
+            channel: expectedChannel,
             interactionId: req.headers['x-interaction-id'] || message.id
         };
         const enrichedMessage = {
@@ -189,7 +205,7 @@ async function processSessionMessageHandler(req, res, next) {
             messageContent: req.body?.content?.substring(0, 100)
         });
 
-        return res.status(500).json({ error: 'Failed to process message', details: error.message, timestamp: new Date().toISOString() });
+        return res.status(500).json({ error: 'Failed to process message', timestamp: new Date().toISOString() });
     }
 }
 
@@ -210,7 +226,7 @@ async function getSessionHistoryHandler(req, res, next) {
 
     } catch (error) {
         logger.error('History retrieval error', { error: error.message, sessionId: req.params.sessionId });
-        return res.status(500).json({ error: 'Failed to retrieve history', details: error.message, timestamp: new Date().toISOString() });
+        return res.status(500).json({ error: 'Failed to retrieve history', timestamp: new Date().toISOString() });
     }
 }
 
@@ -320,6 +336,9 @@ router.post('/process', verifyToken, (req, res, next) => {
             agentType: req.headers['x-agent-type']
         });
 
+        if (req.ownedSession.metadata?.channel === 'ivr' && !verifiedVoiceTransport(req)) {
+            return res.status(403).json({ error: 'An authenticated voice connector is required for IVR input.' });
+        }
         // Process message through orchestrator
         const result = await agentOrchestrator.processMessage(
             sessionInfo.sessionId,
@@ -344,7 +363,7 @@ router.post('/process', verifyToken, (req, res, next) => {
 
         res.status(500).json({
             error: 'Message processing failed',
-            details: error.message,
+
             timestamp: new Date().toISOString()
         });
     }
@@ -400,7 +419,7 @@ router.get('/sessions/:sessionId', verifyToken, requireSessionOwnership, async (
 
         res.status(500).json({
             error: 'Failed to retrieve session',
-            details: error.message,
+
             timestamp: new Date().toISOString()
         });
     }
@@ -462,7 +481,7 @@ router.post('/sessions', verifyToken, async (req, res) => {
 
         res.status(500).json({
             error: 'Failed to create session',
-            details: error.message,
+
             timestamp: new Date().toISOString()
         });
     }
@@ -520,7 +539,7 @@ router.delete('/sessions/:sessionId', verifyToken, requireSessionOwnership, asyn
 
         res.status(500).json({
             error: 'Failed to end session',
-            details: error.message,
+
             timestamp: new Date().toISOString()
         });
     }
@@ -561,7 +580,7 @@ router.get('/agents', async (req, res) => {
 
         res.status(500).json({
             error: 'Failed to retrieve agent status',
-            details: error.message,
+
             timestamp: new Date().toISOString()
         });
     }

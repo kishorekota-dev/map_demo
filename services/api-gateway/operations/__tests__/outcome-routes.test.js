@@ -33,11 +33,13 @@ test('outcome queries enforce role/tenant boundaries, strict window input and a 
 });
 test('connector sync rejects the entire sensitive/invalid batch before invoking control-plane import', async () => {
   const documents = [{ id: 'safe', title: 'Public help', content: 'A sufficiently detailed public servicing guide.', source: 'Approved support manual', allowedRoles: ['customer'] }];
-  const store = { tenantId: 'knowledge-fixture', get: jest.fn(async () => ({ enabled: true, kind: 'knowledge' })),
+  const definition = { id: 'source', name: 'Source', kind: 'knowledge', baseUrl: 'https://api.example.com' };
+  const store = { tenantId: 'knowledge-fixture', get: jest.fn(async () => ({ ...definition, enabled: true })),
     transaction: jest.fn(async fn => fn({ event: jest.fn() })) };
   const provider = jest.fn(async () => ({ status: 200, data: { documents } }));
   const importFetch = jest.fn(async () => ({ ok: true, json: async () => ({ revision: 2 }) }));
-  const { app, auth } = fixture(store, { request: provider, fetch: importFetch });
+  const { app, auth } = fixture(store, { request: provider, fetch: importFetch, connectorDefinitions: [definition],
+    env: { NODE_ENV: 'test', JWT_SECRET: secret, CONNECTOR_ALLOWED_HOSTS: 'api.example.com' } });
   const sync = () => request(app).post('/operations/connections/source/sync').set('Authorization', auth('control_plane_admin')).send({ revision: 1 });
   await sync().expect(200);
   expect(JSON.parse(importFetch.mock.calls[0][1].body).documents[0]).toMatchObject({ id: 'safe', status: 'draft' });

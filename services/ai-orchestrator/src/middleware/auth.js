@@ -34,6 +34,9 @@ function authenticate(req, res, next) {
 
 async function authorizeSession(req, res, next) {
   try {
+    if (req.body?.expectedChannel !== undefined && !['digital', 'ava', 'ivr'].includes(req.body.expectedChannel)) {
+      return res.status(400).json({ success: false, error: 'Unsupported expected channel' });
+    }
     const requestedUserId = req.body?.userId || req.params?.userId;
     if (requestedUserId && String(requestedUserId) !== req.user.userId) {
       return res.status(403).json({ success: false, error: 'User access denied' });
