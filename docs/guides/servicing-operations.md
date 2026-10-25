@@ -314,3 +314,19 @@ for sanitized diagnostic export. Public health probes expose only liveness or
 aggregate readiness. Reports cover checked storage/service contracts, with no
 live model/connector/identity acceptance claim. Solution packages share the same
 draft/release lifecycle; see the [platform guide](platform-readiness.md).
+
+## Case handling and interrupted customer requests
+
+The [Agent workspace](../../services/api-gateway/operations/AGENT-WORKSPACE.md)
+combines connector case context, self-assignment, notes, disposition, knowledge
+citations and evidence. A handling note cannot change an external outcome or
+resolve an uncertain financial action. Use the existing reconciliation procedure
+for that state.
+
+Production graph checkpoints persist alongside the workflow ledger. A customer
+can explicitly resume an interrupted request using the authenticated chat recovery
+action, retaining its original session, interaction and release. Recovery uses a
+fresh access token and never authorizes an operator to impersonate the customer.
+See [checkpoint/recovery contract](../../services/ai-orchestrator/WHY-CHECKPOINTER-IS-REQUIRED.md).
+Database restore, realtime socket failover and retention remain separate operating
+procedures to qualify in the target deployment.

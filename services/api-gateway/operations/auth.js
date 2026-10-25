@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { isQualityDelegation } = require('../middleware/tokenScope');
 const { timingSafeEqual, createHmac } = require("crypto");
 const { permissionsFor } = require("../control-plane");
 function equal(a, b) {
@@ -22,6 +23,7 @@ function authenticate(secret, tenant) {
       const claims = jwt.verify(token.slice(7), secret, {
         algorithms: ["HS256"],
       });
+      if (isQualityDelegation(claims)) throw new Error('Evaluation delegation is not an operator login');
       const actor = claims.userId || claims.sub;
       if (
         typeof actor !== "string" ||

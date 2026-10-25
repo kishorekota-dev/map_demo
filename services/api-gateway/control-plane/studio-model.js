@@ -69,6 +69,15 @@ async function enforceGates(state, records, config, author) {
     const approvals = await records.list('approvals', { limit: 100, filters: { fingerprint: digest } });
     if (!approvals.items.some((approval) => approval.approvedBy !== author)) throw new ControlPlaneError(409, 'An independent approval of this exact configuration is required.');
   }
+  for (const requirement of ensureStudio(state).qualityPolicy?.requirements || []) {
+    const suite = await records.get('quality_suites', requirement.suiteId);
+    const profile = config.llm?.profiles.find(item => item.id === requirement.profileId);
+    if (!suite || !config.llm?.enabled || !profile) throw new ControlPlaneError(409, `Measured quality requirement ${requirement.suiteId}/${requirement.profileId} is unavailable.`);
+    const suiteFingerprint = fingerprint(suite.definition); const profileFingerprint = fingerprint(profile);
+    const id = fingerprint({ config: digest, suite: suiteFingerprint, profile: profileFingerprint, suiteId: requirement.suiteId, profileId: requirement.profileId });
+    const evidence = await records.get('quality_evidence', id);
+    if (!evidence || !evidence.passed || evidence.scope !== 'measured_prompt_probe' || evidence.fingerprint !== digest || evidence.suiteFingerprint !== suiteFingerprint || evidence.profileFingerprint !== profileFingerprint) throw new ControlPlaneError(409, `Passing measured evaluation of this exact configuration, suite and profile is required: ${requirement.suiteId}/${requirement.profileId}.`);
+  }
   return digest;
 }
 function pageParameters(query = {}) {

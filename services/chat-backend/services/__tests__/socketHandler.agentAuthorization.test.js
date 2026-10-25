@@ -455,3 +455,15 @@ describe('SocketHandler agent relay requests', () => {
         expect(socket.join).toHaveBeenCalledWith('session:session-1');
     });
 });
+
+ test('socket authentication rejects delegated quality job credentials', async () => {
+    const previous = process.env.JWT_SECRET; process.env.JWT_SECRET = JWT_SECRET;
+    try {
+      const { handler, socket } = createHarness();
+      setClient(handler,socket,{ isAuthenticated: false });
+      const token = jwt.sign({ userId: 'customer-1', type: 'access', purpose: 'quality_evaluation', aud: 'servicing-quality' },JWT_SECRET);
+      await handler.handleAuthentication(socket,{ token });
+      expect(handler.connectedClients.get(socket.id).isAuthenticated).toBe(false);
+      expect(socket.emit).toHaveBeenCalledWith('authenticationError',expect.anything());
+    } finally { if (previous === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previous; }
+  });

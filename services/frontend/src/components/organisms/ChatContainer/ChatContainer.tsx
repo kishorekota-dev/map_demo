@@ -18,6 +18,9 @@ export interface ChatContainerProps {
   onNewConversation: () => Promise<void>;
   initializing?: boolean;
   sending?: boolean;
+  recoveryRequired?: boolean;
+  recovering?: boolean;
+  onRecover?: () => Promise<void>;
   intent?: IntentAnalysis;
   error?: string | null;
   onDismissError: () => void;
@@ -31,6 +34,9 @@ export function ChatContainer({
   onNewConversation,
   initializing = false,
   sending = false,
+  recoveryRequired = false,
+  recovering = false,
+  onRecover,
   intent,
   error,
   onDismissError,
@@ -65,13 +71,22 @@ export function ChatContainer({
               type="button"
               className="secondary-action"
               onClick={() => void onNewConversation()}
-              disabled={initializing || sending}
+              disabled={initializing || sending || recoveryRequired || recovering}
             >
               <span aria-hidden="true">＋</span>
               New conversation
             </button>
           </div>
         </header>
+
+        {recoveryRequired && (
+          <div className="chat-alert chat-recovery" role="status">
+            <div><strong>Your request was interrupted.</strong><span>Resume the same request before continuing this conversation.</span></div>
+            <button type="button" className="secondary-action" disabled={initializing || sending || recovering} onClick={() => void onRecover?.()}>
+              {recovering ? 'Resuming request…' : 'Resume interrupted request'}
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="chat-alert" role="alert">
@@ -109,7 +124,7 @@ export function ChatContainer({
                     type="button"
                     key={prompt}
                     onClick={() => void onSend(prompt)}
-                    disabled={sending}
+                    disabled={sending || recoveryRequired || recovering}
                   >
                     <span>{prompt}</span>
                     <span aria-hidden="true">→</span>
@@ -131,7 +146,7 @@ export function ChatContainer({
         </div>
 
         <div className="chat-panel__composer">
-          <ChatInput onSend={onSend} disabled={initializing || sending} />
+          <ChatInput onSend={onSend} disabled={initializing || sending || recoveryRequired || recovering} />
           <p className="composer-disclaimer">
             Never share a password, PIN, or one-time security code in chat.
           </p>
@@ -147,7 +162,7 @@ export function ChatContainer({
           <dl>
             <div>
               <dt>Status</dt>
-              <dd>Active</dd>
+              <dd>{recoveryRequired ? 'Recovery required' : 'Active'}</dd>
             </div>
             <div>
               <dt>Messages</dt>

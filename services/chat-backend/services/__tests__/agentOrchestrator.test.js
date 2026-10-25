@@ -172,3 +172,30 @@ describe('AgentOrchestrator request deadlines', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 });
+
+ test('explicit recovery never classifies or submits a new request and preserves pending state on interruption', async () => {
+    const orchestrator = new AgentOrchestrator();
+    orchestrator.classifyIntent = jest.fn();
+    orchestrator.callOrchestrator = jest.fn(async () => ({ type: 'policy_blocked', code: 'workflow_recovery_required', message: 'Resume later' }));
+    const result = await orchestrator.recoverWorkflow('original-session','fresh-token','transfer_funds');
+    expect(orchestrator.callOrchestrator).toHaveBeenCalledWith({ path: '/api/orchestrator/session/original-session/recover', payload: {}, authToken: 'fresh-token' });
+    expect(orchestrator.classifyIntent).not.toHaveBeenCalled();
+    expect(result.conversationContextUpdates).toEqual({});
+  });
+
+ test('transport loss after workflow dispatch preserves an explicit recovery state without fake handoff', async () => {
+    const orchestrator = new AgentOrchestrator();
+    orchestrator.classifyIntent = jest.fn(async () => 'transfer_funds');
+    orchestrator.callOrchestrator = jest.fn(async () => { throw new Error('connection lost'); });
+    const escalation = jest.fn(); orchestrator.on('humanEscalation',escalation);
+    const result = await orchestrator.processMessage('s',{ id: 'original', content: 'transfer', userId: 'u', authToken: 'fresh' },{});
+    expect(result.finalResponse.metadata.policyCode).toBe('workflow_recovery_required');
+    expect(result.conversationContextUpdates).toEqual({ workflowRecoveryRequired: true });
+    expect(escalation).not.toHaveBeenCalled();
+  });
+
+ test('preserves the authoritative absent-session code across the recovery adapter', async () => {
+    const orchestrator = new AgentOrchestrator();
+    axios.post.mockRejectedValueOnce({ response: { status: 404, data: { code: 'WORKFLOW_SESSION_NOT_FOUND' } }, message: 'not found' });
+    await expect(orchestrator.recoverWorkflow('never-dispatched','fresh')).rejects.toMatchObject({ status: 404, upstreamCode: 'WORKFLOW_SESSION_NOT_FOUND' });
+  });

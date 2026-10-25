@@ -24,6 +24,7 @@ const { createControlPlaneRouter } = require('./control-plane');
 const { ControlPlaneStore } = require('./control-plane/store');
 const { PostgresControlPlaneStore } = require('./control-plane/postgres-store');
 const { createOperationsRouter } = require('./operations');
+const { createQualityRouter } = require('./quality');
 const { createIdentityRouter } = require('./identity');
 const { PlatformReadiness } = require('./platform/readiness');
 const { createPlatformRouter } = require('./platform');
@@ -138,6 +139,7 @@ app.get('/api', (req, res) => {
       orchestrator: '/api/orchestrator/*',
       controlPlane: '/api/control-plane/*',
       operations: '/api/operations/*',
+      quality: '/api/quality/*',
       identity: '/api/identity/*',
       platform: '/api/platform/*'
     },
@@ -157,10 +159,12 @@ const controlPlaneStore = process.env.CONTROL_PLANE_DATABASE_URL
 const controlPlaneRouter = createControlPlaneRouter({ store: controlPlaneStore });
 app.use('/api/control-plane', controlPlaneRouter);
 const operationsRouter = createOperationsRouter({ configStore: controlPlaneStore });
+const qualityRouter = createQualityRouter({ store: operationsRouter.store, configStore: controlPlaneStore });
 const platformReadiness = new PlatformReadiness({ configStore: controlPlaneStore, operationsStore: operationsRouter.store,
   redisStatus: rateLimitMiddleware.readiness });
 app.locals.platformReadiness = platformReadiness;
 app.use('/api/operations', operationsRouter);
+app.use('/api/quality', qualityRouter);
 app.use('/api/identity', rateLimitMiddleware.authLimiter, createIdentityRouter({ store: operationsRouter.store }));
 app.use('/api/platform', createPlatformRouter({ configStore: controlPlaneStore, readiness: platformReadiness }));
 
@@ -303,6 +307,7 @@ app.use('*', (req, res) => {
       orchestrator: '/api/orchestrator',
       controlPlane: '/api/control-plane',
       operations: '/api/operations',
+      quality: '/api/quality',
       identity: '/api/identity',
       platform: '/api/platform'
     }
@@ -337,6 +342,7 @@ const gracefulShutdown = (signal) => {
     try {
       serviceRegistry.cleanup();
       loadBalancer.resetStatistics();
+      await qualityRouter.close();
       await controlPlaneRouter.close();
       await operationsRouter.close();
       await rateLimitMiddleware.cleanup();
@@ -362,6 +368,10 @@ async function start() {
     await controlPlaneStore.pool.query('SELECT tenant_id,kind,id FROM servicing_control_plane_records LIMIT 0');
     await operationsRouter.store.initialize();
   }
+  if (operationsRouter.store.configured) {
+    await operationsRouter.store.initialize();
+    qualityRouter.start();
+  }
   server = app.listen(PORT, () => {
   logger.info(`POC API Gateway running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -376,6 +386,7 @@ async function start() {
 if (require.main === module) start().catch(async () => {
   logger.error('Gateway startup failed: verify durable storage, schema migrations and deployment configuration.');
   serviceRegistry.cleanup();
+  await qualityRouter.close();
   await Promise.allSettled([controlPlaneRouter.close(), operationsRouter.close(), rateLimitMiddleware.cleanup()]);
   process.exitCode = 1;
 });

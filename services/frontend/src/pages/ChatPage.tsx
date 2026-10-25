@@ -9,6 +9,7 @@ export default function ChatPage() {
     messages,
     initializing,
     sending,
+    recoveryRequired, recovering, recoverConversation,
     intent,
     error,
     dismissError,
@@ -24,6 +25,9 @@ export default function ChatPage() {
       onNewConversation={startNewConversation}
       initializing={initializing}
       sending={sending}
+      recoveryRequired={recoveryRequired}
+      recovering={recovering}
+      onRecover={recoverConversation}
       intent={intent}
       error={error}
       onDismissError={dismissError}

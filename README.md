@@ -14,10 +14,16 @@ fulfillment and release configuration.
 
 - **Servicing Studio** at `/control-plane`: author every canonical intent and
   prompt, typed custom intents, recognition policy, journeys, channels, queues,
-  knowledge and model profiles across 14 workspaces.
+  knowledge and model profiles across 16 workspaces.
 - **Governed changes**: immutable releases, semantic diffs, exact-content contract
   evaluations, independent approval, environment promotion, canaries and rollback.
   Active confirmation flows retain their pinned configuration.
+- **Measured response quality**: synthetic model probes, objective assertions,
+  recorded-run comparison and exact-content model evaluation gates.
+- **Agent workspace**: connector case assignment, safe context, approved knowledge
+  citations and revision-protected handling/disposition.
+- **Durable conversation recovery**: PostgreSQL graph checkpoints and an explicit
+  owner-authorized resume action, retaining the original release and effect ledger.
 - **Reusable solutions**: catalog, configuration import/export, conflict-aware
   preview and reviewed draft application. Packages retain all release gates and
   cannot install arbitrary code, endpoints or credentials.
@@ -36,7 +42,7 @@ provider-neutral adapters. Live telephony/media, enterprise identity and connect
 qualification require configured providers. Shared SaaS tenancy, commercial
 entitlements and a certified production SLA are outside the delivered scope.
 See the [implementation record](docs/guides/servicing-product-implementation.md)
-and [market comparison](docs/guides/market-comparison.md).
+and [current platform gap assessment](docs/guides/platform-gap-assessment.md).
 
 ## Architecture
 
@@ -109,6 +115,8 @@ another file. Never put credentials in public frontend runtime configuration.
 | Task | Entry point |
 | --- | --- |
 | Configure Qwen on the separate Mac Studio | [Model setup](docs/guides/llm-providers.md) |
+| Evaluate real model responses and gate releases | [Response quality](docs/guides/model-evaluation.md) |
+| Review current market gaps and differentiation | [Platform assessment](docs/guides/platform-gap-assessment.md) |
 | Edit prompts/intents and govern releases | [Control-plane guide](docs/guides/control-plane.md) |
 | Diagnose readiness and install a solution draft | [Platform guide](docs/guides/platform-readiness.md) |
 | Configure voice, cases, knowledge and identity | [Operations runbook](docs/guides/servicing-operations.md) |

@@ -1,0 +1,335 @@
+.aw-workspace {
+  min-width: 0;
+}
+.aw-workspace * {
+  box-sizing: border-box;
+}
+.aw-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.aw-metrics > div {
+  padding: 17px;
+  border: 1px solid #dce5de;
+  border-radius: 9px;
+  background: #f6f8f3;
+}
+.aw-metrics strong {
+  display: block;
+  color: #234638;
+  font-size: 25px;
+  margin-bottom: 7px;
+}
+.aw-metrics span {
+  font-size: 11px;
+  color: #607469;
+}
+.aw-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+  align-items: end;
+}
+.aw-filters > button {
+  justify-self: start;
+}
+.aw-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.65fr);
+  gap: 20px;
+  align-items: start;
+}
+.aw-inbox,
+.aw-detail {
+  min-width: 0;
+}
+.aw-case-list {
+  display: grid;
+  gap: 10px;
+}
+.aw-case {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #dce3da;
+  border-radius: 8px;
+  background: #fcfdfa;
+  padding: 13px;
+  cursor: pointer;
+  color: #354d40;
+  font: inherit;
+}
+.aw-case:hover {
+  border-color: #638773;
+}
+.aw-case--selected {
+  border-color: #357e64;
+  background: #edf5ee;
+  box-shadow: inset 3px 0 #357e64;
+}
+.aw-case > div,
+.aw-history article > div,
+.aw-knowledge > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.aw-case strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.aw-case p {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 11px 0;
+  overflow-wrap: anywhere;
+}
+.aw-case span,
+.aw-case small {
+  font-size: 10px;
+}
+.aw-case small {
+  display: block;
+  margin-top: 8px;
+  color: #687b6e;
+  line-height: 1.5;
+}
+.aw-workspace .aw-overdue {
+  color: #a05b22;
+}
+.aw-pagination {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 18px;
+  font-size: 10px;
+}
+.aw-oversight {
+  margin-top: 20px;
+  font-size: 11px;
+}
+.aw-oversight summary {
+  cursor: pointer;
+  font-weight: 650;
+  padding: 10px 0;
+}
+.aw-oversight > div {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #e5e9e1;
+  padding: 10px 0;
+}
+.aw-oversight small,
+.aw-history > small {
+  display: block;
+  color: #7d897e;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.aw-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.aw-context dt {
+  font-size: 10px;
+  color: #758476;
+  margin-bottom: 5px;
+}
+.aw-context dd {
+  margin: 0;
+  font-size: 12px;
+  color: #354d40;
+  overflow-wrap: anywhere;
+}
+.aw-next-steps {
+  display: grid;
+  gap: 10px;
+}
+.aw-next-steps > div {
+  border-left: 3px solid #8dab85;
+  background: #f3f7ef;
+  padding: 12px 14px;
+  border-radius: 4px;
+}
+.aw-next-steps strong {
+  font-size: 12px;
+}
+.aw-next-steps p {
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 7px 0 0;
+  color: #647761;
+}
+.aw-actions,
+.aw-unsaved > div {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+.aw-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.aw-search .cp-field {
+  flex: 1;
+}
+.aw-knowledge {
+  border-top: 1px solid #e1e7dd;
+  padding: 17px 0 0;
+  margin-top: 17px;
+}
+.aw-knowledge h4,
+.aw-history h4 {
+  font-size: 12px;
+  margin: 0;
+}
+.aw-knowledge p,
+.aw-history p {
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.aw-knowledge small {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 10px;
+  color: #8a6f43;
+}
+.aw-knowledge a,
+.aw-history a {
+  color: #257b60;
+  font-size: 11px;
+}
+.aw-knowledge > div > span {
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+.aw-citations {
+  margin-top: 15px;
+  font-size: 11px;
+}
+.aw-citations > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+}
+.aw-citations button {
+  border: 0;
+  background: none;
+  color: #936746;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.aw-history {
+  margin-top: 25px;
+  border-top: 1px solid #dce3da;
+  padding-top: 20px;
+}
+.aw-history article {
+  border-left: 2px solid #ccdcca;
+  padding: 5px 0 16px 14px;
+  margin-top: 15px;
+}
+.aw-history strong {
+  font-size: 11px;
+}
+.aw-history time,
+.aw-history small {
+  display: block;
+  font-size: 10px;
+  color: #7a887c;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.aw-history a {
+  display: inline-block;
+  margin-top: 10px;
+}
+.aw-evidence {
+  scroll-margin-top: 20px;
+}
+.aw-evidence article {
+  padding: 12px 10px;
+  border-top: 1px solid #e4e8df;
+  display: grid;
+  gap: 7px;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.aw-evidence .aw-evidence--selected {
+  background: #edf5e8;
+  border-left: 3px solid #43816a;
+}
+.aw-evidence code {
+  white-space: normal;
+}
+.aw-scope {
+  color: #798679;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.aw-scope button {
+  margin: 8px;
+}
+.aw-workspace .cp-panel-heading {
+  flex-wrap: wrap;
+}
+.aw-workspace .cp-panel-heading h3,
+.aw-workspace .cp-panel-heading span {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .aw-layout {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  }
+  .aw-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 800px) {
+  .aw-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .aw-case-list {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .aw-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .aw-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aw-metrics > div {
+    padding: 13px;
+  }
+  .aw-filters,
+  .aw-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .aw-search {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .aw-workspace .cp-button {
+    white-space: normal;
+    max-width: 100%;
+  }
+  .aw-workspace .cp-panel {
+    padding: 17px;
+  }
+}

@@ -33,6 +33,14 @@ router.post('/operations/:operationId/reconcile', requireOperationsPermission('s
   } catch (error) { if (error.status) return res.status(error.status).json({ error: error.message }); next(error); }
 });
 
+router.post('/session/:sessionId/recover', authorizeSession, async (req, res, next) => {
+  try {
+    const result = await req.app.locals.workflowService.recoverMessage({ sessionId: req.params.sessionId,
+      userId: req.user.userId, tenantId: req.user.tenantId, authToken: req.headers.authorization.slice(7) });
+    res.json({ success: true, sessionId: req.params.sessionId, ...result });
+  } catch (error) { if (error.status) return res.status(error.status).json({ error: error.message, ...(error.code ? { code: error.code } : {}) }); next(error); }
+});
+
 router.post('/session/:sessionId/channel', authorizeSession, async (req, res, next) => {
   try {
     const expected = process.env.SERVICING_SERVICE_TOKEN;
@@ -45,6 +53,8 @@ router.post('/session/:sessionId/channel', authorizeSession, async (req, res, ne
     const persistence = req.app.locals.workflowService.persistence;
     await persistence.runSession(req.user.tenantId, session.sessionId, async () => {
       const current = await req.app.locals.sessionManager.getSession(session.sessionId);
+      if (!current || current.userId !== req.user.userId) throw Object.assign(new Error('Session access denied'), { status: 403 });
+      if (current.metadata?.graphRun?.status === 'running') throw Object.assign(new Error('Recover the interrupted request before changing channel'), { status: 409 });
       const { resolvePublishedRoute } = require('../services/controlPlaneRuntime');
       const snapshot = current.metadata?.controlPlane;
       const route = snapshot ? { ...resolvePublishedRoute(snapshot, channel, current.intent), environment: snapshot.environment, cohort: snapshot.cohort } : null;
@@ -68,6 +78,7 @@ router.get('/session/:sessionId/context', async (req, res, next) => {
     return res.json({ sessionId: session.sessionId, summary: `${session.intent || 'Unclassified'} request is ${session.status}; current step: ${session.currentStep || 'initial'}.`,
       intent: session.intent, status: session.status, currentStep: session.currentStep, channel: session.metadata?.channel || 'digital',
       version: session.metadata?.controlPlane?.version, collectedFields: Object.keys(session.collectedData || {}), requiredFields: session.requiredData || [],
+      recoveryRequired: session.metadata?.graphRun?.status === 'running',
       confirmationPending: session.currentStep === 'request_confirmation', caseId: session.metadata?.caseId || null, evidenceIds: session.metadata?.evidenceIds || [],
       unresolvedOperations: operations.filter(operation => ['dispatched', 'reconciliation_required'].includes(operation.status)).map(({ operationId, status, tool }) => ({ operationId, status, tool })) });
   } catch (error) { next(error); }

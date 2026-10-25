@@ -56,6 +56,7 @@ PostgreSQL 15 is the reference database. Core banking, chat and orchestrator cli
 | Orchestrator sessions/workflows | `DB_NAME=ai_orchestrator`; model initialization requires PostgreSQL |
 | Control-plane releases/drafts | `CONTROL_PLANE_DATABASE_URL` selects PostgreSQL; otherwise `CONTROL_PLANE_DATA_FILE` selects a file |
 | Operations/jobs/identity/evidence | `OPERATIONS_DATABASE_URL`, then `CONTROL_PLANE_DATABASE_URL`, then `DATABASE_URL`; PostgreSQL required |
+| Graph checkpoints | `CHECKPOINT_ENABLED=true`, `CHECKPOINT_BACKEND=postgres`; `CHECKPOINT_DATABASE_URL` falls back to `WORKFLOW_DATABASE_URL` / orchestrator DB settings. Memory mode is development-only. |
 | Financial dispatch ledger | `WORKFLOW_DURABLE_EXECUTION=true`; `WORKFLOW_DATABASE_URL` or orchestrator `DB_*` configuration |
 | Cross-channel grants | `HANDOFF_STORAGE=postgres`; `HANDOFF_DATABASE_URL` or chat `DB_*` configuration |
 
@@ -63,7 +64,7 @@ Both Compose stacks and the root environment templates enable persistent chat. K
 
 Production gateway startup requires PostgreSQL configuration storage. File mode is available for development using `CONTROL_PLANE_DATA_FILE` with exactly one writer; operations still require PostgreSQL. `CONTROL_PLANE_SINGLE_WRITER=true` does not replace production PostgreSQL requirements. Keep `DEPLOYMENT_TENANT_ID` consistent across gateway, chat and orchestrator; browser `tenantId` is display configuration, not authorization.
 
-Schema flags are `CONTROL_PLANE_MANAGE_SCHEMA`, `OPERATIONS_MANAGE_SCHEMA`, `WORKFLOW_SCHEMA_AUTO_MIGRATE` and `HANDOFF_SCHEMA_AUTO_MIGRATE`. Set them to `false` only after the owning migration process applies the corresponding schema. See [deployment schema ownership](../guides/deployment.md#database-initialization-and-upgrades). Chat/orchestrator base models use `DATABASE_MANAGE_SCHEMA`; production defaults to verification without synchronization. The production overlay disables all runtime schema management and requires explicit migrations.
+Schema flags are `CONTROL_PLANE_MANAGE_SCHEMA`, `OPERATIONS_MANAGE_SCHEMA`, `WORKFLOW_SCHEMA_AUTO_MIGRATE`, `HANDOFF_SCHEMA_AUTO_MIGRATE` and `CHECKPOINT_SCHEMA_AUTO_MIGRATE`. Set them to `false` only after the owning migration process applies the corresponding schema. See [deployment schema ownership](../guides/deployment.md#database-initialization-and-upgrades). Chat/orchestrator base models use `DATABASE_MANAGE_SCHEMA`; production defaults to verification without synchronization. The production overlay disables all runtime schema management and requires explicit migrations.
 
 `REDIS_URL` is used by several services; orchestrator and agent integrations also use `REDIS_HOST`/`REDIS_PORT`. Compose sets internal names. Verify the settings consumed by each service rather than assuming one URL changes every client. Database TLS behavior also differs between clients; test certificate validation with the deployed driver configuration.
 

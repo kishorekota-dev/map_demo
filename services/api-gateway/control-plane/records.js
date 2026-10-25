@@ -1,5 +1,5 @@
 const { clone } = require('./config');
-const KINDS = ['suites', 'evaluations', 'approvals', 'knowledge', 'knowledge_published', 'knowledge_versions', 'promotions'];
+const KINDS = ['suites', 'evaluations', 'approvals', 'knowledge', 'knowledge_published', 'knowledge_versions', 'promotions', 'quality_suites', 'quality_evidence'];
 const checkKind = (kind) => { if (!KINDS.includes(kind)) throw new Error('Unknown studio record kind'); };
 function filterRecord(record, filters = {}) {
   return Object.entries(filters).every(([key, value]) => record[key] === value);

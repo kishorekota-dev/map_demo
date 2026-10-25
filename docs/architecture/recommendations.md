@@ -10,6 +10,10 @@ The baseline is a dedicated-enterprise deployment with a provider-neutral contro
 - Model-provider choice does not authorize model-generated tools or arbitrary workflow code.
 - A configured adapter and passing fixtures do not prove a customer's actual provider is reachable or production validated.
 
+See the [current gap assessment](../guides/platform-gap-assessment.md) for the
+market comparison, delivered response-quality/case-workspace/recovery changes,
+and prioritized acceptance criteria.
+
 ## Current follow-ups
 
 | Area | Evidence and next decision |
@@ -17,7 +21,7 @@ The baseline is a dedicated-enterprise deployment with a provider-neutral contro
 | Domain modularity | Canonical catalogs, workflow branches, validators, and formatters still contain banking logic. A platform/domain-pack contract should make those dependencies explicit before another domain is advertised. Generic case/knowledge intents are supported without creating arbitrary executable workflows. |
 | Internal ingress | NLU/MCP now enforce the production service-token gate, with authenticated caller/header tests. Verify private ingress/TLS in the target deployment. Keep internal services private; do not treat CORS as access control. |
 | Startup/readiness | Distinguish process liveness, configured capability, verified dependency readiness, and successful external-provider validation. Fail deployment preflight on missing required secrets/schemas rather than labeling a configured URL healthy. |
-| Persistence | The effect ledger and sessions are durable when configured; LangGraph `MemorySaver`, NLU context/cache, and socket routing state are still process-local. Test failover/recovery and document the scaling boundary. |
+| Persistence | Production graph checkpoints, effect ledger and sessions now persist in PostgreSQL. NLU context/cache and socket routing remain process-local. Qualify realtime failover and database restore separately; retain and archive checkpoints under an explicit policy. |
 | Provider compatibility | Verify the selected Mac Studio address/model and enterprise identity, voice, CRM, and cloud credentials in the target environment. The repo's WebSocket MCP adapter is not a blanket interoperability certification. |
 | Schema lifecycle | Controlled repeatable SQL and verification-only production startup now cover model tables, ledger, and grants. Use least-privilege application users and assess existing legacy column types before upgrades. |
 | Operational recovery | Exercise uncertain financial outcomes, outbox retries/dead letters, terminal-session write failures, and one-time handoff consumption before rollout. |

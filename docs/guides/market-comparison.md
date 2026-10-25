@@ -6,6 +6,13 @@ Vendor capabilities below are documentation-based, not hands-on benchmarks or
 claims that every feature is included in every commercial plan. The roadmap and
 positioning are engineering/product judgments.
 
+## Current assessment
+
+The [current platform gap assessment](platform-gap-assessment.md) records the next
+implementation: measured model-response probes and release gates, a unified case
+workspace, and durable graph checkpoints with explicit recovery. It distinguishes
+these delivered controls from live-provider qualification and broader product gaps.
+
 ## Implementation update
 
 The comparison below records the **pre-expansion baseline**. The subsequent

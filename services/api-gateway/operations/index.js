@@ -9,6 +9,7 @@ const { receiveWebhook } = require("./webhooks");
 const { retainOperations } = require("./maintenance");
 const { RolloutMonitor } = require("./rollout-monitor");
 const { mountUsageRoutes } = require("./usage");
+const { mountAgentRoutes } = require("./agent-workspace");
 const { identifier, text } = require("../control-plane/config");
 
 const safeText = (value, max = 1000) =>
@@ -56,6 +57,7 @@ function createOperationsRouter(options = {}) {
     ),
   );
   router.use(authenticate(secret, store.tenantId));
+  mountAgentRoutes(router, { store, configStore: options.configStore, env: { ...env, JWT_SECRET: secret } });
   router.get(
     "/status",
     authorize("canView"),

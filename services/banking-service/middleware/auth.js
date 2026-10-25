@@ -59,6 +59,10 @@ const authenticateToken = (req, res, next) => {
       return res.status(403).json(errorResponse);
     }
 
+    if (decoded.purpose === 'quality_evaluation' || [decoded.aud].flat().includes('servicing-quality')) {
+      return res.status(403).json({ error: 'Access denied', code: 'TOKEN_SCOPE_INVALID', message: 'Evaluation delegation cannot authenticate banking requests.' });
+    }
+
     // Add user info to request object
     req.user = {
       id: decoded.id || decoded.userId,

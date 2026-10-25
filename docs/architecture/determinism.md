@@ -36,7 +36,7 @@ Temperature zero and provider-specific sampling controls are best-effort reprodu
 
 ## Persistence is layered
 
-`ai_sessions`, `ai_human_feedback`, and the tool ledger provide persistent release/continuation and outcome data. LangGraph's `MemorySaver` is process-local. Enabling `CHECKPOINT_ENABLED` does not make checkpoints durable, and its current history/clear helper methods do not implement a durable audit store.
+`ai_sessions`, `ai_human_feedback`, and the tool ledger provide persistent release/continuation and outcome data. Production graph checkpoints and pending writes now persist synchronously in PostgreSQL; production rejects disabled or memory checkpoints. Owner-authorized recovery resumes the original interaction with fresh credentials and its pinned release. Confirmation/data feedback remains in SQL and financial effects remain protected by the ledger. See [checkpoint recovery](../../services/ai-orchestrator/WHY-CHECKPOINTER-IS-REQUIRED.md). Checkpoints contain customer context, so retention and database access controls still apply; they are not an immutable audit archive.
 
 ## Verification
 

@@ -31,6 +31,7 @@ The gateway preserves `/api/chat` and `/api/sessions` prefixes. Protected endpoi
 | POST | `/api/sessions/:id/messages` | `{content,type?,attachments?,metadata?}` |
 | DELETE | `/api/sessions/:id` | End an owned session |
 | POST | `/api/chat/message` | Compatibility message endpoint; requires session ID |
+| POST | `/api/chat/recover` | Explicit recovery of the same owned session; `{sessionId}`, no new message or release |
 | GET | `/api/chat/history` | Compatibility history endpoint; requires session ID |
 | POST | `/api/sessions/:id/handoff` | `{targetChannel:"digital|ava|ivr"}` → short-lived grant |
 | POST | `/api/sessions/resume` | `{grant}` → resume the same authenticated customer's session/channel |
@@ -74,3 +75,9 @@ npm test -w services/chat-backend -- --runInBand
 Use Node 22. Configure `JWT_SECRET`, `DEPLOYMENT_TENANT_ID`, `SERVICING_SERVICE_TOKEN`, `AI_ORCHESTRATOR_URL`, `NLU_SERVICE_URL`, persistence/database settings, and allowed origins. `AGENT_RESPONSE_TIMEOUT` defaults to a bounded 400000 ms orchestration budget; `NLU_REQUEST_TIMEOUT_MS` defaults to 5000 ms. Coordinate gateway/browser deadlines with the published provider budgets; do not turn a slow workflow into an automatic duplicate action.
 
 The supported deployment entry points are the root [local Compose](../../docker/docker-compose.local.yml) and [full-stack Compose](../../docker/docker-compose-full-stack.yml). Set `RUNTIME_TEST_DATABASE_URL` to an isolated PostgreSQL database for real grant replay/concurrency tests. Historical test counts and “production-ready” documents do not apply automatically to the current code or deployment.
+
+## Interrupted workflow recovery
+
+The customer chat retains its account-scoped session and offers an explicit **Resume interrupted request** action when the orchestrator context reports recovery or chat has an undelivered recovered response. Owner-checked `POST /api/chat/recover` sends the current JWT to `POST /api/orchestrator/session/:id/recover`, with no replacement message, intent or release. Ordinary message processing durably marks delivery pending before AI dispatch and clears that marker only after chat state and transcript persistence. Recovery maps the original result and persists pending feedback before delivering its prompt. No financial retry is inferred from transport loss. If the orchestrator explicitly confirms that the original session does not exist, chat clears the delivery marker and displays an outcome-check message without submitting the action; unreachable, forbidden, or unrecognized responses retain recovery state. Completed prompts are replayed only while their original feedback remains pending and unexpired. See [durable recovery](../ai-orchestrator/WHY-CHECKPOINTER-IS-REQUIRED.md).
+
+Delegated quality-job credentials cannot authenticate REST/socket customer sessions or refresh into chat access tokens. Direct confirmation remains the SQL-feedback/effect-ledger path; graph recovery does not regenerate a lost post-confirmation response. If the original prompt has already advanced, recovery rejects it and clears stale chat confirmation context; check transaction history or the provider outcome before another action. Uncertain external outcomes require operator reconciliation rather than graph replay.

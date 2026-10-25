@@ -9,6 +9,8 @@ The [documentation index](../README.md) is the current entry point.
   architecture, deterministic behavior, API index and product positioning.
 - Prompt/intent/runtime, model setup/plugins, fulfillment/identity/privacy/cost
   contracts, new platform packages/readiness and administrator bootstrap.
+- Current market assessment, measured-response evaluation/gates, case assignment/knowledge,
+  durable graph checkpoint/recovery contracts and customer resume behavior.
 - Current frontend, banking, chat, orchestrator, NLU and MCP service guides and
   deployment tooling references.
 - Earlier implementation, completion, review and test reports: preserved with
@@ -18,7 +20,8 @@ Claims were checked against route validators, package scripts, Compose services,
 Docker entrypoints, migrations and regression tests. The review corrected the
 request flow, optional-model determinism scope, service counts/ports, internal
 service identity, supported identity modes, safe environment loading, schema
-ownership, readiness semantics, and dedicated-deployment limits. It removed
+ownership, readiness semantics, durable graph storage, scoped evaluation delegation,
+operator case handling, and dedicated-deployment limits. It removed
 unsupported claims that a template, sample or passing unit suite establishes a
 production SLA, generic domain neutrality, native SAML, shared SaaS isolation or
 live telephony/model qualification.

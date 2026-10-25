@@ -163,6 +163,23 @@ These are **contract simulations**: they do not execute banking tools, call
 external adapters, assess generated answer quality, or establish production
 latency. Live integration checks and operational traces are separate evidence.
 
+## Measured response quality
+
+**Response quality** runs explicitly requested model probes against saved synthetic
+suites and a pinned draft or release profile. Choose generation, extraction or
+recognition, author objective assertions and save the suite before running.
+Unapplied advanced JSON and unsaved configuration disable execution. Review each
+response, assertion, latency and measured token coverage; missing usage is unknown.
+Cancel stops future cases, while an already dispatched provider call may still
+finish and incur usage. Comparison reads recorded evidence without inference.
+
+Administrators can require suite/profile pairs for publish, rollback and promotion.
+Only a completed passing run with exact current config, suite and profile
+fingerprints satisfies these gates. Changed prompts, assertions or profiles need
+a new run. Contract simulations and approval gates remain independent. These are
+prompt probes, not full conversation/tool tests or a semantic quality judge.
+See [evaluation guide and limits](../../docs/guides/model-evaluation.md).
+
 ## Knowledge management
 
 **Knowledge** creates and versions documents with source references, role access,
@@ -194,6 +211,37 @@ revisions, including identity mappings, to avoid lost updates.
 For a saved, enabled knowledge adapter, **Sync knowledge to drafts** retrieves
 the provider's document batch through the server and imports it for review.
 Save local configuration changes before synchronization.
+
+## Agent workspace
+
+Use **Agent workspace** for durable connector-backed servicing cases. Filter by
+queue, channel, assignment, handling state, provider execution, or overdue SLA;
+queue oversight reflects the applied filters. Select a case to review its bounded
+summary, routing, session reference, pinned journey and recent execution evidence.
+Customer banking records and transcripts are not aggregated into this view.
+
+An operator claims work for themselves with a reason, then records an in-progress,
+waiting, or resolved handling state and disposition. Only the owner may edit;
+administrators can release another assignment with a reason. Every save checks
+both case and handling revisions. A 409 preserves your note: refresh the workspace,
+review the newer assignment/provider state, and save only if it remains appropriate.
+Switching cases with unsaved edits requires an explicit discard decision.
+
+Search published knowledge and cite the source version in a handling note. Access
+uses your signed roles; expired, unpublished, inaccessible or changed citations
+cannot be saved. Source excerpts are bounded and link to the approved source when
+a valid HTTP(S) URL exists. These are lexical search results, not generated advice.
+Notes must avoid bank data, customer identifiers and secrets; email addresses and
+long digit runs are redacted. Handling notes follow case retention and erasure.
+
+Provider execution remains authoritative. Agent handling cannot resolve while
+execution is open or uncertain, and `service completed` requires a completed
+provider outcome. Use the existing reconciliation flow for an uncertain external
+result. Agent saves do not execute or retry a financial action. Handling history
+links to recorded evidence; the full administrator export includes older action
+digests without duplicating note content. Manual work items remain in **Fulfillment**,
+and actual chat/media delivery remains with the qualified provider/agent console.
+See the [agent workspace contract](../api-gateway/operations/AGENT-WORKSPACE.md).
 
 ## Execution and reconciliation
 

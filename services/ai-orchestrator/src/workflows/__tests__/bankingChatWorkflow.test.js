@@ -319,3 +319,36 @@ describe('BankingChatWorkflow graph integration', () => {
     expect(mcp.executeTool).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('checkpointed workflow credentials and recovery identity', () => {
+  test('recovery injects fresh credentials, validates pinned identity, and persists no bearer token', async () => {
+    const { CheckpointerManager, graphThreadId } = require('../../utils/checkpointer');
+    const manager = new CheckpointerManager({ env: { NODE_ENV: 'test' } });
+    const saver = manager.getCheckpointer();
+    const originalPut = saver.put.bind(saver);
+    let fail = true;
+    saver.put = async (...args) => {
+      if (fail && args[1].channel_values.currentStep === 'check_required_data') { fail = false; throw new Error('checkpoint store interrupted'); }
+      return originalPut(...args);
+    };
+    const sessionManager = { getSession: jest.fn(async () => ({ collectedData: {}, conversationHistory: [] })), updateSession: jest.fn(), updateWorkflowState: jest.fn() };
+    const mcp = { executeTool: jest.fn(async () => ({ success: true, data: { accounts: [] } })) };
+    const policy = new (require('../../services/policyEngine'))();
+    const input = { sessionId: 'recover-auth', userId: 'customer', tenantId: 'default-enterprise', interactionId: 'original', authToken: 'old-private-bearer',
+      runtimeContext: { action: 'automated', version: 7, channel: 'digital' }, intent: 'balance_inquiry', question: 'balance', collectedData: {}, conversationHistory: [], policyTrace: [] };
+    const threadId = graphThreadId({ ...input, runId: 'execution-1' });
+    const workflow = new BankingChatWorkflow(mcp,sessionManager,policy,{ checkpointerManager: manager });
+    expect(await workflow.execute(input,{ threadId })).toMatchObject({ recoveryRequired: true });
+    expect(mcp.executeTool).not.toHaveBeenCalled();
+    const restarted = new BankingChatWorkflow(mcp,sessionManager,policy,{ checkpointerManager: manager });
+    await expect(restarted.recover({ ...input, userId: 'foreign' },threadId)).rejects.toMatchObject({ status: 409 });
+    await expect(restarted.recover({ ...input, runtimeContext: { ...input.runtimeContext, version: 8 } },threadId)).rejects.toMatchObject({ status: 409 });
+    const result = await restarted.recover({ ...input, authToken: 'refreshed-private-bearer' },threadId);
+    expect(result.finalResponse.type).toBe('complete');
+    expect(mcp.executeTool).toHaveBeenCalledTimes(1);
+    expect(mcp.executeTool).toHaveBeenCalledWith('banking_get_accounts',expect.objectContaining({ authToken: 'refreshed-private-bearer' }),'recover-auth');
+    const stored = JSON.stringify(await manager.getCheckpointHistory(threadId,100));
+    expect(stored).not.toMatch(/old-private-bearer|refreshed-private-bearer|authToken/);
+    expect(result).not.toHaveProperty('authToken');
+  });
+});

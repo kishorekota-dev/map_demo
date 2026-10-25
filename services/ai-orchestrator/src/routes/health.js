@@ -13,6 +13,7 @@ router.get('/', async (req, res) => {
     const { sequelize } = require('../models');
     await sequelize.authenticate();
     const dbHealthy = true;
+    const graphCheckpoints = await req.app.locals.workflowService?.workflow.checkpointerManager?.healthCheck();
     
     // Check MCP service
     const mcpHealth = await mcpClient.healthCheck();
@@ -25,6 +26,7 @@ router.get('/', async (req, res) => {
       version: '1.0.0',
       uptime: process.uptime(),
       checks: {
+        ...(graphCheckpoints ? { graphCheckpoints: { status: 'up', ...graphCheckpoints } } : {}),
         database: {
           status: dbHealthy ? 'up' : 'down'
         },

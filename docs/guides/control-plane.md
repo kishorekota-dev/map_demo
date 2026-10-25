@@ -181,3 +181,16 @@ schema access; do not rely on automatic development DDL. Start with the
 bootstrap instead of granting demo customer identities privileges. MCP/NLU internal
 requests require the separate server-side service token in production. Customer
 authorization remains required for banking effects.
+
+## Measured response quality and case handling
+
+**Tests & evaluations** simulates routing and tool contracts. **Response quality**
+explicitly invokes the configured model on saved synthetic probes, records response
+assertions/latency/usage, compares runs and optionally gates releases with exact
+configuration/dataset/profile evidence. Opening the console or publishing does not
+start inference. See [evaluation limits and API](model-evaluation.md).
+
+**Agent workspace** handles existing connector cases: filters, self-assignment,
+revision-protected notes/dispositions, approved knowledge citations and bounded
+case context. Provider outcomes remain authoritative and uncertain financial work
+cannot be resolved by a note. See [workspace contract](../../services/api-gateway/operations/AGENT-WORKSPACE.md).

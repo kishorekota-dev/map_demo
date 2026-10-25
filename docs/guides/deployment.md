@@ -48,7 +48,7 @@ npm run production:preflight -- --env "$APP_ENV_FILE" --compose
   -f docker/docker-compose-full-stack.yml -f docker/docker-compose.production.yml \
   run --rm --build --no-deps --entrypoint node banking-service database/scripts/migrate.js
 
-# Configuration, operations, AI base/ledger and chat base/handoff schemas.
+# Configuration, operations, AI base/ledger/checkpoints and chat base/handoff schemas.
 ./scripts/run-with-env.sh docker compose \
   -f docker/docker-compose-full-stack.yml -f docker/docker-compose.production.yml \
   run --rm --build servicing-migrations
@@ -77,7 +77,7 @@ The bundled database user owns the local Compose database. An enterprise using m
 | Banking domain and roles | `services/banking-service/database/migrations`; `npm run db:migrate` under the banking `DB_*` environment |
 | Control-plane releases, drafts and records | `services/api-gateway/control-plane/schema.sql`; `platform:migrate --component control-plane` |
 | Operations, jobs, identity and evidence | `services/api-gateway/operations/schema.sql`; `platform:migrate --component operations` |
-| AI model tables and financial dispatch ledger | `services/ai-orchestrator/migrations/V0__ai_model_tables.sql` and V1; `platform:migrate --component workflow` |
+| AI model tables, financial dispatch ledger and graph checkpoints | `services/ai-orchestrator/migrations/V0__ai_model_tables.sql`, V1 and V2; `platform:migrate --component workflow` |
 | Chat sessions/messages and resume grants | `services/chat-backend/migrations/V1` through V6; `platform:migrate --component handoff` |
 
 For non-container deployments:
@@ -88,7 +88,7 @@ npm run platform:migrate -- --env /absolute/path/migration.env
 
 The CLI requires explicit `CONTROL_PLANE_DATABASE_URL`, `OPERATIONS_DATABASE_URL`, `WORKFLOW_DATABASE_URL` and `HANDOFF_DATABASE_URL`. It applies each component in its own transaction with an advisory lock, stops on failure and emits sanitized status. It does not create databases, run banking migrations or seed identities. Use migration-owner credentials and grant the runtime only the required database access.
 
-`DATABASE_MANAGE_SCHEMA=false` makes production chat/AI startup verify model tables/columns without calling Sequelize synchronization. `CONTROL_PLANE_MANAGE_SCHEMA=false`, `OPERATIONS_MANAGE_SCHEMA=false`, `WORKFLOW_SCHEMA_AUTO_MIGRATE=false` and `HANDOFF_SCHEMA_AUTO_MIGRATE=false` similarly require pre-applied servicing schemas. Keep the workflow/handoff migration URLs aligned with each service's base database. Root `db:setup` is a development bootstrap, not this production process.
+`DATABASE_MANAGE_SCHEMA=false` makes production chat/AI startup verify model tables/columns without calling Sequelize synchronization. `CONTROL_PLANE_MANAGE_SCHEMA=false`, `OPERATIONS_MANAGE_SCHEMA=false`, `WORKFLOW_SCHEMA_AUTO_MIGRATE=false`, `HANDOFF_SCHEMA_AUTO_MIGRATE=false` and `CHECKPOINT_SCHEMA_AUTO_MIGRATE=false` similarly require pre-applied servicing schemas. Keep the workflow/handoff migration URLs aligned with each service's base database. Production requires `CHECKPOINT_ENABLED=true` and `CHECKPOINT_BACKEND=postgres`; this migration profile keeps checkpoint storage in the workflow database. Root `db:setup` is a development bootstrap, not this production process.
 
 Review migration history and upgrade behavior on staging backups before rollout. Do not modify deployed migration versions or drop volumes to force reinitialization. PostgreSQL Docker init scripts only run on empty volumes.
 

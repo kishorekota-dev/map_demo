@@ -60,7 +60,7 @@ substitution/interpolation. Public runtime JSON must never contain credentials.
 | Identity | OIDC/local JWT implemented; customer IdP registration/mappings required, SCIM and native SAML absent |
 | Voice | Signed normalized turn/action contract; actual media, ASR/TTS, DTMF timing and contact-center transfer require a provider adapter |
 | Model portability | Protocol fixtures and governed profiles verified; separate Mac Studio/cloud reachability, quality and latency require target testing |
-| Reliability | Durable records, leases, unknown-outcome handling and readiness; some graph/socket/cache state is process-local, and throughput/SLO/RPO/RTO remain unmeasured |
+| Reliability | Durable records, leases, unknown-outcome handling and readiness; graph checkpoints now persist in PostgreSQL; socket/cache state remains process-local, and throughput/SLO/RPO/RTO remain unmeasured |
 | Deployment | Supported dedicated Compose overlay and explicit schema lifecycle; no generated production Helm/Terraform installer or universal rolling-upgrade compatibility guarantee |
 | Assurance | Operational ACL/retention/evidence mechanisms; customer legal policy, immutable archival, full data lifecycle and regulatory certification remain external |
 | Commercial | Measured usage/configured costs; no licensing, entitlement enforcement, subscriptions, invoicing or commercial support contract |

@@ -115,6 +115,10 @@ async function processSessionMessageHandler(req, res, next) {
             authToken
         };
 
+        // Preserve delivery intent before dispatch: a completed AI graph may
+        // outlive this HTTP request or chat transcript/state persistence.
+        await sessionManager.updateSessionState(sessionId, { workflowRecoveryRequired: true });
+
         // Process through orchestrator
         const agentResult = await agentOrchestrator.processMessage(
             sessionId,
@@ -157,6 +161,9 @@ async function processSessionMessageHandler(req, res, next) {
                 agentResult.conversationContextUpdates
             );
         }
+
+        await sessionManager.updateSessionState(sessionId, { workflowRecoveryRequired:
+            finalResponse.metadata?.policyCode === 'workflow_recovery_required' || agentResult.conversationContextUpdates?.workflowRecoveryRequired === true });
 
         logger.info('Message processed via REST API', { sessionId, messageId: message.id, responseId: response.id });
 
@@ -230,6 +237,34 @@ router.post('/chat/message', verifyToken, requireSessionOwnership, async (req, r
         return processSessionMessageHandler(req, res, next);
     } catch (err) {
         next(err);
+    }
+});
+
+// Explicit recovery never creates a new customer message or reclassifies intent.
+router.post('/chat/recover', verifyToken, requireSessionOwnership, async (req, res) => {
+    const sessionId = req.ownedSession.sessionId;
+    try {
+        const { agentOrchestrator, sessionManager, chatService } = req.app.locals.services;
+        await sessionManager.updateSessionState(sessionId, { workflowRecoveryRequired: true });
+        const result = await agentOrchestrator.recoverWorkflow(sessionId, req.headers.authorization.substring(7), req.ownedSession.state?.lockedIntent);
+        // Store pending feedback before returning its prompt, so the next reply
+        // follows the original pinned workflow instead of starting a new request.
+        if (result.conversationContextUpdates) await sessionManager.updateSessionState(sessionId, result.conversationContextUpdates);
+        const finalResponse = result.finalResponse || {};
+        const response = await chatService.sendResponse(sessionId, finalResponse, {
+            agentId: finalResponse.source || 'orchestrator', agentType: 'ai', confidence: finalResponse.confidence, processingTime: result.processingTime
+        });
+        await sessionManager.updateSessionState(sessionId, { workflowRecoveryRequired: finalResponse.metadata?.policyCode === 'workflow_recovery_required' });
+        return res.json({ response, agentResult: { intent: finalResponse.metadata?.intent, processingTime: result.processingTime }, timestamp: new Date().toISOString() });
+    } catch (_error) {
+        const absentOriginal = _error.status === 404 && _error.upstreamCode === 'WORKFLOW_SESSION_NOT_FOUND';
+        if (_error.status === 409 || absentOriginal) {
+            await req.app.locals.services.sessionManager.updateSessionState(sessionId, { workflowRecoveryRequired: false, pendingFeedback: null, lockedIntent: null }).catch(() => {});
+            return res.status(409).json({ error: absentOriginal
+                ? 'No original workflow was found; no action has been replayed. Check its outcome or transaction history before starting another action.'
+                : 'The original request has advanced or expired. Check its outcome or transaction history before starting another action.' });
+        }
+        return res.status(503).json({ error: 'Recovery could not be completed. The original request is preserved; check its status before continuing.' });
     }
 });
 

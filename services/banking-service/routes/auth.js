@@ -347,7 +347,7 @@ router.post('/refresh', async (req, res) => {
     // Verify refresh token
     const decoded = jwt.verify(refreshToken, JWT_SECRET);
 
-    if (decoded.type !== 'refresh') {
+    if (decoded.type !== 'refresh' || decoded.purpose === 'quality_evaluation' || [decoded.aud].flat().includes('servicing-quality')) {
       return res.status(401).json({
         status: 'error',
         error: {

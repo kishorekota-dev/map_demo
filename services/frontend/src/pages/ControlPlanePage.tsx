@@ -28,10 +28,14 @@ import IntentContractEditor from "@/components/control-plane/IntentContractEdito
 import ReleaseDiff from "@/components/control-plane/ReleaseDiff";
 import ModelProviderConsole from "@/components/control-plane/ModelProviderConsole";
 import PlatformConsole from "@/components/control-plane/PlatformConsole";
+import AgentWorkspace from "@/components/control-plane/AgentWorkspace";
+import QualityConsole from "@/components/control-plane/QualityConsole";
 
 type Section =
   | "overview"
   | "platform"
+  | "agent"
+  | "quality"
   | "channels"
   | "intents"
   | "models"
@@ -46,7 +50,21 @@ type Section =
   | "operations";
 const sections: Array<{ id: Section; label: string; detail: string }> = [
   { id: "overview", label: "Overview", detail: "Service readiness" },
-  { id: "platform", label: "Platform & solutions", detail: "Deployment health and reusable solutions" },
+  {
+    id: "platform",
+    label: "Platform & solutions",
+    detail: "Deployment health and reusable solutions",
+  },
+  {
+    id: "agent",
+    label: "Agent workspace",
+    detail: "Case assignment and resolution",
+  },
+  {
+    id: "quality",
+    label: "Response quality",
+    detail: "Measured model evaluation",
+  },
   { id: "channels", label: "Channels", detail: "Digital · AVA · IVR" },
   { id: "intents", label: "Intents & prompts", detail: "Conversation design" },
   {
@@ -1024,7 +1042,13 @@ export default function ControlPlanePage() {
           </>
         )}
 
-        {section === "platform" && <PlatformConsole editable={editable} configurationDirty={dirty || rawEdited} onApplied={refresh} />}
+        {section === "platform" && (
+          <PlatformConsole
+            editable={editable}
+            configurationDirty={dirty || rawEdited}
+            onApplied={refresh}
+          />
+        )}
 
         {section === "models" && (
           <ModelProviderConsole
@@ -2258,6 +2282,17 @@ export default function ControlPlanePage() {
           </>
         )}
 
+        {section === "agent" && <AgentWorkspace onNavigate={setSection} />}
+        {section === "quality" && (
+          <QualityConsole
+            control={state}
+            configurationDirty={dirty || rawEdited}
+            onRevisionChange={(revision) => {
+              if (!dirty && !rawEdited && revision !== state.revision)
+                void refresh();
+            }}
+          />
+        )}
         {(section === "connections" ||
           section === "traces" ||
           section === "operations") && (

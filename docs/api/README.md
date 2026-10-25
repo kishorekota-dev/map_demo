@@ -11,10 +11,12 @@ and gateway on host loopback for a separately configured TLS ingress.
 | --- | --- | --- |
 | `/api/banking/v1/auth` | Banking login, refresh, logout and user identity | Login/refresh have their own validation; protected operations require access JWTs |
 | `/api/banking/v1` | Banking accounts, transfers, cards, transactions, fraud and disputes | Signed user access JWT plus domain ownership/authorization |
-| `/api/chat`, `/api/sessions` | Customer messages, owned sessions and one-time channel handoffs | Signed customer JWT; session ownership enforced |
+| `/api/chat`, `/api/sessions` | Customer messages, owned sessions, explicit interrupted-request recovery and one-time channel handoffs | Signed customer JWT; session ownership enforced |
 | `/api/orchestrator` | Governed workflows, feedback, session context and financial exception reconciliation | Signed tenant JWT; extra operator scopes for context/reconciliation |
+| `/api/orchestrator/llm/evaluate` | Internal bounded synthetic model probe, without tools | Short-lived run-scoped delegation JWT plus service credential; ordinary customer/editor tokens cannot invoke it |
 | `/api/orchestrator/llm` | Sanitized server model registry, model discovery and fixed synthetic tests | Operator viewing roles; editor/admin for tests |
 | `/api/control-plane` | Drafts, simulation, publish/rollback, work, suites, knowledge, environments and approvals | Signed deployment tenant; operation-specific control-plane role |
+| `/api/quality` | Synthetic model probes, persisted results, comparison and exact-fingerprint release policy | Signed operator read; editor/admin run; admin policy |
 | `/api/operations` | Connections, executed cases, callbacks, identity mappings, evidence, retention and measured costs | Operation-specific signed roles; runtime writes also require internal service identity |
 | `/api/identity` | OIDC code/PKCE login, callback, browser session and logout | Bound login state and HTTP-only session; role mapping is server-owned |
 | `/api/platform` | Readiness diagnostics, extension catalog and governed solution packages | Operator view; editor/admin for package preview/apply |
@@ -28,6 +30,8 @@ frontend runtime JSON or a query string.
 
 ## Current references
 
+- [Measured model evaluation](../guides/model-evaluation.md) and
+  [agent workspace](../../services/api-gateway/operations/AGENT-WORKSPACE.md).
 - [Control-plane API](../../services/api-gateway/control-plane/README.md):
   payloads, revision conflicts, publish gates, pagination and runtime policy.
 - [Platform API](../../services/api-gateway/platform/README.md): package

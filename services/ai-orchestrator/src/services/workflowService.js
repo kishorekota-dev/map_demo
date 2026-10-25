@@ -10,6 +10,7 @@ const { RuntimePersistence } = require('./runtimePersistence');
 const { randomUUID } = require('crypto');
 const RuntimeIntegrations = require('./runtimeIntegrations');
 const { isLlmError, modelUnavailable } = require('../llm/errors');
+const { graphThreadId } = require('../utils/checkpointer');
 
 /**
  * Workflow Service
@@ -70,6 +71,7 @@ class WorkflowService {
       if (current && (String(current.userId) !== String(input.userId) || (current.metadata?.tenantId && current.metadata.tenantId !== tenant))) {
         throw Object.assign(new Error('Session access denied'), { status: 403 });
       }
+      if (current?.metadata?.graphRun?.status === 'running') return this.controlPlaneBlock('workflow_recovery_required', { version: current.metadata.controlPlane?.version, recoveryRequired: true });
       return this.withEvidence(enriched, () => this.processMessageInSession(enriched));
     }));
   }
@@ -157,7 +159,9 @@ class WorkflowService {
   controlPlaneBlock(reason, metadata = {}, wording = null) {
     return {
       type: 'policy_blocked', code: reason, stage: 'control_plane', currentStep: 'control_plane_routing',
-      message: reason === 'configuration_unavailable'
+      message: reason === 'workflow_recovery_required'
+        ? 'Resume the interrupted request before starting another action.'
+        : reason === 'configuration_unavailable'
         ? 'Servicing configuration is temporarily unavailable. Please try again later.'
         : reason === 'pending_workflow'
           ? 'Please finish or cancel your pending request before starting another.'
@@ -239,6 +243,8 @@ class WorkflowService {
         throw Object.assign(new Error('Session access denied'), { status: 403 });
       }
 
+      await this.sessionManager.updateSession(sessionId, { intent, metadata: { ...session.metadata, ...metadata } });
+
       // Add user message to conversation history
       await this.sessionManager.addMessage(sessionId, 'user', question);
 
@@ -301,7 +307,7 @@ class WorkflowService {
         userId,
         authToken,
         interactionId: session.metadata?.interactionId || metadata.interactionId,
-        tenantId: session.metadata?.tenantId || metadata.tenantId,
+        tenantId: session.metadata?.tenantId || metadata.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
         runtimeContext: metadata.runtimeContext || session.metadata?.runtimeContext,
         intent,
         question,
@@ -312,8 +318,22 @@ class WorkflowService {
         confirmationGranted: false
       };
 
-      // Execute workflow
-      const result = await this.workflow.execute(workflowInput);
+      const threadId = graphThreadId({ tenantId: workflowInput.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise', userId, sessionId, runId: executionId });
+      const { authToken: _credential, ...initialInput } = workflowInput;
+      await this.sessionManager.updateSession(sessionId, { metadata: { ...session.metadata, graphRun: {
+        id: executionId, threadId, interactionId: workflowInput.interactionId, status: 'running', initialInput
+      } } });
+      const result = await this.workflow.execute(workflowInput, { threadId });
+      return this.finalizeWorkflowResult(sessionId, executionId, result, execution);
+    } catch (error) {
+      await WorkflowExecution.update({ status: 'failed', error: { message: error.message }, completedAt: new Date() }, { where: { executionId } }).catch(() => {});
+      throw error;
+    }
+  }
+
+  async finalizeWorkflowResult(sessionId, executionId, result, execution) {
+      if (result.recoveryRequired) return { executionId, ...result.finalResponse, needsHumanInput: false, recoveryRequired: true };
+
 
       // Update execution record
       const executionStatus = result.error
@@ -323,6 +343,7 @@ class WorkflowService {
           : 'completed';
 
       let telemetryUnavailable = result.finalResponse?.telemetryUnavailable === true;
+      let terminalSaved = true;
       try { await execution.update({
         status: executionStatus,
         output: result.finalResponse,
@@ -332,12 +353,12 @@ class WorkflowService {
         completedAt: new Date()
       }); } catch (error) {
         if (result.needsHumanInput) throw error;
-        telemetryUnavailable = true;
+        telemetryUnavailable = true; terminalSaved = false;
       }
 
       // Handle human input required
       if (result.needsHumanInput) {
-        const feedback = await HumanFeedback.create({
+        const feedback = await HumanFeedback.findOne({ where: { sessionId, executionId, status: 'pending' } }) || await HumanFeedback.create({
           sessionId,
           executionId,
           feedbackType: result.finalResponse.type === 'confirmation_required' 
@@ -358,8 +379,16 @@ class WorkflowService {
         });
       } else {
         try { await this.sessionManager.updateSession(sessionId, { status: 'active', requiredData: [], currentStep: result.currentStep }); }
-        catch (_error) { telemetryUnavailable = true; }
+        catch (_error) { telemetryUnavailable = true; terminalSaved = false; }
       }
+
+      try {
+        const current = await this.sessionManager.getSession(sessionId);
+        if (terminalSaved && current.metadata?.graphRun?.id === executionId) {
+          const { initialInput: _input, ...run } = current.metadata.graphRun;
+          await this.sessionManager.updateSession(sessionId, { metadata: { ...current.metadata, graphRun: { ...run, status: 'completed' } } });
+        }
+      } catch (error) { if (result.needsHumanInput) throw error; telemetryUnavailable = true; }
 
       logger.info('Workflow execution completed', {
         sessionId,
@@ -376,26 +405,52 @@ class WorkflowService {
         currentStep: result.currentStep
       };
 
-    } catch (error) {
-      logger.error('Workflow processing error', {
-        sessionId,
-        executionId,
-        error: error.message,
-        stack: error.stack
+  }
+
+  async recoverMessage({ sessionId, userId, tenantId, authToken }) {
+    return this.requestMutex.runExclusive(sessionId, () => this.persistence.runSession(tenantId, sessionId, async () => {
+      const session = await this.sessionManager.getSession(sessionId, { includeExpired: true });
+      if (!session) throw Object.assign(new Error('No original workflow session was found'), { status: 404, code: 'WORKFLOW_SESSION_NOT_FOUND' });
+      if (String(session.userId) !== userId || (session.metadata?.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise') !== tenantId) {
+        throw Object.assign(new Error('Session access denied'), { status: 403 });
+      }
+      const run = session.metadata?.graphRun;
+      if (!['running', 'completed'].includes(run?.status)) throw Object.assign(new Error('No recoverable graph is available'), { status: 409 });
+      if (['expired', 'completed'].includes(session.status) || (session.expiresAt && new Date(session.expiresAt) <= new Date())) throw Object.assign(new Error('Session expired; operator reconciliation may be required'), { status: 409 });
+      const expectedThread = graphThreadId({ tenantId, userId, sessionId, runId: run.id });
+      if (run.threadId !== expectedThread || run.interactionId !== session.metadata.interactionId) throw Object.assign(new Error('Graph execution binding is invalid'), { status: 409 });
+      const execution = await WorkflowExecution.findOne({ where: { executionId: run.id, sessionId } });
+      if (!execution) throw Object.assign(new Error('Original workflow execution is unavailable'), { status: 409 });
+      // A response lost between AI and chat may be delivered again without
+      // invoking the graph, replacing a release, or executing any tool.
+      if (run.status === 'completed') {
+        if (!execution.output?.type) throw Object.assign(new Error('Completed workflow response is unavailable'), { status: 409 });
+        const needsHumanInput = ['human_input_required', 'confirmation_required'].includes(execution.output.type);
+        if (needsHumanInput) {
+          const pending = await HumanFeedback.findOne({ where: { sessionId, executionId: run.id, status: 'pending' } });
+          if (!pending || (pending.expiresAt && new Date(pending.expiresAt) <= new Date())) {
+            throw Object.assign(new Error('This request has advanced or expired; its old prompt cannot be replayed'), { status: 409 });
+          }
+        }
+        return { executionId: run.id, ...execution.output, intent: session.intent, currentStep: execution.currentNode,
+          needsHumanInput, recovered: true };
+      }
+      if (!run.initialInput) throw Object.assign(new Error('Original workflow input is unavailable'), { status: 409 });
+      const snapshot = session.metadata.controlPlane ? validateSnapshot(session.metadata.controlPlane) : null;
+      if (this.controlPlane.isEnabled() && !snapshot) return this.controlPlaneBlock('configuration_unavailable');
+      const route = snapshot ? { ...resolvePublishedRoute(snapshot, normalizeChannel(session.metadata.channel), session.intent), environment: snapshot.environment, cohort: snapshot.cohort } : run.initialInput.runtimeContext;
+      if (route && route.action !== 'automated') return this.controlPlaneBlock(route.reason || 'recovery_route_changed', route);
+      const initialInput = { ...run.initialInput, userId, tenantId, sessionId, authToken, runtimeContext: route };
+      if (initialInput.intent !== session.intent || initialInput.interactionId !== run.interactionId
+        || initialInput.runtimeContext?.version !== run.initialInput.runtimeContext?.version
+        || initialInput.runtimeContext?.channel !== run.initialInput.runtimeContext?.channel) throw Object.assign(new Error('Pinned release does not match graph execution'), { status: 409 });
+      const recover = () => this.withEvidence({ sessionId, userId, authToken, metadata: session.metadata }, async () => {
+        const result = await this.workflow.recover(initialInput, run.threadId);
+        return this.finalizeWorkflowResult(sessionId, run.id, result, execution);
       });
-
-      // Update execution as failed
-      await WorkflowExecution.update(
-        {
-          status: 'failed',
-          error: { message: error.message, stack: error.stack },
-          completedAt: new Date()
-        },
-        { where: { executionId } }
-      ).catch(() => {});
-
-      throw error;
-    }
+      return snapshot ? intentMapper.withPublishedIntents(snapshot.config.intents, recover, snapshot.config.prompts,
+        { recordUsage: this.usageRecorder({ sessionId, metadata: session.metadata, authToken }, snapshot, route.channel) }, snapshot.config.llm) : recover();
+    }));
   }
 
   /**
@@ -406,6 +461,8 @@ class WorkflowService {
   }
 
   async processFeedbackInSession(input) {
+    const current = await this.sessionManager.getSession(input.sessionId);
+    if (current?.metadata?.graphRun?.status === 'running') return this.controlPlaneBlock('workflow_recovery_required', { recoveryRequired: true });
     if (!this.controlPlane.isEnabled()) return this.processConfiguredFeedback(input);
     const session = await this.sessionManager.getSession(input.sessionId);
     let snapshot;

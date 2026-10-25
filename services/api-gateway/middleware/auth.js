@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const { isQualityDelegation } = require('./tokenScope');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
 
@@ -31,6 +32,7 @@ const authMiddleware = (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, JWT_SECRET);
+    if (isQualityDelegation(decoded)) return res.status(403).json({ error: 'Evaluation delegation cannot authenticate gateway requests.' });
     
     // Attach user info to request
     req.user = decoded;
@@ -89,6 +91,7 @@ const optionalAuth = (req, res, next) => {
   try {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, JWT_SECRET);
+    if (isQualityDelegation(decoded)) return res.status(403).json({ error: 'Evaluation delegation cannot authenticate gateway requests.' });
     req.user = decoded;
     req.userId = decoded.userId;
     req.userRole = decoded.role || 'user';
@@ -144,7 +147,9 @@ const generateToken = (payload, expiresIn = '24h') => {
  */
 const verifyToken = (token) => {
   try {
-    return { valid: true, decoded: jwt.verify(token, JWT_SECRET) };
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (isQualityDelegation(decoded)) return { valid: false, error: 'Evaluation delegation is not an access token.' };
+    return { valid: true, decoded };
   } catch (error) {
     return { valid: false, error: error.message };
   }

@@ -192,3 +192,84 @@ describe('chat REST authorization', () => {
     }));
   });
 });
+
+ test('explicit recovery checks owner, uses fresh JWT, and restores pending feedback before delivery', async () => {
+    const token = jwt.sign({ userId: 'user-a' }, JWT_SECRET);
+    const updates = { pendingFeedback: { type: 'confirmation_required', intent: 'transfer_funds' }, lockedIntent: 'transfer_funds' };
+    const agentOrchestrator = { recoverWorkflow: jest.fn(async () => ({ finalResponse: { content: 'Confirm?', metadata: { intent: 'transfer_funds' } }, conversationContextUpdates: updates })) };
+    const sessionManager = { getSession: jest.fn(async () => ({ sessionId: 's1', userId: 'user-a', state: {} })), updateSessionState: jest.fn() };
+    const chatService = { sendResponse: jest.fn(async () => ({ id: 'reply', content: 'Confirm?' })) };
+    const app = createApp(null,{ agentOrchestrator,sessionManager,chatService });
+    expect((await request(app).post('/api/chat/recover').send({ sessionId: 's1' })).status).toBe(401);
+    expect((await request(app).post('/api/chat/recover').set('Authorization', `Bearer ${jwt.sign({ userId: 'foreign' },JWT_SECRET)}`).send({ sessionId: 's1' })).status).toBe(403);
+    expect((await request(app).post('/api/chat/recover').set('Authorization', `Bearer ${token}`).send({ sessionId: 's1', version: 99, intent: 'help' })).status).toBe(200);
+    expect(agentOrchestrator.recoverWorkflow).toHaveBeenCalledWith('s1',token,undefined);
+    expect(sessionManager.updateSessionState).toHaveBeenCalledWith('s1',updates);
+    expect(sessionManager.updateSessionState.mock.invocationCallOrder[1]).toBeLessThan(chatService.sendResponse.mock.invocationCallOrder[0]);
+    expect(sessionManager.updateSessionState).toHaveBeenLastCalledWith('s1',{ workflowRecoveryRequired: false });
+  });
+
+ test('scoped evaluation credentials cannot recover customer sessions or mint chat tokens', async () => {
+    const app = createApp({ sessionId: 's1', userId: 'user-a' });
+    app.use('/auth',require('../auth').router);
+    for (const claim of [{ purpose: 'quality_evaluation' },{ aud: 'servicing-quality' },{ aud: ['servicing-quality'] }]) {
+      const token = jwt.sign({ userId: 'user-a', type: 'access', ...claim },JWT_SECRET,{ expiresIn: '5m' });
+      expect((await request(app).post('/api/chat/recover').set('Authorization', `Bearer ${token}`).send({ sessionId: 's1' })).status).toBe(401);
+      expect((await request(app).post('/auth/refresh').send({ token })).status).toBe(401);
+    }
+  });
+
+ test('ordinary message delivery is marked before AI dispatch and remains recoverable if persistence fails', async () => {
+    const token = jwt.sign({ userId: 'user-a' },JWT_SECRET);
+    const session = { sessionId: 's1', userId: 'user-a', state: {} };
+    const sessionManager = { getSession: jest.fn(async () => session), updateSessionState: jest.fn(async (_id,updates) => Object.assign(session.state,updates)) };
+    const agentOrchestrator = { processMessage: jest.fn(async () => ({ finalResponse: { content: 'Confirm?', metadata: { intent: 'transfer_funds' } },
+      conversationContextUpdates: { pendingFeedback: { type: 'confirmation_required', intent: 'transfer_funds' } } })) };
+    const chatService = { processMessage: jest.fn(async () => ({ id: 'original-message' })), sendResponse: jest.fn(async () => { throw new Error('transcript unavailable'); }) };
+    const app = createApp(session,{ sessionManager,agentOrchestrator,chatService });
+    expect((await request(app).post('/api/chat/message').set('Authorization', `Bearer ${token}`).send({ sessionId: 's1', message: 'transfer' })).status).toBe(500);
+    expect(session.state.workflowRecoveryRequired).toBe(true);
+    expect(sessionManager.updateSessionState.mock.invocationCallOrder[0]).toBeLessThan(agentOrchestrator.processMessage.mock.invocationCallOrder[0]);
+    expect(agentOrchestrator.processMessage).toHaveBeenCalledTimes(1);
+  });
+
+ test('advanced recovery clears stale chat confirmation without submitting a new message', async () => {
+    const token = jwt.sign({ userId: 'user-a' },JWT_SECRET);
+    const session = { sessionId: 's1', userId: 'user-a', state: { pendingFeedback: { type: 'confirmation_required' }, lockedIntent: 'transfer_funds' } };
+    const sessionManager = { getSession: jest.fn(async () => session), updateSessionState: jest.fn(async (_id,updates) => Object.assign(session.state,updates)) };
+    const agentOrchestrator = { recoverWorkflow: jest.fn(async () => { throw Object.assign(new Error('advanced'),{ status: 409 }); }) };
+    const response = await request(createApp(session,{ sessionManager,agentOrchestrator })).post('/api/chat/recover').set('Authorization', `Bearer ${token}`).send({ sessionId: 's1' });
+    expect(response.status).toBe(409);
+    expect(session.state).toMatchObject({ workflowRecoveryRequired: false, pendingFeedback: null, lockedIntent: null });
+    expect(response.body.error).toMatch(/Check its outcome/);
+  });
+
+ test('initial dispatch outage can exit recovery after authoritative absence without replaying the message', async () => {
+    const token = jwt.sign({ userId: 'user-a' },JWT_SECRET);
+    const session = { sessionId: 'never-dispatched', userId: 'user-a', state: {} };
+    const sessionManager = { getSession: jest.fn(async () => session), updateSessionState: jest.fn(async (_id,updates) => Object.assign(session.state,updates)) };
+    const agentOrchestrator = {
+      processMessage: jest.fn(async () => ({ finalResponse: { content: 'Request interrupted', metadata: { policyCode: 'workflow_recovery_required' } }, conversationContextUpdates: { workflowRecoveryRequired: true } })),
+      recoverWorkflow: jest.fn(async () => { throw Object.assign(new Error('no original session'),{ status: 404, upstreamCode: 'WORKFLOW_SESSION_NOT_FOUND' }); })
+    };
+    const chatService = { processMessage: jest.fn(async () => ({ id: 'original-message' })), sendResponse: jest.fn(async () => ({ id: 'reply' })) };
+    const app = createApp(session,{ sessionManager,agentOrchestrator,chatService });
+    expect((await request(app).post('/api/chat/message').set('Authorization', `Bearer ${token}`).send({ sessionId: session.sessionId, message: 'transfer' })).status).toBe(200);
+    expect(session.state.workflowRecoveryRequired).toBe(true);
+    const recovered = await request(app).post('/api/chat/recover').set('Authorization', `Bearer ${token}`).send({ sessionId: session.sessionId });
+    expect(recovered.status).toBe(409);
+    expect(recovered.body.error).toMatch(/Check its outcome/);
+    expect(session.state).toMatchObject({ workflowRecoveryRequired: false, pendingFeedback: null, lockedIntent: null });
+    expect(agentOrchestrator.processMessage).toHaveBeenCalledTimes(1);
+    expect(chatService.processMessage).toHaveBeenCalledTimes(1);
+    expect(agentOrchestrator.recoverWorkflow).toHaveBeenCalledTimes(1);
+  });
+ test.each([403,404])('untrusted or forbidden recovery response %s preserves the delivery marker', async status => {
+    const token = jwt.sign({ userId: 'user-a' },JWT_SECRET);
+    const session = { sessionId: 's1', userId: 'user-a', state: { workflowRecoveryRequired: true } };
+    const sessionManager = { getSession: jest.fn(async () => session), updateSessionState: jest.fn(async (_id,updates) => Object.assign(session.state,updates)) };
+    const agentOrchestrator = { recoverWorkflow: jest.fn(async () => { throw Object.assign(new Error('upstream denied or unknown route'),{ status }); }) };
+    const response = await request(createApp(session,{ sessionManager,agentOrchestrator })).post('/api/chat/recover').set('Authorization', `Bearer ${token}`).send({ sessionId: 's1' });
+    expect(response.status).toBe(503);
+    expect(session.state.workflowRecoveryRequired).toBe(true);
+  });

@@ -37,6 +37,8 @@
   gap: 14px;
 }
 
+.assistant-identity > div { min-width: 0; }
+
 .assistant-identity__mark {
   width: 44px;
   height: 44px;
@@ -68,8 +70,8 @@
   font-size: clamp(20px, 2vw, 27px);
   font-weight: 500;
   line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .chat-panel__actions {
@@ -405,3 +407,10 @@
   .assistant-typing span { animation: none; }
   .suggested-prompts button { transition: none; }
 }
+
+.chat-recovery { border-color: #b9cce9; color: #254774; background: #f1f6fe; flex-wrap: wrap; }
+.chat-recovery button { font-size: 13px; border: 1px solid currentColor; padding: 9px 12px; border-radius: 8px; }
+.chat-recovery button:disabled { opacity: .6; cursor: wait; }
+
+.chat-recovery .secondary-action { width: auto; min-width: 160px; max-width: 100%; height: auto; }
+.chat-recovery .secondary-action::after { content: none; }

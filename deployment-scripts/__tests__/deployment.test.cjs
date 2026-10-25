@@ -16,7 +16,7 @@ function fixture(directory) {
   const env = { NODE_ENV: 'production', AUTH_PROVIDER: 'jwt', DEPLOYMENT_TENANT_ID: 'fixture-bank',
     JWT_SECRET: secret(), SERVICING_SERVICE_TOKEN: secret(), SESSION_SECRET: secret(), AUDIT_ACTOR_HASH_KEY: secret(),
     CONTROL_PLANE_ENABLED: 'true', CONTROL_PLANE_ENVIRONMENT: 'production', CHAT_PERSISTENCE_ENABLED: 'true',
-    WORKFLOW_DURABLE_EXECUTION: 'true', HANDOFF_STORAGE: 'postgres', FULFILLMENT_WORKER_ENABLED: 'true', INTERNAL_SERVICE_AUTH_REQUIRED: 'true',
+    WORKFLOW_DURABLE_EXECUTION: 'true', CHECKPOINT_ENABLED: 'true', CHECKPOINT_BACKEND: 'postgres', CHECKPOINT_SCHEMA_AUTO_MIGRATE: 'false', HANDOFF_STORAGE: 'postgres', FULFILLMENT_WORKER_ENABLED: 'true', INTERNAL_SERVICE_AUTH_REQUIRED: 'true',
     DATABASE_MANAGE_SCHEMA: 'false', CONTROL_PLANE_MANAGE_SCHEMA: 'false', OPERATIONS_MANAGE_SCHEMA: 'false',
     WORKFLOW_SCHEMA_AUTO_MIGRATE: 'false', HANDOFF_SCHEMA_AUTO_MIGRATE: 'false', BANKING_RUN_MIGRATIONS: 'false',
     POSTGRES_PASSWORD: db, REDIS_PASSWORD: redis, REDIS_URL: `redis://:${redis}@redis:6379`,
@@ -218,7 +218,7 @@ test('canonical servicing migrations apply twice and preserve records in disposa
     await target.query("INSERT INTO servicing_operations_records(tenant_id,kind,id,document) VALUES('migration-test','fixture','retained','{\"preserved\":true}')");
     for (const component of Object.keys(components)) await migrateComponent(component, env, Pool);
     assert.equal((await target.query("SELECT document->>'preserved' AS preserved FROM servicing_operations_records WHERE tenant_id='migration-test'")).rows[0].preserved, 'true');
-    for (const table of ['servicing_control_plane_state','servicing_operations_jobs','ai_sessions','ai_workflow_executions','ai_human_feedback','servicing_tool_operations','chat_sessions','chat_messages','servicing_resume_grants']) {
+    for (const table of ['servicing_control_plane_state','servicing_operations_jobs','ai_sessions','ai_workflow_executions','ai_human_feedback','servicing_tool_operations','servicing_graph_checkpoints','servicing_graph_writes','chat_sessions','chat_messages','servicing_resume_grants']) {
       assert.equal((await target.query('SELECT to_regclass($1) AS name', [table])).rows[0].name, table);
     }
   } finally {
@@ -227,3 +227,11 @@ test('canonical servicing migrations apply twice and preserve records in disposa
     await admin.end();
   }
 });
+
+ test('preflight rejects process-local graph storage and a separately unmigrated checkpoint database', () => {
+   const env = fixture(); env.CHECKPOINT_BACKEND = 'memory'; env.CHECKPOINT_DATABASE_URL = 'postgres://separate.invalid/graphs';
+   const result = validateProduction(env,{ checkFiles: false });
+   assert.ok(result.failures.some(item => item.code === 'CHECKPOINT_BACKEND'));
+   assert.ok(result.failures.some(item => item.code === 'CHECKPOINT_DATABASE_URL'));
+   assert.doesNotMatch(JSON.stringify(result),/separate.invalid/);
+ });

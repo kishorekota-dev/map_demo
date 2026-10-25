@@ -29,6 +29,9 @@ executable migration scripts resolve conflicts with old implementation reports.
 | Pinned runtime behavior and durable effect records | [Runtime reference](../services/ai-orchestrator/CONTROL-PLANE-RUNTIME.md) |
 | Enterprise packaging and supported boundaries | [Productization](guides/productization.md) |
 | Delivered market gaps and verification evidence | [Implementation record](guides/servicing-product-implementation.md) |
+| Current gaps, new implementation and differentiation | [Platform assessment](guides/platform-gap-assessment.md) |
+| Measured model responses and exact-evidence release gates | [Response quality](guides/model-evaluation.md) |
+| Case assignment, citations and handling | [Agent workspace](../services/api-gateway/operations/AGENT-WORKSPACE.md) |
 | Vendor comparison and differentiation | [Market review](guides/market-comparison.md) |
 | Dependency audit and runtime/build-tool scope | [Dependency review](architecture/dependency-audit.md) |
 | Remaining architecture work | [Recommendations](architecture/recommendations.md) |

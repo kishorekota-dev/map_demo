@@ -18,6 +18,8 @@ function configurationChecks(env = process.env) {
       'Configure REDIS_URL for shared production rate limits.'),
     check('durable_runtime', env.WORKFLOW_DURABLE_EXECUTION === 'true' && env.HANDOFF_STORAGE === 'postgres',
       'Enable durable workflow execution and PostgreSQL handoff grants across services.'),
+    check('durable_graph', env.CHECKPOINT_ENABLED === 'true' && env.CHECKPOINT_BACKEND === 'postgres' && env.CHECKPOINT_SCHEMA_AUTO_MIGRATE === 'false',
+      'Enable PostgreSQL graph checkpoints and preinstall the V2 checkpoint schema.'),
     check('connector_network', env.CONNECTOR_ALLOW_LOCAL !== 'true' && env.OIDC_ALLOW_LOCAL !== 'true',
       'Disable development-only local connector and identity allowances.'),
     check('browser_origins', !!env.ALLOWED_ORIGINS && env.ALLOWED_ORIGINS.split(',').every(value => {

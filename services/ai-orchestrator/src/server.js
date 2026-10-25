@@ -45,6 +45,7 @@ async function initializeServices() {
     // Initialize Workflow Service
     const workflowService = new WorkflowService(mcpClient, sessionManager);
     await workflowService.persistence.initialize();
+    await workflowService.workflow.checkpointerManager.initialize();
     logger.info('Workflow Service initialized');
 
     // Store services in app locals
@@ -213,6 +214,7 @@ async function startServer() {
 
           // Close database connection
           const { sequelize } = require('./models');
+          await app.locals.workflowService?.workflow.checkpointerManager.close();
           if (app.locals.workflowService?.persistence.pool) await app.locals.workflowService.persistence.pool.end();
           await sequelize.close();
           

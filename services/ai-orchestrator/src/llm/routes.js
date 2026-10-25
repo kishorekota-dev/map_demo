@@ -4,6 +4,7 @@ const { getRegistry } = require('./registry');
 const { IDENTIFIER, validModel } = require('./contract');
 const { LlmError } = require('./errors');
 const router = express.Router();
+router.use(require('./evaluation-routes').createEvaluationRouter());
 function authorize(edit = false) {
   return (req, res, next) => {
     const allowed = edit ? ['admin', 'control_plane_admin', 'control_plane_editor']

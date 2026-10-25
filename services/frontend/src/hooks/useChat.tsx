@@ -63,6 +63,8 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [initializing, setInitializing] = useState(true);
   const [sending, setSending] = useState(false);
+  const [recoveryRequired, setRecoveryRequired] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [intent, setIntent] = useState<IntentAnalysis | undefined>();
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +86,8 @@ export function useChat() {
         setSessionId(activeSessionId);
         setMessages(normalized);
         setIntent([...normalized].reverse().find((message) => message.intent)?.intent);
+        const context = await apiService.getRecoveryContext(activeSessionId);
+        if (active) setRecoveryRequired(context.recoveryRequired);
       } catch (loadError) {
         if (active) setError(getErrorMessage(loadError));
       } finally {
@@ -99,7 +103,7 @@ export function useChat() {
 
   const sendMessage = useCallback(async (text: string): Promise<boolean> => {
     const content = text.trim();
-    if (!content || sending) return false;
+    if (!content || sending || recovering || recoveryRequired) return false;
 
     const optimisticId = `user_${Date.now()}`;
     const userMessage: ChatMessageType = {
@@ -150,12 +154,14 @@ export function useChat() {
       setError(getErrorMessage(sendError));
       return false;
     } finally {
+      try { setRecoveryRequired((await apiService.getRecoveryContext()).recoveryRequired); }
+      catch (contextError) { setError(getErrorMessage(contextError)); }
       setSending(false);
     }
-  }, [sending]);
+  }, [sending, recovering, recoveryRequired]);
 
   const startNewConversation = useCallback(async (): Promise<void> => {
-    if (sending) return;
+    if (sending || recovering || recoveryRequired) return;
 
     setInitializing(true);
     setError(null);
@@ -169,7 +175,27 @@ export function useChat() {
     } finally {
       setInitializing(false);
     }
-  }, [sending]);
+  }, [sending, recovering, recoveryRequired]);
+
+  const recoverConversation = useCallback(async (): Promise<void> => {
+    if (sending || recovering || !recoveryRequired) return;
+    setRecovering(true); setError(null);
+    try {
+      const result = await apiService.recoverConversation();
+      setMessages(current => [...current, { id: result.conversation.messageId, content: result.message, type: 'bot',
+        timestamp: new Date(result.response.timestamp), intent: result.intent, status: 'sent' }]);
+      setIntent(result.intent);
+      const context = await apiService.getRecoveryContext(sessionId);
+      setRecoveryRequired(context.recoveryRequired);
+      if (context.recoveryRequired) setError('The original request is still interrupted. Resume it after the service is available.');
+    } catch (recoveryError) {
+      setError(getErrorMessage(recoveryError));
+      if ((recoveryError as ApiError).status === 409) {
+        try { setRecoveryRequired((await apiService.getRecoveryContext(sessionId)).recoveryRequired); } catch { /* Preserve the interrupted request if its state cannot be verified. */ }
+      }
+    }
+    finally { setRecovering(false); }
+  }, [sending, recovering, recoveryRequired, sessionId]);
 
   const analyze = useCallback(async (text: string) => {
     try {
@@ -184,6 +210,7 @@ export function useChat() {
     messages,
     initializing,
     sending,
+    recoveryRequired, recovering, recoverConversation,
     intent,
     error,
     dismissError: () => setError(null),

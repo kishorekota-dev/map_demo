@@ -1,142 +1,36 @@
 const { MemorySaver } = require('@langchain/langgraph');
-const logger = require('./logger');
-const config = require('../../config');
+const { createHash } = require('crypto');
+const { PostgresCheckpointer } = require('./postgresCheckpointer');
 
-/**
- * LangGraph Checkpointer Setup
- * Provides memory persistence for workflow state across invocations
- * 
- * Uses sessionId as thread_id for conversation continuity
- */
 class CheckpointerManager {
-  constructor() {
-    this.enabled = config.langgraph?.checkpointEnabled !== false;
-    
-    if (this.enabled) {
-      // Initialize MemorySaver for in-memory state persistence
-      // For production, consider using SqliteSaver or PostgresSaver
-      this.checkpointer = new MemorySaver();
-      logger.info('Checkpointer initialized with MemorySaver');
-    } else {
-      this.checkpointer = null;
-      logger.info('Checkpointer disabled');
-    }
+  constructor({ env = process.env, pool } = {}) {
+    this.enabled = env.CHECKPOINT_ENABLED !== 'false';
+    this.backend = env.CHECKPOINT_BACKEND || (env.NODE_ENV === 'production' ? 'postgres' : 'memory');
+    if (!['postgres','memory'].includes(this.backend)) throw new Error('CHECKPOINT_BACKEND must be postgres or memory');
+    if (env.NODE_ENV === 'production' && (!this.enabled || this.backend !== 'postgres')) throw new Error('Production graph checkpoints require PostgreSQL');
+    this.checkpointer = !this.enabled ? null : this.backend === 'postgres' ? new PostgresCheckpointer({ env, pool, tenantId: env.DEPLOYMENT_TENANT_ID }) : new MemorySaver();
   }
-
-  /**
-   * Get checkpointer instance
-   */
-  getCheckpointer() {
-    if (!this.enabled) {
-      logger.warn('Checkpointer is disabled');
-      return null;
-    }
-    return this.checkpointer;
-  }
-
-  /**
-   * Check if checkpointer is enabled
-   */
-  isEnabled() {
-    return this.enabled;
-  }
-
-  /**
-   * Get checkpoint for a specific thread (session)
-   */
-  async getCheckpoint(threadId) {
-    if (!this.enabled || !this.checkpointer) {
-      return null;
-    }
-
-    try {
-      const checkpoint = await this.checkpointer.get({
-        configurable: { thread_id: threadId }
-      });
-      
-      logger.debug('Retrieved checkpoint', {
-        threadId,
-        hasCheckpoint: !!checkpoint
-      });
-
-      return checkpoint;
-    } catch (error) {
-      logger.error('Failed to get checkpoint', {
-        threadId,
-        error: error.message
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Clear checkpoint for a specific thread (session)
-   */
-  async clearCheckpoint(threadId) {
-    if (!this.enabled || !this.checkpointer) {
-      return;
-    }
-
-    try {
-      // MemorySaver doesn't have a direct clear method
-      // State will be cleared when the process restarts
-      logger.info('Checkpoint clear requested', { threadId });
-    } catch (error) {
-      logger.error('Failed to clear checkpoint', {
-        threadId,
-        error: error.message
-      });
-    }
-  }
-
-  /**
-   * Get all checkpoint history for a thread
-   */
+  async initialize() { await this.checkpointer?.initialize?.(); }
+  getCheckpointer() { return this.checkpointer; }
+  isEnabled() { return this.enabled; }
+  getStats() { return { enabled: this.enabled, type: !this.enabled ? 'disabled' : this.backend === 'postgres' ? 'PostgresCheckpointer' : 'MemorySaver', durable: this.enabled && this.backend === 'postgres' }; }
+  async getCheckpoint(threadId) { return this.checkpointer ? (await this.checkpointer.get({ configurable: { thread_id: threadId } })) ?? null : null; }
+  async clearCheckpoint(threadId) { await this.checkpointer?.deleteThread(threadId); }
   async getCheckpointHistory(threadId, limit = 10) {
-    if (!this.enabled || !this.checkpointer) {
-      return [];
-    }
-
-    try {
-      // Note: MemorySaver may not support history listing
-      // This is a placeholder for future implementation with SqliteSaver
-      logger.debug('Checkpoint history requested', { threadId, limit });
-      return [];
-    } catch (error) {
-      logger.error('Failed to get checkpoint history', {
-        threadId,
-        error: error.message
-      });
-      return [];
-    }
+    const history = []; if (!this.checkpointer) return history;
+    for await (const entry of this.checkpointer.list({ configurable: { thread_id: threadId, checkpoint_ns: '' } }, { limit: Math.min(100,Math.max(1,limit)) })) history.push(entry);
+    return history;
   }
-
-  /**
-   * Get statistics about checkpointer usage
-   */
-  getStats() {
-    return {
-      enabled: this.enabled,
-      type: 'MemorySaver',
-      // Add more stats as needed
-    };
+  async healthCheck() {
+    if (this.backend === 'postgres' && this.enabled) { await this.initialize(); await this.checkpointer.pool.query('SELECT 1'); }
+    return this.getStats();
   }
+  async close() { await this.checkpointer?.close?.(); }
 }
-
-// Singleton instance
-let checkpointerInstance = null;
-
-/**
- * Get or create checkpointer instance
- */
-function getCheckpointer() {
-  if (!checkpointerInstance) {
-    checkpointerInstance = new CheckpointerManager();
-  }
-  return checkpointerInstance;
+function graphThreadId({ tenantId, userId, sessionId, runId }) {
+  if (![tenantId,userId,sessionId,runId].every(value => typeof value === 'string' && value)) throw new Error('Graph execution identity is incomplete');
+  return 'servicing:' + createHash('sha256').update(JSON.stringify([tenantId,userId,sessionId,runId])).digest('hex');
 }
-
-module.exports = {
-  CheckpointerManager,
-  getCheckpointer
-};
+let instance;
+function getCheckpointer() { return instance ??= new CheckpointerManager(); }
+module.exports = { CheckpointerManager, getCheckpointer, graphThreadId };

@@ -91,7 +91,7 @@ class SessionManager {
   /**
    * Get session by ID
    */
-  async getSession(sessionId) {
+  async getSession(sessionId, { includeExpired = false } = {}) {
     try {
       const session = await Session.findOne({
         where: { sessionId },
@@ -110,7 +110,7 @@ class SessionManager {
       }
 
       // Check if expired
-      if (session.expiresAt && new Date() > session.expiresAt) {
+      if (!includeExpired && session.expiresAt && new Date() > session.expiresAt) {
         logger.warn('Session expired', { sessionId });
         await this.expireSession(sessionId);
         return null;

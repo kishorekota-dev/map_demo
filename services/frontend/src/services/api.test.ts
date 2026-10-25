@@ -6,7 +6,7 @@ const clientMocks = vi.hoisted(() => ({
   delete: vi.fn(),
 }));
 
-const runtime = vi.hoisted(() => ({ apiBaseUrl: 'http://localhost:3001/api', chatRequestTimeoutMs: 420000 }));
+const runtime = vi.hoisted(() => ({ tenantId: 'test-enterprise', apiBaseUrl: 'http://localhost:3001/api', chatRequestTimeoutMs: 420000 }));
 
 vi.mock('axios', () => ({
   default: {
@@ -77,3 +77,32 @@ describe('apiService NLU contract', () => {
     });
   });
 });
+
+ test('explicit recovery preserves the current session and posts no replacement message or release', async () => {
+    clientMocks.post.mockReset(); apiService.setSessionId('interrupted-session');
+    clientMocks.post.mockResolvedValue({ data: { response: { id: 'recovered', content: 'Confirm?', metadata: { intent: 'transfer_funds' } } } });
+    const result = await apiService.recoverConversation();
+    expect(clientMocks.post).toHaveBeenCalledExactlyOnceWith('/chat/recover', { sessionId: 'interrupted-session' }, { timeout: runtime.chatRequestTimeoutMs });
+    expect(result.conversation.sessionId).toBe('interrupted-session');
+    expect(apiService.getSessionId()).toBe('interrupted-session');
+  });
+ test('recovery discovery includes delivery pending in chat even after the AI graph completed', async () => {
+    clientMocks.get.mockReset();
+    clientMocks.get.mockResolvedValueOnce({ data: { session: { state: { workflowRecoveryRequired: true } } } })
+      .mockResolvedValueOnce({ data: { recoveryRequired: false } });
+    expect(await apiService.getRecoveryContext('interrupted-session')).toEqual({ recoveryRequired: true });
+    expect(clientMocks.get).toHaveBeenLastCalledWith('/orchestrator/session/interrupted-session/context');
+  });
+
+ test('reload restores only the account-scoped session after server validation, without creating a replacement', async () => {
+    const entries = new Map<string,string>();
+    vi.stubGlobal('sessionStorage',{ getItem: (key: string) => entries.get(key) || null, setItem: (key: string,value: string) => entries.set(key,value), removeItem: (key: string) => entries.delete(key) });
+    try {
+      apiService.updateBaseURL('https://restored.test/api');
+      entries.set('servicing-chat:test-enterprise:https://restored.test/api:manual-user','original-session');
+      clientMocks.get.mockReset(); clientMocks.post.mockReset(); clientMocks.get.mockResolvedValue({ data: { session: { sessionId: 'original-session' } } });
+      expect(await apiService.ensureSession()).toBe('original-session');
+      expect(clientMocks.get).toHaveBeenCalledExactlyOnceWith('/sessions/original-session');
+      expect(clientMocks.post).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });

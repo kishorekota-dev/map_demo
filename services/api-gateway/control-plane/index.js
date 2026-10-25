@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { isQualityDelegation } = require('../middleware/tokenScope');
 const { randomUUID } = require('crypto');
 const { ControlPlaneStore, ControlPlaneError } = require('./store');
 const { PostgresControlPlaneStore } = require('./postgres-store');
@@ -42,6 +43,7 @@ function createControlPlaneRouter(options = {}) {
       const bearer = req.get('Authorization');
       if (!bearer?.startsWith('Bearer ')) throw new Error('Missing bearer token');
       const claims = options.verifyAccessToken ? await options.verifyAccessToken(bearer.slice(7)) : jwt.verify(bearer.slice(7), secret, { algorithms: ['HS256'] });
+      if (isQualityDelegation(claims)) throw new Error('Evaluation delegation is not an operator login');
       const actor = claims.userId || claims.sub;
       if (!text(actor, 200) || claims.type === 'refresh') throw new Error('An access token with a principal is required');
       const tenant = claims.tenantId === undefined ? store.tenantId : claims.tenantId;

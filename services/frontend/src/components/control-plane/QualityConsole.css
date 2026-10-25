@@ -1,0 +1,112 @@
+.cp-quality {
+  min-width: 0;
+}
+.cp-quality fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.cp-quality-case {
+  border: 1px solid var(--cp-border, #d9e3df);
+  border-radius: 14px;
+  padding: 20px;
+  margin: 18px 0;
+  min-width: 0;
+}
+.cp-quality-rule {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.cp-quality-assertion {
+  background: var(--cp-surface-soft, #f7f9f7);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.cp-quality-run-list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.cp-quality-run {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  text-align: left;
+  padding: 16px;
+  background: white;
+  border: 1px solid var(--cp-border, #d9e3df);
+  border-radius: 12px;
+  cursor: pointer;
+  color: inherit;
+  min-width: 0;
+}
+.cp-quality-run--selected {
+  border-color: #27635b;
+  background: #f1f7f4;
+}
+.cp-quality-run span {
+  min-width: 0;
+}
+.cp-quality-run strong,
+.cp-quality-run small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.cp-quality-run small {
+  margin-top: 7px;
+  color: #667c75;
+}
+.cp-quality-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.cp-quality-metrics > div {
+  background: #f5f8f5;
+  border: 1px solid #e2e9e3;
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.cp-quality-metrics strong,
+.cp-quality-metrics small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.cp-quality-metrics small {
+  font-size: 12px;
+  color: #657970;
+  margin-bottom: 10px;
+}
+.cp-quality-requirement {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.cp-quality-requirement .cp-field {
+  flex: 1;
+  min-width: min(100%, 210px);
+}
+.cp-quality h4,
+.cp-quality pre {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .cp-quality-case {
+    padding: 14px;
+  }
+  .cp-quality-run {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .cp-quality-case .cp-panel-heading {
+    align-items: start;
+  }
+}

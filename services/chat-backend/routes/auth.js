@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const logger = require('../services/logger');
+const { isQualityDelegation } = require('../services/accessTokenPolicy');
 
 const BANKING_SERVICE_URL = process.env.BANKING_SERVICE_URL || 'http://localhost:3005';
 const BANKING_AUTH_URL = `${BANKING_SERVICE_URL}/api/v1/auth/login`;
@@ -159,6 +160,8 @@ router.post('/refresh', async (req, res) => {
             { ignoreExpiration: true } // We'll check expiration manually
         );
 
+        if (isQualityDelegation(decoded)) return res.status(401).json({ error: 'Invalid access token' });
+
         // Check if token is not too old (allow refresh within 7 days of expiration)
         const now = Math.floor(Date.now() / 1000);
         const maxRefreshTime = decoded.exp + (7 * 24 * 60 * 60); // 7 days after expiration
@@ -245,7 +248,7 @@ router.post('/validate', async (req, res) => {
         );
 
         // Check token type
-        if (decoded.type !== 'websocket_auth') {
+        if (isQualityDelegation(decoded) || decoded.type !== 'websocket_auth') {
             return res.status(401).json({
                 error: 'Invalid token type',
                 timestamp: new Date().toISOString()
@@ -398,7 +401,7 @@ const verifyToken = (req, res, next) => {
 
         const userId = decoded.userId || decoded.sub || decoded.id;
         const tenantId = decoded.tenantId || decoded.tenant_id || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
-        if (!userId || decoded.type === 'refresh') {
+        if (!userId || decoded.type === 'refresh' || isQualityDelegation(decoded)) {
             return res.status(401).json({ error: 'Invalid access token' });
         }
         if (tenantId !== (process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')) {

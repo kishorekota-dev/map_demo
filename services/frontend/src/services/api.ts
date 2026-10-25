@@ -122,7 +122,7 @@ class ApiService {
 
   private handleAuthFailure(): void {
     authService.logout();
-    this.clearSession();
+    this.clearSession(false);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }
@@ -136,7 +136,14 @@ class ApiService {
     return this.getUserProfile()?.userId || 'manual-user';
   }
 
-  private clearSession(): void {
+  private sessionStorageKey(): string { return `servicing-chat:${getRuntimeConfig().tenantId}:${this.baseURL}:${this.getUserId()}`; }
+
+  private rememberSession(): void {
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(this.sessionStorageKey(), this.sessionId); } catch { /* Browser storage may be disabled. */ }
+  }
+
+  private clearSession(forget = true): void {
+    try { if (forget && typeof sessionStorage !== 'undefined') sessionStorage.removeItem(this.sessionStorageKey()); } catch { /* No persistent browser state. */ }
     this.sessionId = uuidv4();
     this.sessionOwnerId = null;
     this.sessionInitialized = false;
@@ -156,6 +163,7 @@ class ApiService {
     this.sessionOwnerId = this.getUserId();
     this.sessionInitialized = true;
     this.sessionPromise = null;
+    this.rememberSession();
   }
 
   /** Create one canonical backend session and share the in-flight request. */
@@ -167,10 +175,22 @@ class ApiService {
     }
 
     if (this.sessionOwnerId && this.sessionOwnerId !== ownerId) {
-      this.clearSession();
+      this.clearSession(false);
     }
 
     if (!this.sessionPromise) {
+      // Reuse only an account-scoped tab session after server ownership checks.
+      let remembered: string | null = null;
+      try { remembered = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(this.sessionStorageKey()) : null; } catch { /* Storage disabled. */ }
+      if (remembered) {
+        this.sessionPromise = this.client.get(`/sessions/${encodeURIComponent(remembered)}`)
+          .then(() => { this.setSessionId(remembered!); return remembered!; })
+          .catch(async (error: ApiError) => {
+            if (![404, 410].includes(error.status || 0)) throw error;
+            this.clearSession(); return this.ensureSession();
+          }).finally(() => { this.sessionPromise = null; });
+        return this.sessionPromise;
+      }
       this.sessionPromise = this.client
         .post('/sessions', {
           userId: ownerId,
@@ -191,6 +211,7 @@ class ApiService {
           this.sessionId = sessionId;
           this.sessionOwnerId = ownerId;
           this.sessionInitialized = true;
+          this.rememberSession();
           return sessionId;
         })
         .finally(() => {
@@ -228,8 +249,10 @@ class ApiService {
       context: context || {},
       sessionId,
     }, { timeout: getRuntimeConfig().chatRequestTimeoutMs });
-    const payload = unwrapPayload(response.data);
+    return this.mapChatResponse(unwrapPayload(response.data), sessionId);
+  }
 
+  private mapChatResponse(payload: any, sessionId: string): ChatResponse {
     if (typeof payload?.message === 'string' && payload?.conversation) {
       return payload as ChatResponse;
     }
@@ -261,6 +284,24 @@ class ApiService {
           outgoing?.agentInfo?.processingTime || payload?.agentResult?.processingTime,
       },
     };
+  }
+
+  public async getRecoveryContext(sessionId = this.sessionId): Promise<{ recoveryRequired: boolean }> {
+    const chat = await this.client.get(`/sessions/${encodeURIComponent(sessionId)}`);
+    const deliveryPending = unwrapPayload(chat.data)?.session?.state?.workflowRecoveryRequired === true;
+    try {
+      const response = await this.client.get(`/orchestrator/session/${encodeURIComponent(sessionId)}/context`);
+      return { recoveryRequired: deliveryPending || unwrapPayload(response.data)?.recoveryRequired === true };
+    } catch (error) {
+      if ((error as ApiError).status === 404) return { recoveryRequired: deliveryPending };
+      throw error;
+    }
+  }
+
+  public async recoverConversation(): Promise<ChatResponse> {
+    const sessionId = await this.ensureSession();
+    const response = await this.client.post('/chat/recover', { sessionId }, { timeout: getRuntimeConfig().chatRequestTimeoutMs });
+    return this.mapChatResponse(unwrapPayload(response.data), sessionId);
   }
 
   public async getChatHistory(

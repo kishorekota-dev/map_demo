@@ -34,6 +34,7 @@ Customer routes below are mounted at `/api/orchestrator`, both directly on port 
 | DELETE | `/session/:sessionId` | Complete/end an owned session |
 | GET | `/user/:userId/sessions` | The authenticated user's sessions |
 | GET | `/session/:sessionId/context` | Safe agent context; owner or same-tenant operator with explicit context permission |
+| POST | `/session/:sessionId/recover` | Owner-only explicit graph recovery or eligible completed-response delivery; empty body, fresh JWT, original release/interaction |
 | POST | `/session/:sessionId/channel` | Trusted handoff only: owner JWT plus servicing-service token |
 | GET | `/operations` | Operator ledger inspection with `servicing:operations:read` |
 | POST | `/operations/:operationId/reconcile` | Evidence-backed manual resolution with `servicing:operations:reconcile`; never resubmits an action |
@@ -59,7 +60,7 @@ Keep an interaction ID for retries of the same new request. Feedback retains the
 
 The Sequelize models use `ai_sessions`, `ai_workflow_executions`, and `ai_human_feedback`. With `DATABASE_MANAGE_SCHEMA=false` (the production default), startup authenticates and verifies every model table/column without DDL. Development defaults to non-altering sync followed by the same verification. Apply the controlled [base migration](migrations/V0__ai_model_tables.sql) before verification-only startup. The separate ledger migration is [V1__servicing_tool_operations.sql](migrations/V1__servicing_tool_operations.sql).
 
-`WORKFLOW_DURABLE_EXECUTION=true` enables PostgreSQL session coordination and durable mutation replay protection; production defaults to enabled. `WORKFLOW_SCHEMA_AUTO_MIGRATE=false` verifies a preinstalled ledger schema. `WORKFLOW_DATABASE_URL` selects that database, otherwise the service's `DB_*` settings apply. The LangGraph checkpointer is process-local `MemorySaver`; durable session/feedback reconstruction and the effect ledger are separate mechanisms.
+`WORKFLOW_DURABLE_EXECUTION=true` enables PostgreSQL session coordination and durable mutation replay protection; production defaults to enabled. `WORKFLOW_SCHEMA_AUTO_MIGRATE=false` verifies a preinstalled ledger schema. `WORKFLOW_DATABASE_URL` selects that database, otherwise the service's `DB_*` settings apply. Graph checkpoints use PostgreSQL in production and `MemorySaver` in development. `CHECKPOINT_BACKEND=postgres` opts development into durable graph state. `CHECKPOINT_SCHEMA_AUTO_MIGRATE=false` verifies the separately installed V2 schema; `CHECKPOINT_DATABASE_URL` defaults to the workflow database. See [checkpoint recovery](WHY-CHECKPOINTER-IS-REQUIRED.md) for the owner-authenticated resume endpoint and its safety boundaries.
 
 After dispatch, uncertain effects require reconciliation. A lost acknowledgement must not trigger an alternate-transport mutation. Read the [recovery contract](CONTROL-PLANE-RUNTIME.md) before implementing retries or operational resolution.
 

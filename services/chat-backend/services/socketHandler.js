@@ -1,5 +1,6 @@
 const logger = require('./logger');
 const jwt = require('jsonwebtoken');
+const { isQualityDelegation } = require('./accessTokenPolicy');
 const HandoffService = require('./handoffService');
 const axios = require('axios');
 
@@ -443,7 +444,7 @@ class SocketHandler {
                         { algorithms: ['HS256'] }
                     );
                     const tenantId = decoded.tenantId || decoded.tenant_id || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise';
-                    if (decoded.type === 'refresh' || tenantId !== (process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')) {
+                    if (isQualityDelegation(decoded) || decoded.type === 'refresh' || tenantId !== (process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise')) {
                         throw new Error('Invalid access token tenant or type');
                     }
                     const principal = this.getPrincipalContext(decoded);

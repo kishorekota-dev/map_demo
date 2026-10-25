@@ -116,6 +116,7 @@ class AgentOrchestrator extends EventEmitter {
 
         this.activeRequests.set(requestKey, startTime);
         this.emit('processingStarted', { sessionId, messageId: message.id });
+        let workflowDispatched = false;
 
         try {
             const question = (message.content || '').trim();
@@ -142,6 +143,7 @@ class AgentOrchestrator extends EventEmitter {
             // confirm-then-execute path runs (with re-validation) instead of being
             // re-classified as a brand new intent.
             if (conversationContext.pendingFeedback) {
+                workflowDispatched = true;
                 return await this.continuePendingWorkflow({
                     sessionId,
                     question,
@@ -155,6 +157,7 @@ class AgentOrchestrator extends EventEmitter {
             const intent = await this.classifyIntent(question, sessionId, conversationContext);
 
             // Step 2 — canonical AI workflow
+            workflowDispatched = true;
             const workflow = await this.callOrchestrator({
                 path: '/api/orchestrator/process',
                 payload: { sessionId, intent, question, userId, interactionId: conversationContext.interactionId || message.id,
@@ -168,6 +171,9 @@ class AgentOrchestrator extends EventEmitter {
             return this.mapWorkflowResult(workflow, { intent, startTime, sessionId });
         } catch (error) {
             logger.error('Orchestration failed', { sessionId, error: error.message });
+            if (workflowDispatched) return this.buildResult({ content: 'Your request was interrupted. Resume the same request before continuing.',
+                type: 'text', confidence: 1, source: 'workflow-recovery', metadata: { policyCode: 'workflow_recovery_required', recoveryRequired: true } },
+                { workflowRecoveryRequired: true }, startTime, ['ai-orchestrator']);
             return this.escalate(sessionId, message, startTime, error);
         } finally {
             this.activeRequests.delete(requestKey);
@@ -179,6 +185,12 @@ class AgentOrchestrator extends EventEmitter {
      * additional data). Reproducible: the same reply + pending state always
      * resolves the same way.
      */
+    async recoverWorkflow(sessionId, authToken, intent) {
+        const startTime = Date.now();
+        const workflow = await this.callOrchestrator({ path: `/api/orchestrator/session/${encodeURIComponent(sessionId)}/recover`, payload: {}, authToken });
+        return this.mapWorkflowResult(workflow, { intent, startTime, sessionId });
+    }
+
     async continuePendingWorkflow({ sessionId, question, authToken, pendingFeedback, startTime }) {
         const confirmed = pendingFeedback.type === 'confirmation_required'
             ? /\b(yes|confirm|approve|proceed|ok|okay)\b/i.test(question)
@@ -274,7 +286,7 @@ class AgentOrchestrator extends EventEmitter {
 
         const agent = this.agents.get('ai-orchestrator');
         if (agent) { agent.failedRequests++; }
-        throw new Error(`AI orchestrator call failed (${path}): ${lastError?.message || 'unknown error'}`);
+        throw Object.assign(new Error(`AI orchestrator call failed (${path}): ${lastError?.message || 'unknown error'}`), { status: lastError?.response?.status, upstreamCode: lastError?.response?.data?.code });
     }
 
     /**
@@ -345,7 +357,7 @@ class AgentOrchestrator extends EventEmitter {
                     source: 'policy-engine',
                     metadata: { ...(workflow.metadata || {}), intent, policyCode: workflow.code, stage: workflow.stage }
                 },
-                ['pending_workflow', 'model_unavailable'].includes(workflow.code)
+                ['pending_workflow', 'model_unavailable', 'workflow_recovery_required'].includes(workflow.code)
                     ? {} : { pendingFeedback: null, lockedIntent: null },
                 startTime,
                 ['ai-orchestrator']

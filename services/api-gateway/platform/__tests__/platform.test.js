@@ -10,7 +10,7 @@ const { PlatformReadiness } = require('../readiness');
 const secret = 'synthetic-platform-test-secret-0123456789';
 const env = { NODE_ENV: 'production', JWT_SECRET: secret, SERVICING_SERVICE_TOKEN: 'synthetic-internal-test-secret-abcdef12345',
   CONTROL_PLANE_ENABLED: 'true', CONTROL_PLANE_DATABASE_URL: 'postgres://fixture.invalid/servicing', REDIS_URL: 'redis://fixture.invalid:6379',
-  WORKFLOW_DURABLE_EXECUTION: 'true', HANDOFF_STORAGE: 'postgres', ALLOWED_ORIGINS: 'https://servicing.example.com' };
+  WORKFLOW_DURABLE_EXECUTION: 'true', CHECKPOINT_ENABLED: 'true', CHECKPOINT_BACKEND: 'postgres', CHECKPOINT_SCHEMA_AUTO_MIGRATE: 'false', HANDOFF_STORAGE: 'postgres', ALLOWED_ORIGINS: 'https://servicing.example.com' };
 const token = (role = 'control_plane_editor', tenant = 'fixture') => jwt.sign({ userId: 'editor', roles: [role], tenantId: tenant, type: 'access' }, secret, { expiresIn: '5m' });
 function fixture() {
   const store = new ControlPlaneStore({ file: null, tenantId: 'fixture' });
@@ -101,7 +101,7 @@ describe('production configuration and dependency readiness', () => {
     const report = JSON.stringify(configurationChecks({ ...env, JWT_SECRET: 'sensitive-value' }));
     expect(report).not.toMatch(/sensitive-value|fixture.invalid/);
   });
-  test.each(['JWT_SECRET', 'SERVICING_SERVICE_TOKEN', 'CONTROL_PLANE_DATABASE_URL', 'REDIS_URL', 'ALLOWED_ORIGINS'])(
+  test.each(['JWT_SECRET', 'SERVICING_SERVICE_TOKEN', 'CONTROL_PLANE_DATABASE_URL', 'REDIS_URL', 'ALLOWED_ORIGINS', 'CHECKPOINT_BACKEND'])(
     'missing %s fails production startup', key => expect(() => assertProductionConfiguration({ ...env, [key]: '' })).toThrow());
   test('readiness verifies storage and every dependency, caches concurrent requests and sanitizes failures', async () => {
     const configStore = { read: jest.fn(async () => ({})), pool: { query: jest.fn(async () => ({})) } };

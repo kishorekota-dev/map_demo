@@ -27,7 +27,7 @@ function validateProduction(env, options = {}) {
   check(new Set(['JWT_SECRET', 'SERVICING_SERVICE_TOKEN', 'SESSION_SECRET', 'AUDIT_ACTOR_HASH_KEY'].map(key => env[key])).size === 4,
     'SECRET_SEPARATION', 'Use distinct signing, internal-service, browser-session and audit-pseudonym keys.');
   for (const [key, expected] of Object.entries({ CONTROL_PLANE_ENABLED: 'true', CONTROL_PLANE_ENVIRONMENT: 'production',
-    CHAT_PERSISTENCE_ENABLED: 'true', WORKFLOW_DURABLE_EXECUTION: 'true', HANDOFF_STORAGE: 'postgres',
+    CHAT_PERSISTENCE_ENABLED: 'true', WORKFLOW_DURABLE_EXECUTION: 'true', CHECKPOINT_ENABLED: 'true', CHECKPOINT_BACKEND: 'postgres', CHECKPOINT_SCHEMA_AUTO_MIGRATE: 'false', HANDOFF_STORAGE: 'postgres',
     FULFILLMENT_WORKER_ENABLED: 'true', INTERNAL_SERVICE_AUTH_REQUIRED: 'true', DATABASE_MANAGE_SCHEMA: 'false',
     CONTROL_PLANE_MANAGE_SCHEMA: 'false', OPERATIONS_MANAGE_SCHEMA: 'false', WORKFLOW_SCHEMA_AUTO_MIGRATE: 'false',
     HANDOFF_SCHEMA_AUTO_MIGRATE: 'false', BANKING_RUN_MIGRATIONS: 'false' })) {
@@ -50,6 +50,8 @@ function validateProduction(env, options = {}) {
       }
     }
   }
+  if (env.CHECKPOINT_DATABASE_URL) check(env.CHECKPOINT_DATABASE_URL === env.WORKFLOW_DATABASE_URL, 'CHECKPOINT_DATABASE_URL',
+    'This migration/deployment profile requires checkpoints in WORKFLOW_DATABASE_URL; separately review and migrate any custom checkpoint database.');
   const redis = url('REDIS_URL', ['redis:', 'rediss:']);
   if (redis) {
     check(strongSecret(decode(redis.password)), 'REDIS_URL', 'REDIS_URL requires an authenticated, non-placeholder password.');

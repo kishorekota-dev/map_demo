@@ -108,6 +108,12 @@ Privileged operational endpoints are exposed through the gateway:
 
 Reconciliation never resubmits an action. A failed original key remains blocked. Provider-specific reconciliation and proof of absence are required before any separately authorized new action; there is no generic unsafe retry button.
 
+## Durable graph checkpoints
+
+Production defaults to PostgreSQL graph snapshots and pending task writes with synchronous durability. Development defaults to `MemorySaver`. The [checkpoint guide](WHY-CHECKPOINTER-IS-REQUIRED.md) details storage, credential exclusion, retention, and recovery. Graph state preserves the original execution and release; customer JWTs are supplied only through request-local context.
+
+An interrupted run returns `workflow_recovery_required`. The owner calls `POST /api/orchestrator/session/:id/recover` with a fresh JWT and an empty body. Recovery acquires the existing tenant/session lock, checks ownership, expiry, execution binding, and pinned release/channel, then resumes the latest checkpoint. New messages, feedback, and channel changes block while the run is unresolved. Operators can inspect/reconcile but cannot resume as the customer. A completed response can be finalized after an interrupted session update; ledger success is replayed and uncertain dispatch requires reconciliation. The customer UI offers an explicit **Resume interrupted request** action through owner-checked `POST /api/chat/recover`; the adapter restores pending chat feedback before delivering its prompt. Completed-response replay supports lost AI-to-chat delivery, but confirmation/data prompts are replayable only while the matching feedback is still pending and unexpired. Session identity is retained in account-scoped tab storage and server-verified after reload. No background token replay or blind mutation retry is introduced. Confirmation and data collection retain the existing durable SQL feedback flow.
+
 ## Authenticated channel handoff and agent context
 
 Chat REST:
@@ -119,7 +125,7 @@ Socket equivalents are `requestHandoff` → `handoffCreated` and `resumeSession`
 
 Chat consumes the grant durably, coordinates concurrent handoffs, and calls the orchestrator's owner-checked channel endpoint using both the customer's JWT and `X-Servicing-Service-Token`. The release and pending confirmation are preserved. Disabled target channels reject the transition. If downstream handoff fails, the grant stays consumed; the customer can issue a new grant after checking current session state. Cross-service handoff is not a distributed transaction.
 
-`GET /api/orchestrator/session/:id/context` returns a deterministic summary, status, intent, channel, release, collected field names, missing fields, confirmation state, case/evidence IDs, and unresolved operation IDs. The owner can read it; other users need a supported operator role and `servicing:context:read` or `*` in the same deployment tenant. It does not expose tokens, prompts, raw field values, or the transcript.
+`GET /api/orchestrator/session/:id/context` returns a deterministic summary, status, intent, channel, release, collected field names, missing fields, confirmation state, graph recovery flag, case/evidence IDs, and unresolved operation IDs. The owner can read it; other users need a supported operator role and `servicing:context:read` or `*` in the same deployment tenant. It does not expose tokens, prompts, raw field values, or the transcript.
 
 ## Evidence and measured usage
 
@@ -153,13 +159,16 @@ Legacy LangChain usage metadata, its tokenUsage fields, and normalized plugin us
 | `WORKFLOW_DURABLE_EXECUTION=true` | Enable PostgreSQL locks and ledger; defaults enabled in production. |
 | `WORKFLOW_DATABASE_URL` | Ledger/coordination database; falls back to orchestrator `DB_*` configuration. |
 | `WORKFLOW_SCHEMA_AUTO_MIGRATE=false` | Verify preinstalled ledger schema instead of application DDL. |
+| `CHECKPOINT_ENABLED`, `CHECKPOINT_BACKEND` | Checkpointing defaults enabled; backend defaults `postgres` in production, `memory` in development. Production rejects disabled checkpoints and the memory backend. |
+| `CHECKPOINT_DATABASE_URL` | Graph database, falling back to `WORKFLOW_DATABASE_URL`, then service `DB_*` settings. |
+| `CHECKPOINT_SCHEMA_AUTO_MIGRATE=false` | Verify V2 checkpoint tables without DDL; defaults false in production. |
 | `HANDOFF_DATABASE_URL` | Chat grant database; falls back to chat `DB_*` configuration. |
 | `HANDOFF_SCHEMA_AUTO_MIGRATE=false` | Verify preinstalled grant schema instead of application DDL. |
 | `RECOGNITION_PROVIDER_URL`, `RECOGNITION_PROVIDER_TOKEN` | Optional external recognition adapter and isolated credential. |
 | `LLM_PROVIDERS_FILE`, `LLM_PROVIDERS_JSON` | Server-only plugin registry; file takes precedence. Relative file paths use the service root. |
 | `LLM_OLLAMA_BASE_URL` | Actual separate Mac Studio endpoint when referenced by registry `baseUrlRef`. |
 
-Apply [AI V0 and V1](migrations/) in the workflow database and [chat V1–V6](../chat-backend/migrations/) in the chat database through the controlled deployment migration job. The SQL is repeatable; the ledger migration also adds context/resolution to earlier ledgers and preserves their records. Set `DATABASE_MANAGE_SCHEMA=false`, `WORKFLOW_SCHEMA_AUTO_MIGRATE=false`, and `HANDOFF_SCHEMA_AUTO_MIGRATE=false` after migration. Required model columns are verified without startup DDL; missing columns block startup. Existing legacy column types are not automatically rewritten by creation SQL, so assess upgrades from older schemas separately.
+Apply [AI V0–V2](migrations/) in the workflow database (the bundled production profile requires graph checkpoints in this same database) and [chat V1–V6](../chat-backend/migrations/) in the chat database through the controlled deployment migration job. The SQL is repeatable; the ledger migration also adds context/resolution to earlier ledgers and preserves their records. Set `DATABASE_MANAGE_SCHEMA=false`, `WORKFLOW_SCHEMA_AUTO_MIGRATE=false`, `CHECKPOINT_SCHEMA_AUTO_MIGRATE=false`, and `HANDOFF_SCHEMA_AUTO_MIGRATE=false` after migration. Required model columns are verified without startup DDL; missing columns block startup. Existing legacy column types are not automatically rewritten by creation SQL, so assess upgrades from older schemas separately.
 
 Application-managed ledger/grant DDL uses advisory transaction locks. Restrict application database privileges and manage retention of completed ledger records and expired grant hashes according to enterprise requirements; do not delete unresolved operations or active idempotency records prematurely. Safe NLU/MCP health routes remain public; all other HTTP APIs and MCP WebSocket upgrades require the header when the internal gate is active. Gateway and application callers inject their own service credential, never a browser-supplied token, and do not forward it to banking or model providers.
 
@@ -167,6 +176,6 @@ Application-managed ledger/grant DDL uses advisory transaction locks. Restrict a
 
 ## Validation
 
-Use Node 22. In each service, run `npm test -- --runInBand`. Set `RUNTIME_TEST_DATABASE_URL` to an isolated PostgreSQL test database to include actual multi-worker lock, restart replay, uncertain-outcome, and one-time-grant tests. Tests use unique tenant identifiers and remove only their own records. Without this variable the PostgreSQL tests are explicitly skipped.
+Use Node 22. In each service, run `npm test -- --runInBand`. Set `RUNTIME_TEST_DATABASE_URL` to an isolated PostgreSQL test database to include actual multi-worker lock, graph child-process crash/recovery, restart replay, uncertain-outcome, and one-time-grant tests. Tests use unique tenant identifiers and remove only their own records. Without this variable the PostgreSQL tests are explicitly skipped.
 
 The suites also cover pinned release/model-profile continuation, concurrent prompt/usage isolation, provider credential isolation, disabled-versus-legacy model behavior, confirmation and field floors, actual LangGraph typed service fulfillment, disabled tools, model/external recognition response validation, source citations, tenant/owner/operator access, telemetry scrubbing, no duplicate metering on financial replay, and preservation of completed outcomes during ancillary evidence failure. Gateway contract tests compare the route and recognition behavior to the evaluator. Provider tests use synthetic in-process or ephemeral HTTP fixtures, not the current machine's installed Ollama, the separate Mac Studio, or live cloud inference.

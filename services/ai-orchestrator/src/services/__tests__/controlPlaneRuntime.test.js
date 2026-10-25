@@ -1,6 +1,6 @@
 jest.mock('axios');
 jest.mock('../../utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
-jest.mock('../../models', () => ({ WorkflowExecution: {}, HumanFeedback: { findOne: jest.fn(), create: jest.fn() } }));
+jest.mock('../../models', () => ({ Session: { findOne: jest.fn() }, WorkflowExecution: {}, HumanFeedback: { findOne: jest.fn(), create: jest.fn() } }));
 jest.mock('../../workflows/bankingChatWorkflow', () => jest.fn());
 jest.mock('../poc-slm-data-extractor', () => ({ extractAndValidate: jest.fn() }));
 
@@ -266,3 +266,91 @@ describe('published control-plane runtime', () => {
     expect(sessions.get('model-outage')).toMatchObject({ status: 'waiting_human_input', metadata: { controlPlane: { version: 7 }, interactionId: 'original-action' } });
   });
 });
+
+describe('interrupted graph service recovery', () => {
+  const { graphThreadId } = require('../../utils/checkpointer');
+  const { WorkflowExecution } = require('../../models');
+  test('pending graph blocks new messages and feedback without replacing its release', async () => {
+    const { service, manager, sessions } = makeService();
+    await manager.createSession('u','interrupted','balance_inquiry',{ tenantId: 'default-enterprise', graphRun: { status: 'running' }, controlPlane: { version: 7, config: defaultConfig() } });
+    expect(await service.processMessage({ sessionId: 'interrupted', userId: 'u', question: 'help', authToken: 'token' })).toMatchObject({ code: 'workflow_recovery_required' });
+    expect(await service.processHumanFeedback({ sessionId: 'interrupted', response: 'yes', authToken: 'token' })).toMatchObject({ code: 'workflow_recovery_required' });
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+    expect(service.processConfiguredFeedback).not.toHaveBeenCalled();
+    expect(sessions.get('interrupted').metadata.controlPlane.version).toBe(7);
+  });
+  test('recovery rechecks owner under lock and restores the original prompt and interaction', async () => {
+    const { service, manager, sessions } = makeService();
+    const snapshot = { version: 7, config: defaultConfig() };
+    snapshot.config.intents.find(intent => intent.id === 'balance_inquiry').systemPrompt = 'Original pinned prompt';
+    const tenantId = 'default-enterprise', sessionId = 'service-recover';
+    const route = resolvePublishedRoute(snapshot,'digital','balance_inquiry');
+    const initialInput = { sessionId, userId: 'u', tenantId, interactionId: 'original', intent: 'balance_inquiry', runtimeContext: route, question: 'check balance' };
+    const run = { id: 'execution-7', status: 'running', interactionId: 'original', threadId: graphThreadId({ tenantId, userId: 'u', sessionId, runId: 'execution-7' }), initialInput };
+    await manager.createSession('u',sessionId,'balance_inquiry',{ tenantId, interactionId: 'original', channel: 'digital', controlPlane: snapshot, graphRun: run });
+    service.workflow.recover = jest.fn(async () => ({ finalResponse: { type: 'complete', response: intentMapper.buildSystemMessage('balance_inquiry') }, currentStep: 'generate_response' }));
+    WorkflowExecution.findOne = jest.fn(async () => ({ update: jest.fn() }));
+    await expect(service.recoverMessage({ sessionId, userId: 'intruder', tenantId, authToken: 'foreign' })).rejects.toMatchObject({ status: 403 });
+    const result = await service.recoverMessage({ sessionId, userId: 'u', tenantId, authToken: 'fresh' });
+    expect(result).toMatchObject({ type: 'complete', response: 'Original pinned prompt' });
+    expect(service.workflow.recover).toHaveBeenCalledWith(expect.objectContaining({ interactionId: 'original', authToken: 'fresh', runtimeContext: expect.objectContaining({ version: 7 }) }),run.threadId);
+    expect(sessions.get(sessionId).metadata.graphRun).toMatchObject({ status: 'completed' });
+    expect(sessions.get(sessionId).metadata.graphRun).not.toHaveProperty('initialInput');
+  });
+});
+
+ test('lost terminal execution save preserves recovery state; completed response replay never invokes tools', async () => {
+    const { WorkflowExecution } = require('../../models');
+    const { graphThreadId } = require('../../utils/checkpointer');
+    const { service, manager, sessions } = makeService();
+    const tenantId = 'default-enterprise', sessionId = 'terminal-save';
+    const run = { id: 'e', interactionId: 'i', status: 'running', initialInput: {}, threadId: graphThreadId({ tenantId, userId: 'u', sessionId, runId: 'e' }) };
+    await manager.createSession('u',sessionId,'balance_inquiry',{ tenantId, interactionId: 'i', graphRun: run });
+    const result = { finalResponse: { type: 'complete', response: 'Recorded result' }, currentStep: 'generate_response' };
+    expect(await service.finalizeWorkflowResult(sessionId,'e',result,{ update: jest.fn(async () => { throw new Error('storage unavailable'); }) })).toMatchObject({ type: 'complete', telemetryUnavailable: true });
+    expect(sessions.get(sessionId).metadata.graphRun.status).toBe('running');
+    sessions.get(sessionId).metadata.graphRun.status = 'completed';
+    WorkflowExecution.findOne = jest.fn(async () => ({ output: result.finalResponse, currentNode: 'generate_response' }));
+    service.workflow.recover = jest.fn();
+    expect(await service.recoverMessage({ sessionId, userId: 'u', tenantId, authToken: 'fresh' })).toMatchObject({ response: 'Recorded result', recovered: true });
+    expect(service.workflow.recover).not.toHaveBeenCalled();
+  });
+
+ test('completed graph replay cannot resurrect a confirmation after its feedback has advanced', async () => {
+    const { WorkflowExecution, HumanFeedback } = require('../../models');
+    const { graphThreadId } = require('../../utils/checkpointer');
+    const { service, manager } = makeService();
+    const tenantId = 'default-enterprise', sessionId = 'advanced-feedback';
+    await manager.createSession('u',sessionId,'transfer_funds',{ tenantId, interactionId: 'i', graphRun: { id: 'e', status: 'completed', interactionId: 'i', threadId: graphThreadId({ tenantId, userId: 'u', sessionId, runId: 'e' }) } });
+    WorkflowExecution.findOne = jest.fn(async () => ({ output: { type: 'confirmation_required', question: 'Confirm?' } }));
+    HumanFeedback.findOne.mockResolvedValue(null);
+    await expect(service.recoverMessage({ sessionId, userId: 'u', tenantId, authToken: 'fresh' })).rejects.toMatchObject({ status: 409 });
+    HumanFeedback.findOne.mockResolvedValue({ expiresAt: new Date(Date.now()+60000) });
+    expect(await service.recoverMessage({ sessionId, userId: 'u', tenantId, authToken: 'fresh' })).toMatchObject({ needsHumanInput: true, question: 'Confirm?' });
+  });
+
+ test('recovery distinguishes an absent original session from an inaccessible session without starting work', async () => {
+    const { service, manager } = makeService();
+    service.workflow.recover = jest.fn();
+    const input = { sessionId: 'never-dispatched', userId: 'u', tenantId: 'default-enterprise', authToken: 'fresh' };
+    await expect(service.recoverMessage(input)).rejects.toMatchObject({ status: 404, code: 'WORKFLOW_SESSION_NOT_FOUND' });
+    await manager.createSession('other',input.sessionId,'help',{ tenantId: input.tenantId });
+    await expect(service.recoverMessage(input)).rejects.toMatchObject({ status: 403 });
+    expect(service.workflow.recover).not.toHaveBeenCalled();
+    expect(service.processConfiguredMessage).not.toHaveBeenCalled();
+  });
+
+ test('recovery lookup distinguishes expired owned records from true absence without reviving the session', async () => {
+    const { Session } = require('../../models');
+    const SessionManager = require('../sessionManager');
+    const manager = Object.create(SessionManager.prototype);
+    manager.expireSession = jest.fn();
+    const expired = { sessionId: 'expired', userId: 'owner', expiresAt: new Date(Date.now()-10000) };
+    Session.findOne.mockResolvedValue(expired);
+    expect(await manager.getSession('expired',{ includeExpired: true })).toBe(expired);
+    expect(manager.expireSession).not.toHaveBeenCalled();
+    expect(await manager.getSession('expired')).toBeNull();
+    expect(manager.expireSession).toHaveBeenCalledWith('expired');
+    Session.findOne.mockResolvedValue(null);
+    expect(await manager.getSession('absent',{ includeExpired: true })).toBeNull();
+  });

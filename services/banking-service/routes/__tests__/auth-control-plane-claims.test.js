@@ -57,4 +57,10 @@ describe('signed operator authorization claims', () => {
       roles: ['control_plane_viewer'], tenantId: 'servicing-test', type: 'access'
     });
   });
+  test('refresh cannot exchange a scoped quality delegation for a general access token', async () => {
+    db.query.mockClear();
+    const refreshToken = jwt.sign({ userId: 'operator-1', type: 'refresh', purpose: 'quality_evaluation', aud: 'servicing-quality' }, 'identity-claims-test-secret');
+    await request(app).post('/auth/refresh').send({ refreshToken }).expect(401);
+    expect(db.query).not.toHaveBeenCalled();
+  });
 });

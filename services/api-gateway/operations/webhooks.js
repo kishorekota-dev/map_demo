@@ -51,6 +51,7 @@ async function receiveWebhook(req, store, options = {}) {
         { algorithms: ["HS256"] },
       );
       if (
+        require('../middleware/tokenScope').isQualityDelegation(claims) ||
         typeof claims.userId !== "string" ||
         !claims.userId ||
         claims.userId.length > 200 ||

@@ -3,7 +3,9 @@ const { ChatOpenAI } = require('@langchain/openai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const logger = require('../utils/logger');
 const config = require('../../config');
-const { getCheckpointer } = require('../utils/checkpointer');
+const { getCheckpointer, graphThreadId } = require('../utils/checkpointer');
+const { AsyncLocalStorage } = require('async_hooks');
+const { randomUUID } = require('crypto');
 const intentMapper = require('../services/intentMapper');
 const slmDataExtractor = require('../services/poc-slm-data-extractor');
 const { formatDeterministicResponse } = require('../services/deterministicResponseFormatter');
@@ -15,7 +17,7 @@ const { isLlmError, modelUnavailable } = require('../llm/errors');
  * Uses LangGraph checkpointer for state persistence across invocations
  */
 class BankingChatWorkflow {
-  constructor(mcpClient, sessionManager, policyEngine) {
+  constructor(mcpClient, sessionManager, policyEngine, options = {}) {
     this.mcpClient = mcpClient;
     this.sessionManager = sessionManager;
     this.policyEngine = policyEngine;
@@ -35,7 +37,8 @@ class BankingChatWorkflow {
     });
     
     // Get checkpointer instance
-    this.checkpointerManager = getCheckpointer();
+    this.checkpointerManager = options.checkpointerManager || getCheckpointer();
+    this.executionContext = new AsyncLocalStorage();
     
     // Build the workflow graph
     this.graph = this.buildGraph();
@@ -53,7 +56,6 @@ class BankingChatWorkflow {
     const graphState = {
       sessionId: null,
       userId: null,
-      authToken: null,
       interactionId: null,
       tenantId: null,
       runtimeContext: null,
@@ -84,14 +86,14 @@ class BankingChatWorkflow {
     });
 
     // Add nodes
-    workflow.addNode('analyze_intent', this.analyzeIntent.bind(this));
-    workflow.addNode('check_required_data', this.checkRequiredData.bind(this));
-    workflow.addNode('request_human_input', this.requestHumanInput.bind(this));
-    workflow.addNode('execute_tools', this.executeTools.bind(this));
-    workflow.addNode('generate_response', this.generateResponse.bind(this));
-    workflow.addNode('request_confirmation', this.requestConfirmation.bind(this));
-    workflow.addNode('handle_policy', this.handlePolicy.bind(this));
-    workflow.addNode('handle_error', this.handleError.bind(this));
+    workflow.addNode('analyze_intent', this.authenticatedNode(this.analyzeIntent.bind(this)));
+    workflow.addNode('check_required_data', this.authenticatedNode(this.checkRequiredData.bind(this)));
+    workflow.addNode('request_human_input', this.authenticatedNode(this.requestHumanInput.bind(this)));
+    workflow.addNode('execute_tools', this.authenticatedNode(this.executeTools.bind(this)));
+    workflow.addNode('generate_response', this.authenticatedNode(this.generateResponse.bind(this)));
+    workflow.addNode('request_confirmation', this.authenticatedNode(this.requestConfirmation.bind(this)));
+    workflow.addNode('handle_policy', this.authenticatedNode(this.handlePolicy.bind(this)));
+    workflow.addNode('handle_error', this.authenticatedNode(this.handleError.bind(this)));
 
     // Define edges (workflow flow)
     workflow.setEntryPoint('analyze_intent');
@@ -908,53 +910,60 @@ class BankingChatWorkflow {
     return `Are you sure you want to ${action}? Please confirm (yes/no).`;
   }
 
-  /**
-   * Execute the workflow with checkpointer support
-   * Uses sessionId as thread_id for conversation continuity
-   */
-  async execute(input) {
-    logger.info('Executing workflow', {
-      sessionId: input.sessionId,
-      userId: input.userId,
-      intent: input.intent,
-      checkpointerEnabled: this.checkpointerManager.isEnabled()
-    });
+  // Authentication is invocation-local, never a persisted graph channel or config.
+  authenticatedNode(handler) {
+    return async state => {
+      const context = this.executionContext.getStore() || {};
+      const result = await handler({ ...state, authToken: context.authToken || null,
+        ...(context.runtimeContext ? { runtimeContext: context.runtimeContext } : {}) });
+      const { authToken: _credential, ...persistable } = result;
+      return persistable;
+    };
+  }
 
+  async execute(input, options = {}) {
+    const { authToken, ...persistable } = input;
+    const threadId = options.threadId || graphThreadId({ tenantId: input.tenantId || process.env.DEPLOYMENT_TENANT_ID || 'default-enterprise',
+      userId: input.userId, sessionId: input.sessionId, runId: options.runId || randomUUID() });
+    return this.invokeGraph(persistable, { threadId, authToken, runtimeContext: input.runtimeContext });
+  }
+
+  async recover(input, threadId) {
+    if (!this.checkpointerManager.isEnabled()) throw new Error('Graph recovery requires checkpointing');
+    const checkpoint = await this.checkpointerManager.getCheckpoint(threadId);
+    if (checkpoint) {
+      const saved = checkpoint.channel_values;
+      // Before the input superstep completes values are inside __start__.
+      const state = saved?.sessionId ? saved : saved?.__start__;
+      if (!state || (state.sessionId !== input.sessionId || state.userId !== input.userId || state.interactionId !== input.interactionId
+        || state.tenantId !== input.tenantId || state.intent !== input.intent || state.runtimeContext?.version !== input.runtimeContext?.version || state.runtimeContext?.channel !== input.runtimeContext?.channel)) {
+        throw Object.assign(new Error('Checkpoint execution identity does not match the pinned workflow'), { status: 409 });
+      }
+      return this.invokeGraph(null, { threadId, authToken: input.authToken, runtimeContext: input.runtimeContext });
+    }
+    // A failure before the first checkpoint cannot have dispatched a graph node
+    // with sync durability. Restart only its trusted, persisted original input.
+    return this.execute(input, { threadId });
+  }
+
+  async invokeGraph(input, { threadId, authToken, runtimeContext }) {
     try {
-      // Build config with thread_id (sessionId) for checkpointer
-      const config = {
-        configurable: {
-          thread_id: input.sessionId
+      await this.checkpointerManager.initialize();
+      return await this.executionContext.run({ authToken, runtimeContext }, async () => {
+        const runConfig = { configurable: { thread_id: threadId }, durability: 'sync' };
+        if (input === null) {
+          const state = await this.graph.getState(runConfig);
+          // Pending task writes can make `next` empty before their superstep
+          // checkpoint commits. Only a stored terminal response is complete.
+          if (!state.next.length && state.values.finalResponse) return state.values;
         }
-      };
-
-      // Execute workflow with checkpointer config
-      // This enables state persistence across invocations for the same session
-      const result = await this.graph.invoke(input, config);
-      
-      logger.info('Workflow completed', {
-        sessionId: input.sessionId,
-        currentStep: result.currentStep,
-        needsHumanInput: result.needsHumanInput
+        return this.graph.invoke(input, runConfig);
       });
-
-      return result;
     } catch (error) {
-      logger.error('Workflow execution failed', {
-        sessionId: input.sessionId,
-        error: error.message,
-        stack: error.stack
-      });
-      
-      return {
-        ...input,
-        error: error.message,
-        finalResponse: {
-          type: 'error',
-          message: 'Workflow execution failed',
-          error: error.message
-        }
-      };
+      logger.error('Graph execution requires recovery', { threadId, error: error.message });
+      return { ...(input || {}), error: error.message, recoveryRequired: true, needsHumanInput: false,
+        finalResponse: { type: 'policy_blocked', code: 'workflow_recovery_required', stage: 'checkpoint', recoveryRequired: true,
+          message: 'This request was interrupted. Resume the existing request before starting another action.' } };
     }
   }
 

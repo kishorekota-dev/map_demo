@@ -26,7 +26,7 @@ describe('orchestrator verifies identity at the service boundary', () => {
 
   test.each([
     ['get', '/session/s'], ['delete', '/session/s'], ['get', '/user/customer/sessions'],
-    ['post', '/process'], ['post', '/feedback'], ['post', '/session']
+    ['post', '/process'], ['post', '/feedback'], ['post', '/session'], ['post', '/session/s/recover']
   ])('requires JWT on %s %s', async (method, path) => {
     expect((await request(appFor(null))[method](`/api/orchestrator${path}`).send({})).status).toBe(401);
   });
@@ -88,3 +88,29 @@ describe('orchestrator verifies identity at the service boundary', () => {
     expect((await request(app).post('/api/orchestrator/operations/op/reconcile').set('Authorization', `Bearer ${token()}`).send({ outcome: 'completed', reference: 'external-ref', note: 'Verified in downstream ledger.' })).status).toBe(403);
   });
 });
+
+ test('recovery accepts only session owner and ignores supplied snapshot/checkpoint selectors', async () => {
+    const previous = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET;
+    try {
+      const app = appFor({ sessionId: 's', userId: 'customer' });
+      app.locals.workflowService.recoverMessage = jest.fn(async () => ({ type: 'complete' }));
+      expect((await request(app).post('/api/orchestrator/session/s/recover').set('Authorization', `Bearer ${token({ userId: 'intruder' })}`).send({})).status).toBe(403);
+      const signed = token();
+      const response = await request(app).post('/api/orchestrator/session/s/recover').set('Authorization', `Bearer ${signed}`)
+        .send({ threadId: 'foreign', checkpointId: 'older', version: 999, metadata: { controlPlane: {} } });
+      expect(response.status).toBe(200);
+      expect(app.locals.workflowService.recoverMessage).toHaveBeenCalledWith({ sessionId: 's', userId: 'customer', tenantId: 'default-enterprise', authToken: signed });
+    } finally { if (previous === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previous; }
+  });
+
+ test('recovery exposes an explicit absent-session code without executing a replacement request', async () => {
+    const previous = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET;
+    try {
+      const app = appFor(null);
+      app.locals.workflowService.recoverMessage = jest.fn(async () => { throw Object.assign(new Error('No original workflow session was found'),{ status: 404, code: 'WORKFLOW_SESSION_NOT_FOUND' }); });
+      const response = await request(app).post('/api/orchestrator/session/missing/recover').set('Authorization', `Bearer ${token()}`).send({});
+      expect(response.status).toBe(404);
+      expect(response.body.code).toBe('WORKFLOW_SESSION_NOT_FOUND');
+      expect(app.locals.workflowService.processMessage).not.toHaveBeenCalled();
+    } finally { if (previous === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previous; }
+  });

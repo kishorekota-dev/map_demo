@@ -91,7 +91,7 @@ jobs:
         env:
           TEST_CONTROL_PLANE_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
           TEST_OPERATIONS_DATABASE_URL: postgres://postgres:control-plane-ci@127.0.0.1:5432/control_plane_test
-        run: npx jest --ci --runInBand control-plane/__tests__ operations/__tests__ platform/__tests__
+        run: npx jest --ci --runInBand control-plane/__tests__ operations/__tests__ platform/__tests__ quality/__tests__
       - name: Install runtime dependencies
         run: |
           npm ci --prefix services/ai-orchestrator --workspaces=false --no-audit --no-fund

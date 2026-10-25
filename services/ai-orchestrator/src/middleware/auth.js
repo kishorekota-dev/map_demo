@@ -11,6 +11,13 @@ function authenticate(req, res, next) {
   if (!header.startsWith('Bearer ')) return res.status(401).json({ success: false, error: 'Authentication required' });
   try {
     const principal = jwt.verify(header.slice(7), secret, { algorithms: ['HS256'] });
+    if (principal.purpose === 'quality_evaluation' || [principal.aud].flat().includes('servicing-quality')) {
+      if (req.method !== 'POST' || req.originalUrl.split('?')[0] !== '/api/orchestrator/llm/evaluate'
+        || principal.purpose !== 'quality_evaluation' || principal.aud !== 'servicing-quality'
+        || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(principal.runId || '')) {
+        return res.status(403).json({ success: false, error: 'Evaluation delegation is restricted to its internal endpoint' });
+      }
+    }
     const userId = principal.userId || principal.sub || principal.id;
     if (typeof userId !== 'string' || !userId || principal.type === 'refresh') {
       return res.status(401).json({ success: false, error: 'Invalid access token' });
