@@ -10,6 +10,11 @@ module.exports = {
       .flatMap(item => Array.isArray(item.content) ? item.content : []).filter(part => part.type === 'output_text').map(part => part.text).join('');
     return { text: text || data.output_text, usage: usage(data.usage?.input_tokens, data.usage?.output_tokens, data.usage?.total_tokens), finishReason: data.status || null };
   },
+  async embed(provider, input, client) {
+    const data = await client.request('/embeddings', { model: input.model, input: input.input, encoding_format: 'float' });
+    const items = Array.isArray(data.data) ? [...data.data].sort((a, b) => a.index - b.index) : [];
+    return { vectors: items.map(item => item.embedding), usage: usage(data.usage?.prompt_tokens, undefined, data.usage?.total_tokens) };
+  },
   async models(provider, client) {
     const data = await client.request('/models');
     return (Array.isArray(data.data) ? data.data : []).map(model => ({ id: model.id, name: model.id }));

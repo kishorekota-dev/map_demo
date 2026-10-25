@@ -66,7 +66,19 @@ export interface ModelConfiguration {
     generation?: string;
     extraction?: string;
     recognition?: string;
+    embedding?: string;
   };
+}
+
+export type RetrievalStrategy = "lexical" | "semantic" | "hybrid";
+export interface RetrievalSettings {
+  strategy: RetrievalStrategy;
+  /** Cosine similarity floor for semantic and hybrid retrieval. */
+  minSimilarity?: number;
+  maxResults?: number;
+  /** Task prefixes some embedding models expect, such as "search_query: ". */
+  queryPrefix?: string;
+  documentPrefix?: string;
 }
 
 export interface ServicingConfig {
@@ -92,9 +104,17 @@ export interface ServicingConfig {
     synonyms: Record<string, string[]>;
   };
   procedures?: ServicingProcedure[];
+  retrieval?: RetrievalSettings;
 }
 
-export type GuardrailOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in";
+export type GuardrailOperator =
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "in";
 type GuardrailBase = { id: string; message?: string; sourceText?: string };
 export type ProcedureGuardrail = GuardrailBase &
   (
@@ -128,7 +148,11 @@ export interface ServicingProcedure {
 
 export interface ProcedureImport {
   procedure: ServicingProcedure;
-  suggestions: Array<{ guardrail: ProcedureGuardrail; sourceText: string; note?: string }>;
+  suggestions: Array<{
+    guardrail: ProcedureGuardrail;
+    sourceText: string;
+    note?: string;
+  }>;
   warnings: string[];
   errors: string[];
   replaces: boolean;

@@ -157,6 +157,32 @@ describe('procedures in the published servicing runtime', () => {
     expect((await workflowService.processMessage({ sessionId: 'digital', userId: 'u', question: 'I need a replacement card', authToken: 'token' })).metadata.procedure).toBeUndefined();
   });
 
+  test('a semantic release warms its procedure index in the background and retrieval uses the pinned settings', async () => {
+    const { getEmbeddingIndex } = require('../embeddingIndex');
+    const warm = jest.spyOn(getEmbeddingIndex(), 'warm').mockResolvedValue(true);
+    const config = { ...defaultConfig(), procedures: [...customerProcedures], retrieval: { strategy: 'hybrid', minSimilarity: 0.4 } };
+    config.llm = { ...config.llm, enabled: true, routing: { ...config.llm.routing, embedding: config.llm.profiles[0].id } };
+    const { workflowService } = service({ version: 6, config });
+    workflowService.processConfiguredMessage = jest.fn(async () => {
+      expect(intentMapper.getRetrieval()).toEqual({ strategy: 'hybrid', minSimilarity: 0.4 });
+      return { type: 'complete', response: 'ok' };
+    });
+    await workflowService.processMessage({ sessionId: 'warm', userId: 'u', question: 'what can you do', authToken: 'token' });
+    expect(warm).toHaveBeenCalledWith(config.llm, expect.arrayContaining(['Set up a travel notice\n1. Tell us your travel dates and destination countries.']), expect.any(Object));
+    expect(warm.mock.calls[0][1].join(' ')).not.toContain('Supervisors');
+    warm.mockRestore();
+  });
+
+  test('a lexical release never warms an embedding index', async () => {
+    const { getEmbeddingIndex } = require('../embeddingIndex');
+    const warm = jest.spyOn(getEmbeddingIndex(), 'warm');
+    const { workflowService } = service({ version: 7, config: { ...defaultConfig(), procedures: [...customerProcedures] } });
+    workflowService.processConfiguredMessage = jest.fn(async () => ({ type: 'complete', response: 'ok' }));
+    await workflowService.processMessage({ sessionId: 'lexical', userId: 'u', question: 'what can you do', authToken: 'token' });
+    expect(warm).not.toHaveBeenCalled();
+    warm.mockRestore();
+  });
+
   test('knowledge search falls back to customer procedures only when approved knowledge has no match', async () => {
     const { workflowService } = service({ version: 1, config: defaultConfig() });
     const state = { intent: 'policy_knowledge', question: 'how do I set up a travel notice with my travel dates', runtimeContext: { channel: 'digital' } };

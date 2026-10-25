@@ -127,6 +127,25 @@ describe('procedure guardrails in the servicing graph', () => {
     } finally { orchestratorConfig.openai.enabled = enabled; }
   });
 
+  test('semantic or hybrid retrieval from the service grounds the answer and reports its mode', async () => {
+    const { workflow, published, input } = harness();
+    const match = { procedureId: 'travel_notice', title: 'Set up a travel notice', source: 'SOP-CARD-20', kind: 'step', stepId: 'step_1', text: '1. Tell us your travel dates and destination countries.', score: 0.032, similarity: 0.71 };
+    workflow.procedureRetriever = jest.fn(async () => ({ strategy: 'hybrid', mode: 'hybrid', matches: [match] }));
+    const state = input({ intent: 'general_inquiry', question: 'Going overseas next month, anything I should do?', collectedData: {}, toolResults: {} });
+    const result = await published([travelSop], () => workflow.generateResponse(state));
+    expect(workflow.procedureRetriever).toHaveBeenCalledWith(expect.objectContaining({ question: state.question }));
+    expect(result.finalResponse).toMatchObject({ generationSource: 'approved-procedure', retrievalMode: 'hybrid', citations: [{ id: 'travel_notice' }] });
+    expect(result.finalResponse.retrieval[0]).toMatchObject({ procedureId: 'travel_notice', similarity: 0.71 });
+    expect(result.finalResponse.response).toMatch(/Foreign transaction fees may apply\.$/);
+  });
+
+  test('an unexpected retrieval failure degrades to lexical retrieval, never a failed turn', async () => {
+    const { workflow, published, input } = harness();
+    workflow.procedureRetriever = jest.fn(async () => { throw new Error('index bug'); });
+    const result = await published([travelSop], () => workflow.generateResponse(input({ intent: 'general_inquiry', question: 'I am traveling abroad, do I need to give you my travel dates?', collectedData: {}, toolResults: {} })));
+    expect(result.finalResponse).toMatchObject({ type: 'complete', retrievalMode: 'lexical_fallback', retrievalFallback: 'retrieval_error', citations: [{ id: 'travel_notice' }] });
+  });
+
   test('an internal procedure is never used to answer customers', async () => {
     const { workflow, published, input } = harness();
     const internal = { ...travelSop, audience: 'internal', intents: ['help'] };

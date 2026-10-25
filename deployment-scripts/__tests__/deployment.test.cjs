@@ -238,7 +238,7 @@ test('canonical servicing migrations apply twice and preserve records in disposa
     await target.query("INSERT INTO servicing_operations_records(tenant_id,kind,id,document) VALUES('migration-test','fixture','retained','{\"preserved\":true}')");
     for (const component of Object.keys(components)) await migrateComponent(component, env, Pool);
     assert.equal((await target.query("SELECT document->>'preserved' AS preserved FROM servicing_operations_records WHERE tenant_id='migration-test'")).rows[0].preserved, 'true');
-    for (const table of ['servicing_control_plane_state','servicing_operations_jobs','ai_sessions','ai_workflow_executions','ai_human_feedback','servicing_tool_operations','servicing_graph_checkpoints','servicing_graph_writes','chat_sessions','chat_messages','servicing_resume_grants']) {
+    for (const table of ['servicing_control_plane_state','servicing_operations_jobs','ai_sessions','ai_workflow_executions','ai_human_feedback','servicing_tool_operations','servicing_graph_checkpoints','servicing_graph_writes','servicing_retrieval_embeddings','chat_sessions','chat_messages','servicing_resume_grants']) {
       assert.equal((await target.query('SELECT to_regclass($1) AS name', [table])).rows[0].name, table);
     }
   } finally {

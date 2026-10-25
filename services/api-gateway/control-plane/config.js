@@ -12,12 +12,39 @@ function intentBaseline(intent) {
     || (GENERIC_BASES.includes(base) ? { id: base, tools: [], requiredData: [], needsConfirmation: false } : null);
 }
 
-function validateLlmConfig(llm, intents = [], recognition) {
+const MODEL_TASKS = ['generation', 'extraction', 'recognition', 'embedding'];
+const RETRIEVAL_STRATEGIES = ['lexical', 'semantic', 'hybrid'];
+const semanticRetrieval = (retrieval) => object(retrieval) && ['semantic', 'hybrid'].includes(retrieval.strategy);
+
+// How customer-audience procedures are retrieved to ground answers. Lexical
+// needs no model; semantic and hybrid embed procedure chunks and questions with
+// the routed embedding profile and fall back to lexical when it is unavailable.
+function validateRetrieval(retrieval) {
+  if (retrieval === undefined) return [];
+  if (!object(retrieval)) return ['retrieval must be an object.'];
+  const errors = [];
+  for (const key of Object.keys(retrieval)) if (!['strategy', 'minSimilarity', 'maxResults', 'queryPrefix', 'documentPrefix'].includes(key)) errors.push(`retrieval.${key} is not supported.`);
+  if (!RETRIEVAL_STRATEGIES.includes(retrieval.strategy)) errors.push('retrieval.strategy must be lexical, semantic, or hybrid.');
+  if ((semanticRetrieval(retrieval) || retrieval.minSimilarity !== undefined)
+    && (!Number.isFinite(retrieval.minSimilarity) || retrieval.minSimilarity < 0 || retrieval.minSimilarity > 1)) errors.push('retrieval.minSimilarity must be a cosine similarity from 0 to 1; calibrate it with retrieval evaluation.');
+  if (retrieval.maxResults !== undefined && (!Number.isInteger(retrieval.maxResults) || retrieval.maxResults < 1 || retrieval.maxResults > 5)) errors.push('retrieval.maxResults must be an integer from 1 to 5.');
+  // Some embedding models expect task prefixes, such as "search_query: " and "search_document: ".
+  for (const key of ['queryPrefix', 'documentPrefix']) {
+    const value = retrieval[key];
+    if (value !== undefined && (typeof value !== 'string' || value.length > 64 || [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) {
+      errors.push(`retrieval.${key} must be text up to 64 characters without control characters.`);
+    }
+  }
+  return errors;
+}
+
+function validateLlmConfig(llm, intents = [], recognition, retrieval) {
   const errors = [];
   const overrides = Array.isArray(intents) ? intents.filter((intent) => object(intent) && intent.llmProfileId !== undefined) : [];
   if (llm === undefined) {
     if (overrides.length) errors.push('Intent llmProfileId requires an llm profile configuration.');
     if (recognition?.strategy === 'llm') errors.push('LLM recognition requires enabled llm configuration and a recognition task profile.');
+    if (semanticRetrieval(retrieval)) errors.push('Semantic retrieval requires enabled llm configuration and an embedding task profile.');
     return errors;
   }
   if (!object(llm)) return ['llm must be an object.'];
@@ -41,12 +68,13 @@ function validateLlmConfig(llm, intents = [], recognition) {
     if (!Number.isInteger(profile.timeoutMs) || profile.timeoutMs < 1000 || profile.timeoutMs > 120000) errors.push(`${path}.timeoutMs must be an integer from 1000 to 120000.`);
   });
   for (const [task, profileId] of Object.entries(llm.routing)) {
-    if (!['generation', 'extraction', 'recognition'].includes(task)) errors.push(`llm.routing.${task} is not a supported model task.`);
+    if (!MODEL_TASKS.includes(task)) errors.push(`llm.routing.${task} is not a supported model task.`);
     if (!identifier(profileId) || !profileIds.has(profileId)) errors.push(`llm.routing.${task} must reference an existing model profile.`);
   }
   for (const intent of overrides) if (!identifier(intent.llmProfileId) || !profileIds.has(intent.llmProfileId)) errors.push(`Intent ${typeof intent.id === 'string' ? intent.id : '(invalid)'} llmProfileId must reference an existing generation profile.`);
   if (llm.enabled && (!llm.profiles.length || (!Object.keys(llm.routing).length && !overrides.length))) errors.push('Enabled llm configuration requires a profile and at least one task route or intent generation override.');
   if (recognition?.strategy === 'llm' && (!llm.enabled || !llm.routing.recognition)) errors.push('LLM recognition requires enabled llm configuration and a recognition task profile.');
+  if (semanticRetrieval(retrieval) && (!llm.enabled || !llm.routing.embedding)) errors.push('Semantic retrieval requires enabled llm configuration and an embedding task profile.');
   return errors;
 }
 
@@ -92,8 +120,9 @@ function validateConfig(config) {
     for (const key of Object.keys(value)) if (!allowed.includes(key)) errors.push(`${path}.${key} is not supported.`);
     return true;
   };
-  fields(config, ['channels', 'journeys', 'queues', 'intents', 'prompts', 'recognition', 'llm', 'procedures'], 'config');
-  errors.push(...validateLlmConfig(config.llm, config.intents, config.recognition));
+  fields(config, ['channels', 'journeys', 'queues', 'intents', 'prompts', 'recognition', 'llm', 'procedures', 'retrieval'], 'config');
+  errors.push(...validateLlmConfig(config.llm, config.intents, config.recognition, config.retrieval));
+  errors.push(...validateRetrieval(config.retrieval));
   if (config.recognition !== undefined && fields(config.recognition, ['strategy', 'confidenceThreshold', 'ambiguityMargin', 'ambiguityAction', 'synonyms'], 'recognition')) {
     const settings = config.recognition;
     if (!['lexical', 'external', 'llm'].includes(settings.strategy)) errors.push('recognition.strategy must be lexical, external, or llm.');
@@ -239,4 +268,4 @@ function resolveDecision(config, { channel, intent }, version) {
   return decision;
 }
 
-module.exports = { CHANNEL_IDS, INTENTS, INTENT_CATALOG, GENERIC_BASES, intentBaseline, clone, object, text, identifier, defaultConfig, validateConfig, validateLlmConfig, resolveDecision };
+module.exports = { CHANNEL_IDS, INTENTS, INTENT_CATALOG, GENERIC_BASES, MODEL_TASKS, RETRIEVAL_STRATEGIES, intentBaseline, clone, object, text, identifier, defaultConfig, validateConfig, validateLlmConfig, validateRetrieval, resolveDecision };

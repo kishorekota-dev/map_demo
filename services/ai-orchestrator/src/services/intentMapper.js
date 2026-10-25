@@ -33,12 +33,17 @@ const ALL_PROMPTS = {
  * Provides methods for intent-based prompt selection and configuration
  */
 class IntentMapper {
-  withPublishedIntents(intents, callback, prompts = {}, hooks = {}, llm = undefined, { procedures = [], channel = 'digital' } = {}) {
+  withPublishedIntents(intents, callback, prompts = {}, hooks = {}, llm = undefined, { procedures = [], channel = 'digital', retrieval } = {}) {
     // Each asynchronous workflow receives an isolated immutable snapshot.
     // Neither the singleton nor the canonical configuration is mutated.
     return publishedIntents.run({ intents: new Map(intents.map(entry => [entry.id, structuredClone(entry)])), prompts: structuredClone(prompts), hooks,
-      llm: llm === undefined ? undefined : structuredClone(llm), procedures: structuredClone(procedures || []), channel }, callback);
+      llm: llm === undefined ? undefined : structuredClone(llm), procedures: structuredClone(procedures || []), channel,
+      retrieval: retrieval === undefined ? undefined : structuredClone(retrieval) }, callback);
   }
+
+  getRetrieval() { return publishedIntents.getStore()?.retrieval; }
+
+  getUsageRecorder() { return publishedIntents.getStore()?.hooks?.recordUsage; }
 
   getLlmConfig() { return publishedIntents.getStore()?.llm; }
 

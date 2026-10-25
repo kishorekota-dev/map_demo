@@ -120,8 +120,10 @@ name is not evidence that the remote service is available.
    and administrators can run this check. It can consume provider usage, but does
    not publish configuration or execute a customer transaction.
 4. Configure profile temperature, output-token limit, and response timeout. Assign
-   profiles to response generation, entity extraction, and intent recognition.
-   Individual intents can override the generation profile only.
+   profiles to response generation, entity extraction, intent recognition and
+   procedure retrieval embeddings. Individual intents can override the
+   generation profile only. The embedding route is needed only for semantic or
+   hybrid procedure retrieval.
 5. Save the draft, evaluate applicable contracts, and publish through the normal
    release process. Configure model-based recognition separately when wanted.
 
@@ -189,8 +191,16 @@ from policy-like sentences for the author to accept. Imported procedures are add
 to the draft disabled. Editors bind intents and channels, choose an internal or
 customer audience, edit steps, remove guardrails or edit the procedure as JSON,
 then save, simulate and publish through the normal release gates. Badges show
-new procedures and unpublished changes. See
-[Procedures and guardrails](../../docs/guides/procedures-and-guardrails.md).
+new procedures and unpublished changes.
+
+The **Retrieval** panel chooses how customer procedures are found: lexical (no
+model), semantic or hybrid (with an embedding route), the similarity floor, the
+number of excerpts and optional model task prefixes. **Run evaluation** measures
+the draft as shown on cases written `question | procedure_id` or
+`question | none`, reports top-result accuracy, top-3 accuracy, MRR and correct
+"no match" rate for each strategy, and suggests a floor that **Use** applies to
+the draft. Evaluation is available outside production only. See
+[Procedures and guardrails](../../docs/guides/procedures-and-guardrails.md#retrieval).
 
 ## Knowledge management
 

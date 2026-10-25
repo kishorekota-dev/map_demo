@@ -49,7 +49,7 @@ npm run platform:migrate -- --env /absolute/path/migration.env --component opera
 | --- | --- | --- |
 | `control-plane` | `CONTROL_PLANE_DATABASE_URL` | Gateway configuration/release records |
 | `operations` | `OPERATIONS_DATABASE_URL` | Jobs, cases, evidence and identity |
-| `workflow` | `WORKFLOW_DATABASE_URL` | AI base tables and durable tool ledger |
+| `workflow` | `WORKFLOW_DATABASE_URL` | AI base tables, durable tool ledger, graph checkpoints and procedure retrieval embeddings |
 | `handoff` | `HANDOFF_DATABASE_URL` | Chat base tables and resume grants |
 
 Each component runs in a transaction under an advisory lock, stops on failure and prints sanitized status. Components may use separate databases, so the whole four-component deployment is not a cross-database atomic transaction. Databases must already exist. Banking migrations run separately; this tool never seeds demo users.

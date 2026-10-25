@@ -8,7 +8,7 @@ const loadPool = () => require(require.resolve('pg', { paths: [ROOT, path.join(R
 const components = {
   'control-plane': ['CONTROL_PLANE_DATABASE_URL', ['services/api-gateway/control-plane/schema.sql']],
   operations: ['OPERATIONS_DATABASE_URL', ['services/api-gateway/operations/schema.sql']],
-  workflow: ['WORKFLOW_DATABASE_URL', ['services/ai-orchestrator/migrations/V0__ai_model_tables.sql', 'services/ai-orchestrator/migrations/V1__servicing_tool_operations.sql', 'services/ai-orchestrator/migrations/V2__servicing_graph_checkpoints.sql']],
+  workflow: ['WORKFLOW_DATABASE_URL', ['services/ai-orchestrator/migrations/V0__ai_model_tables.sql', 'services/ai-orchestrator/migrations/V1__servicing_tool_operations.sql', 'services/ai-orchestrator/migrations/V2__servicing_graph_checkpoints.sql', 'services/ai-orchestrator/migrations/V3__servicing_retrieval_embeddings.sql']],
   handoff: ['HANDOFF_DATABASE_URL', ['V1__create_chat_sessions_table.sql', 'V2__create_chat_messages_table.sql', 'V3__create_updated_at_trigger.sql', 'V4__create_indexes_for_queries.sql', 'V5__create_session_statistics_view.sql', 'V6__servicing_resume_grants.sql'].map(file => `services/chat-backend/migrations/${file}`)]
 };
 async function migrateComponent(name, env, Pool) {

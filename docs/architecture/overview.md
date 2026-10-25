@@ -67,6 +67,7 @@ Missing `config.llm` preserves legacy deployment behavior. Explicit `llm.enabled
 | Orchestrator | `ai_sessions`, `ai_workflow_executions`, `ai_human_feedback` | Pinned workflow release and customer continuation |
 | Orchestrator graph | `servicing_graph_checkpoints`, `servicing_graph_writes` | Tenant/owner/interaction-bound graph progress and pending writes, without bearer tokens |
 | Orchestrator ledger | `servicing_tool_operations` | Dispatch status, result, safe policy/consent context, reconciliation |
+| Orchestrator retrieval | `servicing_retrieval_embeddings` | Content-addressed procedure chunk vectors shared across replicas; no procedure text or customer questions |
 | Gateway modules | Control-plane and operations SQL schemas | Releases, cases, outbox, evidence, usage, enterprise identity state |
 
 PostgreSQL advisory locks coordinate durable workflows across workers. Production LangGraph checkpoints and pending writes persist synchronously in PostgreSQL. Explicit owner-authorized recovery retains the original release and interaction, supplies fresh credentials and consults the effect ledger; uncertain financial dispatches require reconciliation. Development can explicitly use memory checkpoints. NLU caches and socket routing remain process-local. Cross-service handoff and external financial operations are not distributed transactions.

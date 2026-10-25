@@ -1670,3 +1670,9 @@
   gap: 0.75rem;
   margin-top: 1rem;
 }
+
+.cp-retrieval-evaluation {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}

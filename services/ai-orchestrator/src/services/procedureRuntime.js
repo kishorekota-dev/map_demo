@@ -178,8 +178,17 @@ function chunksFor(procedure) {
   }
   // The title is part of every chunk's terms so a step is findable by topic.
   const titleTerms = tokenize(procedure.title);
-  return chunks.filter(chunk => chunk.text).map(chunk => ({ ...chunk, procedureId: procedure.id, title: procedure.title, source: procedure.source, terms: [...titleTerms, ...tokenize(chunk.text)] }));
+  return chunks.filter(chunk => chunk.text).map(chunk => ({ ...chunk, procedureId: procedure.id, title: procedure.title, source: procedure.source, terms: [...titleTerms, ...tokenize(chunk.text)],
+    // Semantic retrieval embeds the title with each chunk, as lexical ranking scores it.
+    embeddingText: `${procedure.title}\n${chunk.text}` }));
 }
+
+// The retrievable chunks: enabled procedures for the channel and audience only.
+function documentChunks(procedures, { channel = 'digital', audience = 'customer' } = {}) {
+  return (procedures || []).filter(procedure => procedure.enabled && procedure.channels.includes(channel) && (procedure.audience || 'internal') === audience).flatMap(chunksFor);
+}
+const chunkKey = chunk => `${chunk.procedureId}\u0000${chunk.kind}\u0000${chunk.stepId || ''}\u0000${chunk.text}`;
+const publicMatch = chunk => ({ procedureId: chunk.procedureId, title: chunk.title, source: chunk.source, kind: chunk.kind, ...(chunk.stepId ? { stepId: chunk.stepId } : {}), text: chunk.text });
 
 // BM25 (k1 = 1.2, b = 0.75) over the chunks of eligible procedures. A chunk must
 // match at least two distinct query terms (one for a one-word query) and 30% of
@@ -187,8 +196,7 @@ function chunksFor(procedure) {
 function retrieve(procedures, question, { channel = 'digital', audience = 'customer', limit = 3 } = {}) {
   const query = [...new Set(tokenize(question))];
   if (!query.length) return [];
-  const eligible = (procedures || []).filter(procedure => procedure.enabled && procedure.channels.includes(channel) && (procedure.audience || 'internal') === audience);
-  const chunks = eligible.flatMap(chunksFor);
+  const chunks = documentChunks(procedures, { channel, audience });
   if (!chunks.length) return [];
   const averageLength = chunks.reduce((total, chunk) => total + chunk.terms.length, 0) / chunks.length;
   const frequency = new Map(query.map(term => [term, chunks.filter(chunk => chunk.terms.includes(term)).length]));
@@ -204,8 +212,7 @@ function retrieve(procedures, question, { channel = 'digital', audience = 'custo
     return { chunk, score, matched, coverage: matched / query.length };
   }).filter(entry => entry.score > 0 && entry.coverage >= 0.3 && entry.matched >= Math.min(2, query.length))
     .sort((a, b) => b.score - a.score || a.chunk.procedureId.localeCompare(b.chunk.procedureId) || a.chunk.text.localeCompare(b.chunk.text));
-  return scored.slice(0, limit).map(({ chunk, score, coverage }) => ({ procedureId: chunk.procedureId, title: chunk.title, source: chunk.source, kind: chunk.kind,
-    ...(chunk.stepId ? { stepId: chunk.stepId } : {}), text: chunk.text, score: Number(score.toFixed(4)), coverage: Number(coverage.toFixed(2)) }));
+  return scored.slice(0, limit).map(({ chunk, score, coverage }) => ({ ...publicMatch(chunk), score: Number(score.toFixed(4)), coverage: Number(coverage.toFixed(2)) }));
 }
 
 function buildGrounding(matches) {
@@ -229,4 +236,4 @@ function citations(matches) {
 }
 
 module.exports = { validateProcedures, resolveProcedure, requiredFields, requiresConfirmation, evaluateGate, conditionMatches, applyResponseGuardrails, applyGoverningGuardrails, groundingProcedures,
-  buildGuidance, retrieve, buildGrounding, groundedAnswer, citations, citation, tokenize, SAFE_RESPONSE };
+  buildGuidance, retrieve, buildGrounding, groundedAnswer, citations, citation, tokenize, documentChunks, chunkKey, publicMatch, SAFE_RESPONSE };

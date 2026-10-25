@@ -159,7 +159,9 @@ integer deadline from 1,000 to 120,000 milliseconds. There can be at most 50 uni
 profiles. Provider adapters may impose narrower provider-specific limits at
 execution time.
 
-`routing` accepts only `generation`, `extraction` and `recognition` profile IDs.
+`routing` accepts only `generation`, `extraction`, `recognition` and `embedding`
+profile IDs. The `embedding` route is used only by semantic and hybrid procedure
+retrieval and is required when `config.retrieval.strategy` is one of them.
 An intent's optional `llmProfileId` overrides **generation only**; extraction and
 recognition continue to use their task routes. Every configured reference must
 resolve even when models are disabled. Enabled configuration requires at least
@@ -328,8 +330,16 @@ lists ordered steps, and carries typed guardrails: `require_fields`,
 `require_confirmation`, `escalate_when`, `prohibited_phrases` and
 `required_disclosure`. Guardrail fields must be collected by every bound intent.
 `/simulate` reports the applied procedure and includes procedure-required fields
-in `requiredFields`. See [Procedures and guardrails](../../../docs/guides/procedures-and-guardrails.md)
-for the schema, import grammar, runtime enforcement and retrieval.
+in `requiredFields`.
+
+`config.retrieval` (optional, also in releases and solution packages) selects how
+customer-audience procedures are retrieved: `{strategy: lexical|semantic|hybrid,
+minSimilarity?, maxResults?, queryPrefix?, documentPrefix?}`. `minSimilarity` is a
+0–1 cosine floor required for semantic and hybrid, `maxResults` is 1–5, and the
+prefixes are at most 64 characters without control characters. The control plane
+and the orchestrator apply the same rules. See
+[Procedures and guardrails](../../../docs/guides/procedures-and-guardrails.md#retrieval)
+for the schema, import grammar, runtime enforcement, retrieval and evaluation.
 
 ## Governed knowledge
 

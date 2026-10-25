@@ -41,6 +41,14 @@ Operators can import standard operating procedures that the assistant follows,
 with guardrails enforced in code and retrieval-grounded answers with citations.
 See [Procedures and guardrails](procedures-and-guardrails.md).
 
+Follow-up: procedure retrieval can be semantic or hybrid. Any provider plugin can
+serve the new `embedding` route, vectors are content-addressed and shared through
+PostgreSQL, a turn falls back to BM25 (and says why) instead of waiting for the
+index, and Studio measures each strategy on authored cases and suggests a
+similarity floor. With a small open model on 25 cases, calibrated semantic and
+hybrid retrieval answered 90% correctly against 67% for BM25; see
+[measured behavior](procedures-and-guardrails.md#measured-behavior).
+
 ## Verification
 
 Run from the final commit with PostgreSQL-backed suites enabled:
@@ -81,7 +89,7 @@ same `node` user, which limits the risk of the Dockerfile change.
 | P1 | Browser access and refresh tokens are in `localStorage`, exposed to any XSS. | Use the HTTP-only cookie session the OIDC path already provides for the local login too. |
 | P1 | Refresh tokens are not rotated and reuse is not detected. | Rotate on each refresh and revoke the token family on reuse. This changes the client contract. |
 | P2 | The gateway adds the internal service credential to every authenticated customer request it proxies to MCP/NLU (documented design). NLU conversation context is keyed only by session ID, so any authenticated customer can read or replace another session's context if they know its UUID. | Bind NLU context to the principal, or stop exposing NLU context routes through the public gateway. |
-| P2 | Procedure retrieval is lexical (BM25); imports accept text and Markdown only; the agent workspace does not yet show the governing procedure. | See the procedures guide's next steps. |
+| P2 | Procedure retrieval quality is qualified only on authored cases, with no reranker or evaluation against production questions; imports accept text and Markdown only; the agent workspace does not yet show the governing procedure. Approved knowledge retrieval remains lexical. | See the procedures guide's next steps. |
 | P2 | Banking balance arithmetic runs in JavaScript numbers. It is correct today because values come from `DECIMAL(15,2)` and are rounded on write, but this depends on that scale. | Move balance arithmetic into SQL or integer minor units before widening precision or adding currencies with other scales. |
 | P3 | The orchestrator runtime image ships a compiler toolchain (`python3`, `make`, `g++`). | Multi-stage build so the runtime image carries only production dependencies. |
 | P0 (pilot) | Live IVR/media, enterprise IdP, real model qualification, load and disaster-recovery evidence. | Unchanged; see the [platform gap assessment](platform-gap-assessment.md). |

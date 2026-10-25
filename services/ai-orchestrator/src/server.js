@@ -49,6 +49,8 @@ async function initializeServices() {
     // Initialize Workflow Service
     const workflowService = new WorkflowService(mcpClient, sessionManager);
     await workflowService.persistence.initialize();
+    // Durable mode shares procedure embeddings across restarts and replicas.
+    require('./services/embeddingIndex').configureEmbeddingIndex({ persistence: workflowService.persistence });
     await workflowService.workflow.checkpointerManager.initialize();
     logger.info('Workflow Service initialized');
 

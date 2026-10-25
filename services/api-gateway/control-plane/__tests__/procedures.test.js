@@ -201,3 +201,59 @@ describe('procedure governance routes', () => {
     expect(() => validateSnapshot({ version: 3, config: withProcedures(procedure({ guardrails: [{ id: 'g', type: 'run_code' }] })) })).toThrow(/procedure/i);
   });
 });
+
+describe('procedure retrieval settings', () => {
+  const embeddingConfig = (retrieval) => {
+    const config = { ...defaultConfig(), retrieval };
+    config.llm = { ...config.llm, enabled: true, routing: { ...config.llm.routing, embedding: config.llm.profiles[0].id } };
+    return config;
+  };
+
+  test.each([
+    [{ strategy: 'lexical' }, []],
+    [{ strategy: 'semantic', minSimilarity: 0.45 }, []],
+    [{ strategy: 'hybrid', minSimilarity: 0.45, maxResults: 4 }, []],
+    [{ strategy: 'hybrid' }, ['retrieval.minSimilarity must be a cosine similarity']],
+    [{ strategy: 'vector', minSimilarity: 0.4 }, ['retrieval.strategy must be lexical, semantic, or hybrid']],
+    [{ strategy: 'semantic', minSimilarity: 2 }, ['retrieval.minSimilarity must be a cosine similarity']],
+    [{ strategy: 'lexical', maxResults: 0 }, ['retrieval.maxResults must be an integer from 1 to 5']],
+    [{ strategy: 'lexical', endpoint: 'https://vector.example' }, ['retrieval.endpoint is not supported']],
+    [{ strategy: 'semantic', minSimilarity: 0.45, queryPrefix: 'search_query: ', documentPrefix: 'search_document: ' }, []],
+    [{ strategy: 'semantic', minSimilarity: 0.45, queryPrefix: 'x'.repeat(65) }, ['retrieval.queryPrefix must be text up to 64 characters']],
+    [{ strategy: 'semantic', minSimilarity: 0.45, documentPrefix: 'a\nb' }, ['retrieval.documentPrefix must be text up to 64 characters']],
+  ])('%j', (retrieval, expected) => {
+    const errors = validateConfig(embeddingConfig(retrieval));
+    if (!expected.length) expect(errors).toEqual([]);
+    for (const message of expected) expect(errors.join(' ')).toContain(message);
+  });
+
+  test('semantic strategies require an enabled embedding route; lexical does not', () => {
+    const disabled = { ...defaultConfig(), retrieval: { strategy: 'hybrid', minSimilarity: 0.4 } };
+    expect(validateConfig(disabled).join(' ')).toContain('Semantic retrieval requires enabled llm configuration and an embedding task profile.');
+    expect(validateConfig({ ...defaultConfig(), retrieval: { strategy: 'lexical' } })).toEqual([]);
+    const unknownTask = embeddingConfig({ strategy: 'lexical' });
+    unknownTask.llm.routing.vectorize = unknownTask.llm.profiles[0].id;
+    expect(validateConfig(unknownTask).join(' ')).toContain('llm.routing.vectorize is not a supported model task.');
+  });
+
+  test('the orchestrator accepts and rejects the same retrieval settings', () => {
+    const { validateSnapshot } = require('../../../ai-orchestrator/src/services/controlPlaneRuntime');
+    for (const retrieval of [{ strategy: 'lexical' }, { strategy: 'hybrid', minSimilarity: 0.45, maxResults: 4, queryPrefix: 'query: ' }]) {
+      expect(validateConfig(embeddingConfig(retrieval))).toEqual([]);
+      expect(() => validateSnapshot({ version: 1, config: embeddingConfig(retrieval) })).not.toThrow();
+    }
+    for (const retrieval of [{ strategy: 'hybrid' }, { strategy: 'lexical', maxResults: 9 }, { strategy: 'lexical', documentPrefix: 'tab\there' }]) {
+      expect(validateConfig(embeddingConfig(retrieval))).not.toEqual([]);
+      expect(() => validateSnapshot({ version: 1, config: embeddingConfig(retrieval) })).toThrow();
+    }
+    const noRoute = { ...defaultConfig(), retrieval: { strategy: 'semantic', minSimilarity: 0.4 } };
+    expect(validateConfig(noRoute)).not.toEqual([]);
+    expect(() => validateSnapshot({ version: 1, config: noRoute })).toThrow();
+  });
+
+  test('solution packages may carry retrieval settings', () => {
+    const solution = { schemaVersion: 1, manifest: { id: 'retrieval', name: 'Retrieval', description: 'Hybrid procedure retrieval', version: '1.0.0' },
+      configuration: { retrieval: { strategy: 'lexical', maxResults: 2 } } };
+    expect(previewPackage(defaultConfig(), solution).configuration.retrieval).toEqual({ strategy: 'lexical', maxResults: 2 });
+  });
+});

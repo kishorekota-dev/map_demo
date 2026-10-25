@@ -13,6 +13,7 @@ import {
   StatusPill,
   useConsoleAction,
 } from "./ConsoleElements";
+import RetrievalPanel from "./RetrievalPanel";
 
 const CHANNELS: ChannelId[] = ["digital", "ava", "ivr"];
 const OPERATOR_LABELS: Record<string, string> = {
@@ -560,6 +561,8 @@ export default function ProcedureConsole({
           </div>
         )}
       </section>
+
+      <RetrievalPanel config={config} onChange={onChange} editable={editable} />
 
       <section className="cp-panel" aria-labelledby="procedure-list">
         <div className="cp-panel-heading">

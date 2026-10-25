@@ -1,9 +1,11 @@
 const { LlmError } = require('./errors');
 const { IDENTIFIER, validModel } = require('./contract');
-function validateLlmConfig(llm, intents = [], recognition) {
+const TASKS = ['generation', 'extraction', 'recognition', 'embedding'];
+const semanticRetrieval = retrieval => ['semantic', 'hybrid'].includes(retrieval?.strategy);
+function validateLlmConfig(llm, intents = [], recognition, retrieval) {
   const overrides = intents.filter(intent => intent.llmProfileId !== undefined);
   if (llm === undefined) {
-    if (overrides.length || recognition?.strategy === 'llm') throw new LlmError('LLM_PROFILE_INVALID', 'Published model profile configuration is required.');
+    if (overrides.length || recognition?.strategy === 'llm' || semanticRetrieval(retrieval)) throw new LlmError('LLM_PROFILE_INVALID', 'Published model profile configuration is required.');
     return;
   }
   if (!llm || typeof llm.enabled !== 'boolean' || !Array.isArray(llm.profiles) || llm.profiles.length > 50
@@ -20,11 +22,12 @@ function validateLlmConfig(llm, intents = [], recognition) {
     profiles.set(profile.id, profile);
   }
   for (const [task, profileId] of Object.entries(llm.routing)) {
-    if (!['generation', 'extraction', 'recognition'].includes(task) || !profiles.has(profileId)) throw new LlmError('LLM_PROFILE_INVALID', 'Published model routing references an unknown profile.');
+    if (!TASKS.includes(task) || !profiles.has(profileId)) throw new LlmError('LLM_PROFILE_INVALID', 'Published model routing references an unknown profile.');
   }
   for (const intent of overrides) if (!profiles.has(intent.llmProfileId)) throw new LlmError('LLM_PROFILE_INVALID', 'An intent references an unknown model profile.');
   if (llm.enabled && (!llm.profiles.length || (!Object.keys(llm.routing).length && !overrides.length))) throw new LlmError('LLM_PROFILE_INVALID', 'Enabled model routing requires a profile and task route.');
   if (recognition?.strategy === 'llm' && (!llm.enabled || !llm.routing.recognition)) throw new LlmError('LLM_PROFILE_INVALID', 'Model recognition requires an enabled recognition profile.');
+  if (semanticRetrieval(retrieval) && (!llm.enabled || !llm.routing.embedding)) throw new LlmError('LLM_PROFILE_INVALID', 'Semantic retrieval requires an enabled embedding profile.');
 }
 function selectProfile(llm, task, intentEntry) {
   if (llm === undefined) return null;
@@ -46,4 +49,13 @@ async function generateWithProfile(llm, task, intentEntry, input, recordUsage, r
       provider: response.providerId, service: task, metric, units }))));
   return response;
 }
-module.exports = { validateLlmConfig, selectProfile, generateWithProfile };
+async function embedWithProfile(llm, texts, purpose, recordUsage, registry = require('./registry').getRegistry()) {
+  const profile = selectProfile(llm, 'embedding');
+  if (!profile) throw new LlmError('LLM_PROFILE_MISSING', 'Published model routing is not configured.');
+  const response = await registry.embed(profile.providerId, { model: profile.model, input: texts, purpose, timeoutMs: profile.timeoutMs });
+  if (recordUsage && Number.isFinite(response.usage.inputTokens)) await Promise.resolve()
+    .then(() => recordUsage({ eventId: `${response.callId}:input_tokens`, provider: response.providerId, service: 'embedding', metric: 'input_tokens', units: response.usage.inputTokens }))
+    .catch(() => {});
+  return { ...response, profile: { id: profile.id, providerId: profile.providerId, model: profile.model } };
+}
+module.exports = { TASKS, validateLlmConfig, selectProfile, generateWithProfile, embedWithProfile };

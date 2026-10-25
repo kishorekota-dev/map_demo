@@ -29,7 +29,8 @@ function validateSnapshot(snapshot) {
     || !['extractionSystem', 'extractionInstructions'].every(key => typeof snapshot.config.prompts?.[key] === 'string' && snapshot.config.prompts[key].trim())) {
     throw new Error('Invalid published control-plane configuration');
   }
-  require('../llm/profiles').validateLlmConfig(snapshot.config.llm, snapshot.config.intents, snapshot.config.recognition);
+  require('../llm/profiles').validateLlmConfig(snapshot.config.llm, snapshot.config.intents, snapshot.config.recognition, snapshot.config.retrieval);
+  require('./procedureRetrieval').validateRetrieval(snapshot.config.retrieval);
   const entries = snapshot.config.intents;
   if (intentConfig.getAllIntents().some(id => !entries.some(entry => entry.id === id))) throw new Error('Missing canonical intent');
   for (const { id } of entries) {

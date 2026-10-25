@@ -551,9 +551,8 @@ class BankingChatWorkflow {
       const governedLlm = intentMapper.getLlmConfig();
       // A bound procedure instructs the assistant. Otherwise, customer-audience
       // procedures relevant to the question ground the answer (retrieval).
-      const retrieved = !isToolBacked && !procedure
-        ? procedureRuntime.retrieve(intentMapper.getPublishedProcedures(), state.question, { channel: state.runtimeContext?.channel || state.channel || 'digital' })
-        : [];
+      const retrieval = !isToolBacked && !procedure ? await this.retrieveMatches(state) : null;
+      const retrieved = retrieval?.matches || [];
       if (!isToolBacked && (governedLlm === undefined ? config.openai.enabled : governedLlm.enabled)) {
         const systemMessage = new SystemMessage([intentMapper.buildSystemMessage(state.intent),
           ...(procedure ? [procedureRuntime.buildGuidance(procedure)] : []),
@@ -654,7 +653,8 @@ class BankingChatWorkflow {
           evidenceIds: Object.values(state.toolResults || {}).map(result => result?.evidenceId).filter(Boolean),
           ...(procedure ? { procedure: procedureRuntime.citation(procedure) } : {}),
           ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}),
-          ...(retrieved.length ? { citations: procedureRuntime.citations(retrieved), retrieval: retrieved.map(({ text: _text, ...match }) => match) } : {})
+          ...(retrieved.length ? { citations: procedureRuntime.citations(retrieved), retrieval: retrieved.map(({ text: _text, ...match }) => match) } : {}),
+          ...(retrieval ? { retrievalMode: retrieval.mode, ...(retrieval.fallbackReason ? { retrievalFallback: retrieval.fallbackReason } : {}) } : {})
         },
         currentStep: 'generate_response'
       };
@@ -787,6 +787,21 @@ class BankingChatWorkflow {
         procedure: { ...procedureRuntime.citation(procedure), guardrailId: gate.audit.guardrailId }
       }
     };
+  }
+
+  /**
+   * Procedure retrieval for a no-tool answer. The service supplies semantic or
+   * hybrid retrieval; without it, or if it fails unexpectedly, BM25 is used.
+   */
+  async retrieveMatches(state) {
+    const lexical = () => ({ mode: 'lexical', matches: procedureRuntime.retrieve(intentMapper.getPublishedProcedures(), state.question,
+      { channel: state.runtimeContext?.channel || state.channel || 'digital' }) });
+    if (!this.procedureRetriever) return lexical();
+    try { return await this.procedureRetriever(state); }
+    catch (error) {
+      logger.warn('Procedure retrieval failed; using lexical retrieval', { sessionId: state.sessionId, error: error.message });
+      return { ...lexical(), mode: 'lexical_fallback', fallbackReason: 'retrieval_error' };
+    }
   }
 
   withProcedureGuardrails(procedure, finalResponse) {

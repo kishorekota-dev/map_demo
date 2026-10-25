@@ -4,6 +4,8 @@ const logger = require('../utils/logger');
 const slmDataExtractor = require('./poc-slm-data-extractor');
 const intentMapper = require('./intentMapper');
 const procedureRuntime = require('./procedureRuntime');
+const { retrieveProcedures, documentText } = require('./procedureRetrieval');
+const { getEmbeddingIndex } = require('./embeddingIndex');
 const PolicyEngine = require('./policyEngine');
 const { ControlPlaneRuntime, normalizeChannel, resolvePublishedRoute, validateSnapshot } = require('./controlPlaneRuntime');
 const KeyedMutex = require('../utils/keyedMutex');
@@ -59,6 +61,7 @@ class WorkflowService {
     this.policyEngine = new PolicyEngine();
     this.workflow = new BankingChatWorkflow(this.mcpClient, sessionManager, this.policyEngine);
     this.workflow.genericHandler = state => this.executeGeneric(state);
+    this.workflow.procedureRetriever = state => this.retrieveForState(state);
     this.controlPlane = new ControlPlaneRuntime();
     this.requestMutex = new KeyedMutex();
     
@@ -150,6 +153,7 @@ class WorkflowService {
     }
     const route = { ...resolvePublishedRoute(snapshot, channel, intent), environment: snapshot.environment, cohort: snapshot.cohort };
     metadata.runtimeContext = route;
+    this.warmRetrieval(snapshot, channel, input);
     await this.sessionManager.updateSession(input.sessionId, { metadata, intent });
     if (route.action === 'disabled') return this.controlPlaneBlock(route.reason, route, snapshot.config.prompts.unavailableText);
     if (route.action === 'human') return this.routeToHuman(input, { ...route, recognition }, route.reason, snapshot.config.prompts.handoffText);
@@ -161,7 +165,23 @@ class WorkflowService {
       if (result.code === 'procedure_handoff') return this.routeToHuman(input, { ...route, recognition, procedure: result.procedure }, 'procedure_guardrail', result.message);
       return { ...result, intent, evidenceIds: [...(result.evidenceIds || []), ...(recognitionEvidence.id ? [recognitionEvidence.id] : [])],
         metadata: { ...(result.metadata || {}), ...route, recognition, ...(procedure ? { procedure: procedureRuntime.citation(procedure) } : {}) } };
-    }, snapshot.config.prompts, { recordUsage: this.usageRecorder(input, snapshot, channel) }, snapshot.config.llm, { procedures: snapshot.config.procedures, channel });
+    }, snapshot.config.prompts, { recordUsage: this.usageRecorder(input, snapshot, channel) }, snapshot.config.llm,
+    { procedures: snapshot.config.procedures, channel, retrieval: snapshot.config.retrieval });
+  }
+
+  // Retrieval over the pinned release's procedures for the current request.
+  retrieveForState(state, options = {}) {
+    return retrieveProcedures({ procedures: intentMapper.getPublishedProcedures(), question: state.question,
+      channel: state.runtimeContext?.channel || state.channel || 'digital', retrieval: intentMapper.getRetrieval(),
+      llm: intentMapper.getLlmConfig(), recordUsage: intentMapper.getUsageRecorder(), ...options });
+  }
+
+  // Embeds a release's procedure chunks in the background so semantic retrieval
+  // is ready for later questions. Failures only leave retrieval lexical.
+  warmRetrieval(snapshot, channel, input) {
+    if (!['semantic', 'hybrid'].includes(snapshot.config.retrieval?.strategy)) return;
+    const chunks = procedureRuntime.documentChunks(snapshot.config.procedures, { channel });
+    if (chunks.length) void getEmbeddingIndex().warm(snapshot.config.llm, chunks.map(chunk => documentText(chunk, snapshot.config.retrieval)), { recordUsage: this.usageRecorder(input, snapshot, channel) });
   }
 
   usageRecorder(input, snapshot, channel) {
@@ -240,12 +260,15 @@ class WorkflowService {
       const answer = await this.integrations.knowledge(state);
       if (answer.citations?.length) return answer;
       // No approved knowledge matched: fall back to customer-audience procedures.
-      const matches = procedureRuntime.retrieve(intentMapper.getPublishedProcedures(), state.question, { channel: state.runtimeContext?.channel || state.channel || 'digital' });
+      const retrieved = await this.retrieveForState(state);
+      const matches = retrieved.matches;
       const grounded = matches.length ? procedureRuntime.groundedAnswer(intentMapper.getPublishedProcedures(), matches) : null;
       if (!grounded) return answer;
       const guarded = procedureRuntime.applyGoverningGuardrails(procedureRuntime.groundingProcedures(intentMapper.getPublishedProcedures(), matches), grounded);
       return { ...answer, response: guarded.response, generationSource: 'approved-procedure', citations: procedureRuntime.citations(matches),
-        retrieval: matches.map(({ text: _text, ...match }) => match), ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}) };
+        retrieval: matches.map(({ text: _text, ...match }) => match), retrievalMode: retrieved.mode,
+        ...(retrieved.fallbackReason ? { retrievalFallback: retrieved.fallbackReason } : {}),
+        ...(guarded.applied.length ? { procedureGuardrails: guarded.applied } : {}) };
     }
     let servicingCase;
     try { servicingCase = await this.integrations.createCase(state); }
@@ -491,7 +514,7 @@ class WorkflowService {
       });
       return snapshot ? intentMapper.withPublishedIntents(snapshot.config.intents, recover, snapshot.config.prompts,
         { recordUsage: this.usageRecorder({ sessionId, metadata: session.metadata, authToken }, snapshot, route.channel) }, snapshot.config.llm,
-        { procedures: snapshot.config.procedures, channel: route.channel }) : recover();
+        { procedures: snapshot.config.procedures, channel: route.channel, retrieval: snapshot.config.retrieval }) : recover();
     }));
   }
 
@@ -526,7 +549,7 @@ class WorkflowService {
       if (result.code === 'procedure_handoff') return this.routeToHuman({ ...input, userId: session.userId, metadata: session.metadata }, { ...route, procedure: result.procedure }, 'procedure_guardrail', result.message);
       return { ...result, intent: session.intent, metadata: { ...(result.metadata || {}), ...route } };
     }, snapshot.config.prompts, { recordUsage: this.usageRecorder({ ...input, metadata: session.metadata }, snapshot, route.channel) }, snapshot.config.llm,
-    { procedures: snapshot.config.procedures, channel: route.channel });
+    { procedures: snapshot.config.procedures, channel: route.channel, retrieval: snapshot.config.retrieval });
   }
 
   async processConfiguredFeedback({ sessionId, response, confirmed, authToken = null }) {

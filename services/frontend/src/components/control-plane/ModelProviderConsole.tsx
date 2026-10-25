@@ -39,6 +39,7 @@ const taskLabels = {
   generation: "Response generation",
   extraction: "Entity extraction",
   recognition: "Intent recognition",
+  embedding: "Procedure retrieval embeddings",
 } as const;
 const providerTypes: Record<string, string> = {
   ollama: "Ollama · Local models",
@@ -317,7 +318,9 @@ export default function ModelProviderConsole({
                         ? "Used when the recognition policy selects the model-based strategy."
                         : task === "generation"
                           ? "Individual intents can override this generation profile."
-                          : "Used for structured field extraction."
+                          : task === "embedding"
+                            ? "An embedding model, used when procedure retrieval is semantic or hybrid. Output limits and temperature do not apply."
+                            : "Used for structured field extraction."
                     }
                   >
                     <select

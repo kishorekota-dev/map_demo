@@ -41,4 +41,27 @@ router.post('/test', authorize(true), (req, res, next) => {
     res.json({ ok: true, providerId, model, latencyMs: result.latencyMs, text: result.text.slice(0, 400), usage: result.usage });
   } catch (error) { res.json({ ok: false, providerId, model, latencyMs: Date.now() - started, text: '', usage: {}, error: failure(error) }); }
 });
+// Compares lexical, semantic and hybrid retrieval of a draft or published
+// configuration on operator-authored cases. Synthetic questions and procedure
+// text go to the configured embedding provider, as at runtime. Questions are not
+// stored; procedure vectors enter the shared index. Like other synthetic model
+// evaluation, it runs only outside production.
+router.post('/retrieval/evaluate', authorize(true), (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: { code: 'LLM_EVALUATION_DISABLED', message: 'Retrieval evaluation is disabled in production. Use a qualified staging environment.' } });
+  next();
+}, rateLimit({ windowMs: 60000, max: 10, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: req => `${req.user.tenantId}:${req.user.userId}` }), async (req, res) => {
+  const { config, cases, channel = 'digital', minSimilarity } = req.body || {};
+  if (Object.keys(req.body || {}).some(key => !['config', 'cases', 'channel', 'minSimilarity'].includes(key)) || !['digital', 'ava', 'ivr'].includes(channel)
+    || (minSimilarity !== undefined && (!Number.isFinite(minSimilarity) || minSimilarity < 0 || minSimilarity > 1))) {
+    return res.status(400).json({ error: 'Provide a servicing config, cases, an optional channel and an optional minSimilarity from 0 to 1.' });
+  }
+  try { require('../services/controlPlaneRuntime').validateSnapshot({ version: 1, config }); }
+  catch (_error) { return res.status(400).json({ error: 'The configuration is not a valid servicing configuration. Validate the draft first.' }); }
+  try { res.json(await require('../services/retrievalEvaluation').evaluateRetrieval({ config, cases, channel, minSimilarity })); }
+  catch (error) {
+    if (error.status === 400) return res.status(400).json({ error: error.message });
+    res.status(error.status || 503).json({ error: failure(error) });
+  }
+});
 module.exports = router;

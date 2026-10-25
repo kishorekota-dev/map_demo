@@ -81,15 +81,29 @@ Generation consumes published intent system/user prompts. Extraction consumes th
 | `vertex_gemini` | Project/location `generateContent`, explicit bearer environment reference | `usageMetadata` token fields |
 | `gemini` | Developer API `generateContent`, explicit API-key header | `usageMetadata` token fields |
 
-The request mappings follow the official [Ollama chat API](https://docs.ollama.com/api/chat), [OpenAI text generation](https://developers.openai.com/api/docs/guides/text), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Vertex inference API](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference), and [Gemini content generation API](https://ai.google.dev/api/generate-content). Compatible servers must implement the stated Chat Completions subset; capability differences surface as explicit errors. This interface does not implement streaming, audio, embeddings, arbitrary tools, or provider-specific reasoning controls.
+The request mappings follow the official [Ollama chat API](https://docs.ollama.com/api/chat), [OpenAI text generation](https://developers.openai.com/api/docs/guides/text), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Vertex inference API](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference), and [Gemini content generation API](https://ai.google.dev/api/generate-content). Compatible servers must implement the stated Chat Completions subset; capability differences surface as explicit errors. This interface does not implement streaming, audio, arbitrary tools, or provider-specific reasoning controls.
 
-Normalized usage contains only actual returned counts, never text-length estimates. Published runtime calls send measured input/output token metrics under the configured provider ID and task service (`generation`, `extraction`, or `recognition`). Admin connectivity tests return usage without attaching it to a customer interaction. Rates remain server-configured operational pricing; unconfigured rates stay unpriced.
+### Embeddings
+
+`ProviderRegistry.embed(providerId, {model,input,purpose,timeoutMs})` returns `{vectors,dimensions,usage,providerId,providerType,model,callId,latencyMs}`. `input` is 1–64 strings of at most 8,000 characters each and 200,000 in total; `purpose` is `document` or `query`. The response is limited to 4 MB, and each input must get exactly one finite, non-zero vector, all of the same length (at most 8,192). Values are normalized to 32-bit floats so stored and freshly computed vectors compare identically. Anything else fails as `LLM_INVALID_RESPONSE`.
+
+| Type | Embedding API | Purpose mapping | Usage |
+| --- | --- | --- | --- |
+| `ollama` | [`/api/embed`](https://docs.ollama.com/api/embed) | Not sent | `prompt_eval_count` |
+| `openai`, `openai_compatible` | [`/embeddings`](https://platform.openai.com/docs/api-reference/embeddings), `encoding_format:float`, reordered by `index` | Not sent | `prompt_tokens` when returned |
+| `gemini` | [`batchEmbedContents`](https://ai.google.dev/api/embeddings) | `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT` | Not returned |
+| `vertex_gemini` | Publisher model [`predict`](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api) | `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT` | `statistics.token_count` |
+
+`profiles.embedWithProfile(llm, texts, purpose, recordUsage)` resolves the published `routing.embedding` profile and records measured input tokens as service `embedding`. Retrieval uses it through the content-addressed index in `services/embeddingIndex.js`; see [Procedures and guardrails](../../../../docs/guides/procedures-and-guardrails.md#retrieval).
+
+Normalized usage contains only actual returned counts, never text-length estimates. Published runtime calls send measured input/output token metrics under the configured provider ID and task service (`generation`, `extraction`, `recognition`, or `embedding`). Admin connectivity tests return usage without attaching it to a customer interaction. Rates remain server-configured operational pricing; unconfigured rates stay unpriced.
 
 ## Protected management endpoints
 
 Under `/api/orchestrator/llm`:
 
-* `GET /providers` returns sanitized IDs/types, enablement/configuration, model allowlists, and capability flags.
+* `GET /providers` returns sanitized IDs/types, enablement/configuration, model allowlists, and capability flags (including `embeddings`).
+* `POST /retrieval/evaluate` (editor/admin, 10 per minute, 403 `LLM_EVALUATION_DISABLED` in production) compares lexical, semantic and hybrid procedure retrieval for a submitted configuration on 1–50 `{question, expectedProcedureId|null}` cases and suggests a similarity floor.
 * `GET /providers/:id/models` reads provider model discovery. Discovery is bounded to the first returned page and 1,000 entries, filtered by the server allowlist. Vertex returns its configured allowlist with `source:configured-allowlist`; it does not claim universal model availability.
 * `POST /test` returns 403 with `LLM_TEST_DISABLED` in production, regardless of editor/admin role. In development/test it accepts only `{providerId,model}`. It sends a fixed synthetic connectivity prompt, with at most 32 output tokens and a 60-second deadline, and returns `{ok,providerId,model,latencyMs,text,usage,error?}`. It cannot accept customer text or a custom prompt. Provider failures use sanitized `{code,message}` errors. Tests are limited to 10 per minute per signed user/tenant.
 
@@ -101,6 +115,6 @@ Read routes require a signed control-plane viewing role. Test requires a signed 
 
 ## Extension and validation
 
-Add a reviewed module to `plugins/` implementing `generate(provider,input,client)` and optionally `models(provider,client)`, then register its fixed type in `registry.js` and the control-console provider enum. Use the supplied client for bounded HTTP, explicit server credentials, and safe error handling. Do not expose dynamic module loading or executable code in the published configuration. Add request/response, credential-isolation, malformed-output, and failure tests for each new plugin.
+Add a reviewed module to `plugins/` implementing `generate(provider,input,client)` and optionally `models(provider,client)` and `embed(provider,input,client)`, then register its fixed type in `registry.js` and the control-console provider enum. Use the supplied client for bounded HTTP, explicit server credentials, and safe error handling. Do not expose dynamic module loading or executable code in the published configuration. Add request/response, credential-isolation, malformed-output, and failure tests for each new plugin.
 
 `npm test -- --runInBand src/llm` exercises synthetic fixtures, including an ephemeral local HTTP fixture that is independent of installed model servers. The tests do not contact the separate Mac Studio, the current machine's Ollama, or a cloud model. Runtime tests cover published prompt/profile isolation, pinned continuations, disabled-versus-legacy semantics, extraction guards, deterministic banking boundaries, and unavailable-provider behavior.

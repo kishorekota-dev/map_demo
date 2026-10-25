@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { LlmError } = require('./errors');
-const { IDENTIFIER, validModel, validateRequest, validateResponse } = require('./contract');
+const { IDENTIFIER, validModel, validateRequest, validateResponse, validateEmbeddingRequest, validateEmbeddingResponse } = require('./contract');
+// Embedding batches return far more JSON than text generation; the limit stays bounded.
+const EMBEDDING_RESPONSE_BYTES = 4000000;
 const plugins = Object.freeze({ ollama: require('./plugins/ollama'), openai: require('./plugins/openai'),
   openai_compatible: require('./plugins/openaiCompatible'), vertex_gemini: require('./plugins/gemini'), gemini: require('./plugins/gemini') });
 const DEFAULT_URLS = { ollama: 'http://127.0.0.1:11434', openai: 'https://api.openai.com/v1',
@@ -74,7 +76,7 @@ class ProviderRegistry {
   list() {
     return [...this.providers.values()].map(provider => ({ id: provider.id, type: provider.type, enabled: provider.enabled,
       configured: this.configured(provider), ...(provider.allowedModels ? { allowedModels: provider.allowedModels } : {}),
-      capabilities: { json: true, modelDiscovery: provider.type !== 'vertex_gemini', temperature: provider.supportsTemperature },
+      capabilities: { json: true, embeddings: true, modelDiscovery: provider.type !== 'vertex_gemini', temperature: provider.supportsTemperature },
       authentication: provider.credentialRef ? 'configured-reference' : 'none' }));
   }
   get(id, model) {
@@ -84,7 +86,7 @@ class ProviderRegistry {
     if (model && provider.allowedModels && !provider.allowedModels.includes(model)) throw new LlmError('LLM_MODEL_NOT_ALLOWED', 'The model is not allowed by the server provider registry.', 400);
     return provider;
   }
-  async client(provider, timeoutMs) {
+  async client(provider, timeoutMs, { maxContentLength = 512000 } = {}) {
     const started = Date.now();
     const headers = { 'Content-Type': 'application/json' };
     // Only an explicitly named server credential can leave this adapter.
@@ -99,7 +101,7 @@ class ProviderRegistry {
         try {
           const response = await this.http.request({ method: body === undefined ? 'GET' : 'POST', url: `${provider.baseUrl}${path}`,
             ...(body === undefined ? {} : { data: body }), headers, timeout: remaining, signal: AbortSignal.timeout(remaining),
-            maxRedirects: 0, maxContentLength: 512000, maxBodyLength: 512000, proxy: false });
+            maxRedirects: 0, maxContentLength, maxBodyLength: 512000, proxy: false });
           if (!response.data || typeof response.data !== 'object') throw new LlmError('LLM_INVALID_RESPONSE', 'The provider response is invalid.');
           if (credential) {
             const serialized = JSON.stringify(response.data);
@@ -125,6 +127,18 @@ class ProviderRegistry {
     } catch (error) {
       if (error instanceof LlmError) throw error;
       throw new LlmError('LLM_INVALID_RESPONSE', 'The model provider returned an unsupported response.');
+    }
+  }
+  async embed(providerId, input) {
+    const request = validateEmbeddingRequest(input);
+    const provider = this.get(providerId, request.model);
+    const callId = randomUUID(); const started = Date.now();
+    try {
+      const result = await plugins[provider.type].embed(provider, request, await this.client(provider, request.timeoutMs, { maxContentLength: EMBEDDING_RESPONSE_BYTES }));
+      return { ...validateEmbeddingResponse(result, request.input.length), callId, providerId, providerType: provider.type, model: request.model, latencyMs: Date.now() - started };
+    } catch (error) {
+      if (error instanceof LlmError) throw error;
+      throw new LlmError('LLM_INVALID_RESPONSE', 'The model provider returned an unsupported embedding response.');
     }
   }
   async models(providerId) {

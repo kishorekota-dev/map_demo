@@ -138,27 +138,148 @@ a changed procedure with the same `id` is reported as a conflict for review.
 | --- | --- | --- |
 | POST | `/api/control-plane/studio/procedures/parse` | Editor/admin. Body `{document:{source,content,title?,id?,intents?,channels?,audience?}}`. Returns `{procedure,suggestions,warnings,errors,replaces}`. Nothing is stored. |
 | PUT | `/api/control-plane/draft` | Save `config.procedures` with the rest of the draft. |
+| POST | `/api/orchestrator/llm/retrieval/evaluate` | Editor/admin, 10 per minute. Body `{config,cases,channel?,minSimilarity?}`; `cases` are `{question, expectedProcedureId|null}`. Returns per-strategy scores, the suggested floor and per-case results. Nothing is stored. |
 | POST | `/api/control-plane/simulate` | `{channel,utterance}` returns `procedure` (id, title, source, step count, guardrail IDs/types) and `requiredFields` including procedure fields. |
 
 ## Retrieval
 
-Retrieval is deterministic BM25 (k1 = 1.2, b = 0.75) over chunks of each eligible
-procedure: the title and summary, each step, and body paragraphs of up to 800
-characters. The procedure title contributes to every chunk. Terms are
-Unicode-normalized, lowercased, filtered for common stop words and lightly stemmed.
-A chunk must match at least two distinct query terms (one for a one-word question)
-and 30% of them, so a single incidental shared word cannot ground an answer. Ties
-break by procedure ID. The top three chunks are used.
+`config.retrieval` selects how customer-audience procedures are found. It is part
+of the release, so a strategy change goes through the same diff, approval, canary
+and rollback as any other change, and each session keeps the strategy it was
+pinned to.
 
-Retrieval considers only enabled, customer-audience procedures for the current
-channel in the pinned release. It runs in the orchestrator against that snapshot,
-so no extra network call or index service is involved.
+```text
+retrieval?: {
+  strategy: "lexical" | "semantic" | "hybrid",   // default lexical
+  minSimilarity?: number,     // 0–1 cosine floor; required for semantic and hybrid
+  maxResults?: number,        // excerpts per answer, 1–5, default 3
+  queryPrefix?: string,       // ≤ 64 characters, for models that need a task prefix
+  documentPrefix?: string     // for example "search_query: " / "search_document: "
+}
+```
+
+| Strategy | How chunks are ranked | Needs a model |
+| --- | --- | --- |
+| `lexical` | BM25 (k1 = 1.2, b = 0.75). A chunk must match at least two distinct query terms (one for a one-word question) and 30% of them, so one incidental shared word cannot ground an answer. | No |
+| `semantic` | Cosine similarity between the question embedding and each chunk embedding. Chunks below `minSimilarity` are dropped. Paraphrases with no shared words can match. | Embedding route |
+| `hybrid` | Reciprocal-rank fusion (k = 60) of the BM25 ranking (top 20) and the cosine ranking above the floor. A chunk qualifies through either ranking. Fusing ranks avoids calibrating BM25 against cosine scores. | Embedding route |
+
+Chunks are the title and summary, each step, and body paragraphs of up to 800
+characters. The procedure title is part of every chunk, both for BM25 and in the
+embedded text. Ties break by procedure ID. Only enabled, customer-audience
+procedures for the current channel in the pinned release are considered.
+
+### Embedding route
+
+Semantic and hybrid retrieval need `llm.enabled` and an `llm.routing.embedding`
+profile. The control plane and the orchestrator both reject a semantic or hybrid
+release without one. The profile can use any provider plugin with embedding
+support: Ollama (`/api/embed`), OpenAI and OpenAI-compatible (`/embeddings`),
+Gemini (`batchEmbedContents`, with the query and document task types) and Vertex
+Gemini (`predict`). See [model providers](llm-providers.md#embeddings).
+
+Some embedding models are trained with task prefixes (for example nomic-embed
+expects `search_query: ` and `search_document: `, and E5 expects `query: ` and
+`passage: `). Set `queryPrefix` and `documentPrefix` for those; leave them empty
+for others. The prefix is part of the embedded text, so changing it re-embeds the
+procedures.
+
+### Index lifecycle
+
+- **Content-addressed.** Each chunk vector is keyed by a SHA-256 of the provider,
+  model and exact embedded text. Editing a procedure, changing a prefix or
+  switching model produces new keys; a stale vector is never reused. An edit
+  re-embeds only the changed chunks.
+- **Shared and durable.** Vectors are held in an in-memory LRU (20,000 entries)
+  and, when workflow persistence uses PostgreSQL, in
+  `servicing_retrieval_embeddings` (migration `V3`). Restarted and additional
+  replicas reuse stored vectors instead of re-embedding. The table holds only
+  hashes, provider, model and vectors: no procedure text and no questions.
+  Rows not used for 30 days are pruned.
+- **Never blocks a customer.** On each message, once the release is resolved,
+  the orchestrator starts embedding any of the channel's procedure chunks that
+  are not yet indexed, in the background. If a question arrives while more than
+  64 chunks are still missing, it is answered with lexical retrieval and reported
+  as `index_warming`; 64 or fewer are embedded inline. Batches of 32 are sent one
+  at a time, a batch already in flight for the same text is joined rather than
+  repeated, and the first provider failure stops the rest.
+- **Questions are not stored.** The customer's question is embedded on every
+  request and is never cached or persisted. Embedding calls are metered as
+  `service: embedding`, `metric: input_tokens` usage events like other model
+  calls.
+
+### Fallback
+
+Retrieval only grounds answers; procedure binding and guardrails never depend on
+it. If semantic retrieval cannot run, that answer uses lexical retrieval, and the
+response reports `retrievalMode: "lexical_fallback"` with `retrievalFallback`:
+
+| Reason | Cause |
+| --- | --- |
+| `index_warming` | The release's procedures are still being embedded. |
+| `index_too_large` | More than 10,000 eligible chunks. |
+| `embedding_mismatch` | Query and document vectors have different dimensions. |
+| `embedding_unavailable` | The embedding provider failed, timed out or returned an invalid response. |
+| `retrieval_error` | Any other retrieval failure. |
+
+Otherwise `retrievalMode` is `lexical`, `semantic` or `hybrid`. Matches carry
+`score`, plus `similarity` (semantic and hybrid) and `lexicalScore` (hybrid,
+when BM25 also ranked the chunk).
+
+### Evaluating and calibrating
+
+Cosine similarity ranges differ widely between models, so a floor that suits one
+model is wrong for another. The **Retrieval** panel in Studio's **Procedures & guardrails** section (and
+`POST /api/orchestrator/llm/retrieval/evaluate`) measures the draft as shown,
+including unsaved edits, before it is published:
+
+- Enter up to 50 cases, one per line: `question | procedure_id`, or
+  `question | none` when nothing should match. Include paraphrases and off-topic
+  questions.
+- Each strategy reports top result correct (hit@1), correct in top 3 (hit@3),
+  mean reciprocal rank and correct "no match" rate. Semantic and hybrid are
+  reported as unavailable with the reason when there is no embedding route or the
+  model fails.
+- The suggested floor is the midpoint of the widest contiguous range of floors
+  (0.01 steps) that gets the most cases right, counting a "none" case right when
+  every procedure scores below the floor. With no "none" cases, the suggestion is
+  based on matched cases only and says so. **Use** applies it to the draft.
+
+Questions and customer procedure text are sent to the configured embedding
+model. Questions are not stored. Procedure chunk vectors go into the shared index
+like any other, so evaluating a draft also prepares the index for its release.
+Evaluation embedding calls are not metered as servicing usage.
+
+### Measured behavior
+
+Evaluated with a small open embedding model (WordLlama `l2_supercat`, 256
+dimensions, served through the OpenAI-compatible plugin) on 8 customer procedures
+and 25 cases: 21 answerable, 7 of them paraphrases sharing almost no words with
+the procedure, and 4 off-topic.
+
+| Strategy | Floor | Top result correct | Correct "no match" |
+| --- | --- | --- | --- |
+| Lexical | — | 67% | 75% |
+| Semantic | 0.50 (default) | 62% | 100% |
+| Hybrid | 0.50 (default) | 67% | 75% |
+| Semantic | 0.19 (suggested) | 90% | 75% |
+| Hybrid | 0.19 (suggested) | 90% | 75% |
+
+Lexical retrieval found none of the 7 paraphrases; semantic found 5. The
+uncalibrated default floor was too high for this model, which is why calibration
+is part of the workflow. All three strategies wrongly matched "open a business
+account" to the statement-download procedure. A larger embedding model will
+score differently: run the evaluation with your own model and cases before
+publishing.
 
 ## Limits and next steps
 
-- Retrieval is lexical. Paraphrases that share no terms with the procedure will
-  not match. Semantic (embedding) retrieval would need provider embedding support,
-  an index lifecycle and a retrieval-quality evaluation before it is enabled.
+- Lexical retrieval misses paraphrases that share no terms with the procedure;
+  semantic and hybrid retrieval need an embedding model and a calibrated floor.
+  Retrieval quality depends on the model and on the evaluation cases; there is no
+  continuous offline evaluation against production questions, and no reranker.
+- Vectors are compared in the orchestrator, which suits procedure sets up to
+  10,000 chunks per channel. Larger corpora need a vector database.
 - Procedure steps instruct model-answered intents; tool-backed intents follow
   their code-owned workflow and the procedure's guardrails. Steps are not compiled
   into a new workflow.
@@ -179,6 +300,14 @@ so no extra network call or index service is involved.
   snapshot validation, conditions, gates, response guardrails, retrieval and the
   published runtime handoff.
 - `services/ai-orchestrator/src/workflows/__tests__/procedureGuardrails.test.js`:
-  the guardrails exercised through the real LangGraph workflow.
-- `services/frontend/src/components/control-plane/ProcedureConsole.test.ts`:
-  guardrail wording and the import client.
+  the guardrails and the retriever exercised through the real LangGraph workflow.
+- `services/ai-orchestrator/src/services/__tests__/procedureRetrieval.test.js`:
+  semantic and hybrid ranking, the similarity floor, fallbacks, task prefixes, the
+  content-addressed index, warming and the PostgreSQL vector store (with
+  `RUNTIME_TEST_DATABASE_URL`).
+- `services/ai-orchestrator/src/llm/__tests__/embeddings.test.js` and
+  `retrievalEvaluation.test.js`: the provider embedding contract for each plugin,
+  usage metering, the evaluation route and floor calibration.
+- `services/frontend/src/components/control-plane/ProcedureConsole.test.ts` and
+  `RetrievalPanel.test.ts`: guardrail wording, the import client and evaluation
+  case parsing.

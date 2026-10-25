@@ -16,6 +16,20 @@ module.exports = {
     return { text: (candidate?.content?.parts || []).filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join(''),
       usage: usage(data.usageMetadata?.promptTokenCount, data.usageMetadata?.candidatesTokenCount, data.usageMetadata?.totalTokenCount), finishReason: candidate?.finishReason || null };
   },
+  async embed(provider, input, client) {
+    const model = input.model.replace(/^models\//, '');
+    const taskType = input.purpose === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT';
+    if (provider.type === 'vertex_gemini') {
+      const data = await client.request(`/v1/projects/${encodeURIComponent(provider.project)}/locations/${encodeURIComponent(provider.location)}/publishers/google/models/${encodeURIComponent(model)}:predict`,
+        { instances: input.input.map(content => ({ content, task_type: taskType })) });
+      const predictions = Array.isArray(data.predictions) ? data.predictions : [];
+      const tokens = predictions.reduce((total, prediction) => total + (Number(prediction.embeddings?.statistics?.token_count) || 0), 0);
+      return { vectors: predictions.map(prediction => prediction.embeddings?.values), usage: usage(tokens || undefined) };
+    }
+    const data = await client.request(`/models/${encodeURIComponent(model)}:batchEmbedContents`,
+      { requests: input.input.map(text => ({ model: `models/${model}`, content: { parts: [{ text }] }, taskType })) });
+    return { vectors: (Array.isArray(data.embeddings) ? data.embeddings : []).map(embedding => embedding.values), usage: {} };
+  },
   async models(provider, client) {
     if (provider.type === 'vertex_gemini') return (provider.allowedModels || []).map(id => ({ id, name: id }));
     const data = await client.request('/models');

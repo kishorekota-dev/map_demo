@@ -1,8 +1,9 @@
 # Model providers and Mac Studio Qwen setup
 
 The orchestrator has a provider plugin contract for bounded text and JSON-object
-generation. Servicing Studio's **Models & providers** workspace selects models
-for generation, field extraction and intent recognition. An intent can override
+generation, and for embeddings. Servicing Studio's **Models & providers**
+workspace selects models for generation, field extraction, intent recognition
+and procedure retrieval embeddings. An intent can override
 the generation profile. Profiles, task routes and prompt edits travel together
 through draft, evaluation, approval, publication and rollback.
 
@@ -14,15 +15,16 @@ machine has been verified. No cloud provider is enabled by the example registry.
 
 | Registry type | Protocol | Default / example endpoint | Authentication |
 | --- | --- | --- | --- |
-| `ollama` | `/api/chat`, `/api/tags`; non-streaming, thinking disabled | `http://mac-studio.local:11434` | None by default; an explicit credential reference is optional |
-| `openai_compatible` | `/chat/completions`, `/models` | LM Studio `http://mac-studio.local:1234/v1`; vLLM example `http://mac-studio.local:8000/v1` | Optional explicit bearer credential reference |
-| `openai` | Responses API `/responses`, `/models`; `store:false` | `https://api.openai.com/v1` | Explicit API-key environment reference |
-| `vertex_gemini` | Vertex `generateContent` | Regional or global `aiplatform.googleapis.com` | Explicit bearer-token environment reference |
-| `gemini` | Gemini Developer API `generateContent`, model list | `https://generativelanguage.googleapis.com/v1beta` | Explicit API-key environment reference |
+| `ollama` | `/api/chat`, `/api/tags`, `/api/embed`; non-streaming, thinking disabled | `http://mac-studio.local:11434` | None by default; an explicit credential reference is optional |
+| `openai_compatible` | `/chat/completions`, `/models`, `/embeddings` | LM Studio `http://mac-studio.local:1234/v1`; vLLM example `http://mac-studio.local:8000/v1` | Optional explicit bearer credential reference |
+| `openai` | Responses API `/responses`, `/models`, `/embeddings`; `store:false` | `https://api.openai.com/v1` | Explicit API-key environment reference |
+| `vertex_gemini` | Vertex `generateContent`; embeddings through `predict` | Regional or global `aiplatform.googleapis.com` | Explicit bearer-token environment reference |
+| `gemini` | Gemini Developer API `generateContent`, `batchEmbedContents`, model list | `https://generativelanguage.googleapis.com/v1beta` | Explicit API-key environment reference |
 
 The plugins normalize response text, JSON objects, measured token usage, model,
-provider, latency and call ID. They do not implement streaming, audio/media,
-embeddings or arbitrary model tool execution. Banking and fulfillment continue
+provider, latency and call ID, and return float embedding vectors for
+[procedure retrieval](#embeddings). They do not implement streaming, audio/media
+or arbitrary model tool execution. Banking and fulfillment continue
 through the established workflow/MCP/adapter contracts.
 
 Production requires HTTPS for every enabled provider and explicit environment credential references for cloud providers. Local HTTP ports below are development/test defaults. Production synthetic `/test` and `/evaluate` endpoints return 403; qualify model behavior in a separate staging deployment. The shipped production registry stays empty until explicitly configured.
@@ -213,6 +215,43 @@ Compatibility behavior is explicit:
   unavailable provider, malformed JSON or deadline failure cannot silently switch
   to the old model or a cloud provider.
 
+## Embeddings
+
+Semantic and hybrid [procedure retrieval](procedures-and-guardrails.md#retrieval)
+use the `embedding` task route. Add a profile for an embedding model (for
+example `nomic-embed-text` on Ollama, `text-embedding-3-small` on OpenAI,
+`text-embedding-004` on Gemini, or any embedding model an OpenAI-compatible
+server loads) and route it:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "profiles": [
+      { "id": "local-qwen", "providerId": "mac-qwen", "model": "YOUR_INSTALLED_QWEN_TAG", "timeoutMs": 120000 },
+      { "id": "embed", "providerId": "mac-qwen", "model": "nomic-embed-text", "timeoutMs": 30000 }
+    ],
+    "routing": { "generation": "local-qwen", "embedding": "embed" }
+  },
+  "retrieval": { "strategy": "hybrid", "minSimilarity": 0.45,
+                 "queryPrefix": "search_query: ", "documentPrefix": "search_document: " }
+}
+```
+
+The embedding route is only required when `retrieval.strategy` is `semantic` or
+`hybrid`; the profile's temperature and output settings are not used. The
+similarity floor above is a placeholder: calibrate it with the retrieval
+evaluation for the exact model.
+
+The embedding contract is bounded: up to 64 inputs per call, 8,000 characters
+per input and 200,000 in total, at most 8,192 dimensions and a 4 MB response.
+Each input must get exactly one finite, non-zero vector of the same length, or
+the call fails as `LLM_INVALID_RESPONSE`. Gemini and Vertex receive the query or
+document task type; Ollama and OpenAI-style servers ignore it, which is what the
+retrieval prefixes are for. Measured input tokens are recorded as
+`service: embedding` usage when the provider reports them: Ollama, OpenAI and
+Vertex do, the Gemini Developer API does not, and OpenAI-compatible servers vary.
+
 ## Cloud and compatible servers
 
 Enable only the selected entry in your server registry. For OpenAI, set
@@ -244,8 +283,9 @@ compatible server/model. See [LM Studio compatibility](https://lmstudio.ai/docs/
 ## Operational contract and extension
 
 `src/llm/registry.js` validates server configuration and isolates credentials.
-Plugins implement `generate(provider, request, client)` and `models(provider,
-client)` behind the shared contract. Add a plugin type to the registry, provide
+Plugins implement `generate(provider, request, client)`, `models(provider,
+client)` and, for embedding support, `embed(provider, request, client)` behind
+the shared contract. Add a plugin type to the registry, provide
 fixture protocol tests, then document its capabilities before enabling it.
 There is no runtime loading of arbitrary plugin source from the browser.
 
@@ -264,7 +304,8 @@ retain deterministic responses.
 editor/admin role and limits requests. All routes require the deployment's
 signed access token. Token counts come from provider responses; missing usage
 remains missing. Configure rates for the registry **provider ID** and task
-(`generation`, `extraction`, `recognition`) in Cost & outcomes to price them.
+(`generation`, `extraction`, `recognition`, `embedding`) in Cost & outcomes to
+price them.
 
 Repository validation uses deterministic HTTP fixtures for protocols and
 governance. The separate Studio, cloud credentials, model quality and performance

@@ -35,7 +35,7 @@ function validatePackage(value) {
     || !identifier(value.manifest.id) || !text(value.manifest.name) || !text(value.manifest.description, 2000)
     || typeof value.manifest.version !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value.manifest.version)
     || !object(value.configuration) || !Object.keys(value.configuration).length
-    || Object.keys(value.configuration).some(key => !['intents', 'queues', 'journeys', 'channels', 'prompts', 'recognition', 'llm', 'procedures'].includes(key))) {
+    || Object.keys(value.configuration).some(key => !['intents', 'queues', 'journeys', 'channels', 'prompts', 'recognition', 'llm', 'procedures', 'retrieval'].includes(key))) {
     fail('A bounded schemaVersion 1 servicing solution package with a valid manifest is required.');
   }
   for (const key of ['intents', 'queues', 'journeys', 'channels', 'procedures']) {
